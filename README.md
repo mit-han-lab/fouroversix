@@ -1,5 +1,7 @@
 # Four Over Six (4/6)
 
+[![arXiv](https://img.shields.io/badge/arXiv-2512.02010-b31b1b.svg)](https://arxiv.org/abs/2512.02010)
+
 _A method for improving the accuracy of NVFP4 quantization with Adaptive Block Scaling._
 
 ![](/assets/four-over-six.png)
@@ -117,6 +119,22 @@ Also, please make sure any code changes are compliant with our linter:
 
 ```bash
 ruff check
+```
+
+## Citation
+
+Please use the following BibTeX entry to cite this work:
+
+```bibtex
+@misc{cook2025sixaccuratenvfp4quantization,
+      title={Four Over Six: More Accurate NVFP4 Quantization with Adaptive Block Scaling},
+      author={Jack Cook and Junxian Guo and Guangxuan Xiao and Yujun Lin and Song Han},
+      year={2025},
+      eprint={2512.02010},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL},
+      url={https://arxiv.org/abs/2512.02010},
+}
 ```
 
 ## License
