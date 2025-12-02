@@ -31,7 +31,7 @@ from transformers import AutoModelForCausalLM
 model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-3.2-1B")
 apply_ptq(model)
 
-# Four Over Six method using MSE block selection
+# Four Over Six method using 4/6 with MSE block selection
 model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-3.2-1B")
 apply_ptq(
     model,
