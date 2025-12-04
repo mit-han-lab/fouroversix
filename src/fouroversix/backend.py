@@ -34,6 +34,12 @@ class MatmulBackend(str, Enum):
     def is_supported(self, **kwargs: dict[str, Any]) -> bool:  # noqa: ARG002
         """Check if the backend supports the given parameters."""
 
+        if self == MatmulBackend.cutlass:
+            return (
+                torch.cuda.is_available()
+                and torch.cuda.get_device_capability()[0] == 10  # noqa: PLR2004
+            )
+
         return True
 
     def fp4_matmul(  # noqa: C901, PLR0912
@@ -76,13 +82,13 @@ class MatmulBackend(str, Enum):
 
         """
 
-        from .ops import (
-            gemm_mxfp4mxfp4_accum_fp32_out_bf16_tnt,
-            gemm_nvfp4nvfp4_accum_fp32_out_bf16_tnt,
-            gemm_nvfp4nvfp4_accum_fp32_out_fp16_tnt,
-        )
-
         if self == MatmulBackend.cutlass:
+            from .ops import (
+                gemm_mxfp4mxfp4_accum_fp32_out_bf16_tnt,
+                gemm_nvfp4nvfp4_accum_fp32_out_bf16_tnt,
+                gemm_nvfp4nvfp4_accum_fp32_out_fp16_tnt,
+            )
+
             if fp4_format == FP4Format.mxfp4:
                 alpha = torch.ones(1, device=a_e2m1.device, dtype=torch.float32)
             elif fp4_format == FP4Format.nvfp4:
@@ -134,13 +140,13 @@ class MatmulBackend(str, Enum):
 
             a = dequantize_from_fp4(
                 a_e2m1,
-                from_blocked(a_sf, (a_e2m1.shape[0], a_e2m1.shape[1] // 16)),
+                from_blocked(a_sf, (a_e2m1.shape[0], a_e2m1.shape[1] // 8)),
                 a_normconst,
             )
 
             b = dequantize_from_fp4(
                 b_e2m1,
-                from_blocked(b_sf, (b_e2m1.shape[0], b_e2m1.shape[1] // 16)),
+                from_blocked(b_sf, (b_e2m1.shape[0], b_e2m1.shape[1] // 8)),
                 b_normconst,
             )
 
