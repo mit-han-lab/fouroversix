@@ -1,13 +1,32 @@
 from __future__ import annotations
 
+import json
 from abc import ABC, abstractmethod
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import modal
+from dateutil.tz import tzlocal
+
+from ..resources import FOUROVERSIX_CACHE_PATH
 
 if TYPE_CHECKING:
     from transformers import AutoModelForCausalLM
+
+
+class CustomJSONEncoder(json.JSONEncoder):
+    """Custom JSON encoder that handles torch.dtype."""
+
+    def default(self, obj: Any) -> Any:  # noqa: ANN401
+        """Convert value to a JSON serializable type."""
+
+        import torch
+
+        if isinstance(obj, torch.dtype):
+            return str(obj)
+
+        return json.JSONEncoder.default(self, obj)
 
 
 class PTQEvaluatorImpl(ABC):
@@ -61,4 +80,31 @@ class PTQEvaluator(PTQEvaluatorImpl):
     @modal.method()
     def evaluate(self, *args: list[str], **kwargs: dict[str, Any]) -> dict[str, Any]:
         """Evaluate a quantized model."""
-        return self.evaluate_impl(*args, **kwargs)
+        model_name = kwargs["model_name"]
+        ptq_method = kwargs["ptq_method"]
+
+        results = self.evaluate_impl(*args, **kwargs)
+
+        logs_path = (
+            FOUROVERSIX_CACHE_PATH
+            / "ptq_logs"
+            / (
+                f"{model_name}_{ptq_method.value}-{datetime.now(tz=tzlocal()).strftime('%Y%m%d%H%M%S')}.json"
+            )
+        )
+        logs_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with logs_path.open("w") as f:
+            json.dump(
+                {
+                    "model_name": model_name,
+                    "ptq_method": ptq_method.value,
+                    "kwargs": kwargs,
+                    "results": results,
+                },
+                f,
+                indent=4,
+                cls=CustomJSONEncoder,
+            )
+
+        return results
