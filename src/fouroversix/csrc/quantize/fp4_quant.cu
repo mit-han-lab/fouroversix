@@ -212,7 +212,7 @@ namespace fouroversix
             ts.fill_(0);
         }
 
-        return std::make_tuple(x_e2m1, x_sf, ts.to(x.dtype()));
+        return std::make_tuple(x_e2m1, x_sf.flatten(), ts.to(x.dtype()));
     }
 
     TORCH_LIBRARY_IMPL(fouroversix, CUDA, m)

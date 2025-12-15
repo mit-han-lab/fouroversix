@@ -7,6 +7,7 @@ from typing import Any
 class PTQMethod(str, Enum):
     """Methods of post-training quantization."""
 
+    awq = "awq"
     high_precision = "high_precision"
     gptq = "gptq"
     rtn = "rtn"

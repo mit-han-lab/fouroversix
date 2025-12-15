@@ -22,6 +22,7 @@ wandb_secret = modal.Secret.from_name("wandb-secret")
 class Dependency(str, Enum):
     """Dependencies to add to the base image."""
 
+    awq = "awq"
     fast_hadamard_transform = "fast_hadamard_transform"
     flash_attention = "flash_attention"
     fouroversix = "fouroversix"
@@ -104,6 +105,15 @@ def get_image(  # noqa: C901
     )
 
     for dependency in dependencies:
+        if dependency == Dependency.awq:
+            img = img.add_local_dir(
+                "third_party/llm-awq",
+                f"{FOUROVERSIX_INSTALL_PATH}/third_party/llm-awq",
+                copy=True,
+            ).run_commands(
+                f"pip install --no-deps {FOUROVERSIX_INSTALL_PATH}/third_party/llm-awq",
+            )
+
         if dependency == Dependency.fast_hadamard_transform:
             img = img.run_commands(
                 "git clone https://github.com/Dao-AILab/fast-hadamard-transform.git "

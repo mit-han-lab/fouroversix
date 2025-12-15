@@ -4,3 +4,6 @@
 [submodule "third_party/fp-quant"]
 	path = third_party/fp-quant
 	url = https://github.com/jackcook/fp-quant-fouroversix.git
+[submodule "third_party/llm-awq"]
+	path = third_party/llm-awq
+	url = https://github.com/jackcook/llm-awq-fouroversix.git
