@@ -91,7 +91,10 @@ def get_image(  # noqa: C901, PLR0912
         pyproject_path = Path(__file__).parent.parent / "fouroversix" / "pyproject.toml"
 
     with pyproject_path.open("rb") as f:
-        build_dependencies = tomllib.load(f)["build-system"]["requires"]
+        build_dependencies = filter(
+            lambda x: not x.startswith("torch"),
+            tomllib.load(f)["build-system"]["requires"],
+        )
 
     img = (
         modal.Image.from_registry(

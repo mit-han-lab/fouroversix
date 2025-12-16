@@ -35,7 +35,8 @@ def add_files_for_build(img: modal.Image) -> modal.Image:
 
 build_img = get_image(
     dependencies=[],
-    extra_pip_dependencies=["build", "setuptools>=77.0.3"],
+    extra_env={"MAX_JOBS": "16"},
+    extra_pip_dependencies=["build"],
     run_before_copy=add_files_for_build,
 )
 
@@ -45,9 +46,8 @@ with build_img.imports():
 
 @app.function(
     image=build_img,
-    cpu=8,
+    cpu=16,
     memory=32 * 1024,
-    gpu="B200",
     timeout=30 * 60,
     volumes={FOUROVERSIX_CACHE_PATH.as_posix(): cache_volume},
 )

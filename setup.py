@@ -3,6 +3,7 @@ import os
 import platform
 import subprocess
 import sys
+import urllib.request
 import warnings
 from pathlib import Path
 from typing import Any
@@ -11,10 +12,14 @@ import torch
 from packaging.version import Version, parse
 from setuptools import setup
 from torch.utils.cpp_extension import CUDA_HOME, BuildExtension, CUDAExtension
+from wheel.bdist_wheel import bdist_wheel as _bdist_wheel
 
 BASE_WHEEL_URL = "https://github.com/mit-han-lab/fouroversix/releases/download"
 PACKAGE_NAME = "fouroversix"
 PACKAGE_VERSION = "0.1.0"
+
+FORCE_BUILD = os.getenv("FORCE_BUILD", "0") == "1"
+FORCE_CXX11_ABI = os.getenv("FORCE_CXX11_ABI", "0") == "1"
 SKIP_CUDA_BUILD = os.getenv("SKIP_CUDA_BUILD", "0") == "1"
 
 
@@ -97,10 +102,7 @@ def get_platform() -> str:
     raise ValueError(msg)
 
 
-def get_package_version() -> str:
-    if CUDA_HOME is None:
-        return PACKAGE_VERSION
-
+def get_wheel_url() -> tuple[str, str]:
     torch_version_raw = parse(torch.__version__)
     python_version = f"cp{sys.version_info.major}{sys.version_info.minor}"
     platform_name = get_platform()
@@ -112,12 +114,55 @@ def get_package_version() -> str:
     torch_cuda_version = parse("12.8")
     cuda_version = f"cu{torch_cuda_version.major}"
 
-    tag = (
-        f"{cuda_version}torch{torch_version}cxx11abi{cxx11_abi}-{python_version}-"
-        f"{python_version}-{platform_name}"
+    wheel_filename = (
+        f"{PACKAGE_NAME}-{PACKAGE_VERSION}-{cuda_version}torch{torch_version}"
+        f"cxx11abi{cxx11_abi}-{python_version}-{python_version}-{platform_name}.whl"
     )
 
-    return f"{PACKAGE_VERSION}+{tag}"
+    return f"{BASE_WHEEL_URL}/v{PACKAGE_VERSION}/{wheel_filename}", wheel_filename
+
+
+class CachedWheelsCommand(_bdist_wheel):
+    """
+    Custom bdist wheel command that checks for pre-built wheels on GitHub Releases.
+
+    The CachedWheelsCommand plugs into the default bdist wheel, which is ran by pip
+    when it cannot find an existing wheel (which is currently the case for all
+    fouroversix installs). We use the environment parameters to detect whether there is
+    already a pre-built version of a compatible wheel available and short-circuits the
+    standard full build pipeline.
+
+    Credit: https://github.com/Dao-AILab/flash-attention/blob/main/setup.py
+    """
+
+    def run(self) -> None:
+        """Run the command."""
+
+        if FORCE_BUILD:
+            return super().run()
+
+        wheel_url, wheel_filename = get_wheel_url()
+        print(f"Guessing wheel URL: {wheel_url}")
+
+        try:
+            urllib.request.urlretrieve(wheel_url, wheel_filename)  # noqa: S310
+
+            # Make the archive
+            # Lifted from the root wheel processing command
+            # https://github.com/pypa/wheel/blob/cf71108ff9f6ffc36978069acb28824b44ae028e/src/wheel/bdist_wheel.py#LL381C9-L381C85
+            if not Path(self.dist_dir).exists():
+                Path(self.dist_dir).mkdir(parents=True, exist_ok=True)
+
+            impl_tag, abi_tag, plat_tag = self.get_tag()
+            archive_basename = f"{self.wheel_dist_name}-{impl_tag}-{abi_tag}-{plat_tag}"
+
+            wheel_path = Path(self.dist_dir) / (archive_basename + ".whl")
+            print(f"Raw wheel path: {wheel_path}")
+            Path(wheel_filename).rename(wheel_path)
+        except (urllib.error.HTTPError, urllib.error.URLError):
+            print("Precompiled wheel not found. Building from source...")
+            # If the wheel could not be downloaded, build from source
+            super().run()
 
 
 class NinjaBuildExtension(BuildExtension):
@@ -158,57 +203,65 @@ class NinjaBuildExtension(BuildExtension):
         super().__init__(*args, **kwargs)
 
 
-if __name__ == "__main__":
-    ext_modules = None
-
-    if SKIP_CUDA_BUILD:
-        warnings.warn(
-            "SKIP_CUDA_BUILD is set to 1, installing fouroversix without quantization "
-            "and matmul kernels",
-            stacklevel=1,
-        )
-    else:
-        setup_dir = Path(__file__).parent
-        kernels_dir = setup_dir / "src" / "fouroversix" / "csrc"
-        sources = [
-            path.relative_to(Path(__file__).parent).as_posix()
-            for ext in ["**/*.cu", "**/*.cpp"]
-            for path in kernels_dir.glob(ext)
-        ]
-        ext_modules = [
-            CUDAExtension(
-                "fouroversix._C",
-                sources,
-                extra_compile_args={
-                    "cxx": ["-O3", "-std=c++17"],
-                    "nvcc": [
-                        "-O3",
-                        "-std=c++17",
-                        "--expt-relaxed-constexpr",
-                        "--use_fast_math",
-                        "-DNDEBUG",
-                        "-Xcompiler",
-                        "-funroll-loops",
-                        "-Xcompiler",
-                        "-ffast-math",
-                        "-Xcompiler",
-                        "-finline-functions",
-                        *get_cuda_gencodes(),
-                    ],
-                },
-                include_dirs=[
-                    setup_dir / "third_party/cutlass/examples/common",
-                    setup_dir / "third_party/cutlass/include",
-                    setup_dir / "third_party/cutlass/tools/util/include",
-                    kernels_dir / "include",
-                ],
-            ),
-        ]
-
-    setup(
-        name=PACKAGE_NAME,
-        version=get_package_version(),
-        ext_modules=ext_modules,
-        cmdclass={"build_ext": NinjaBuildExtension},
-        include_package_data=True,
+if SKIP_CUDA_BUILD:
+    warnings.warn(
+        "SKIP_CUDA_BUILD is set to 1, installing fouroversix without quantization and "
+        "matmul kernels",
+        stacklevel=1,
     )
+
+    ext_modules = None
+else:
+    # The compiler flag -D_GLIBCXX_USE_CXX11_ABI is set to be the same as
+    # torch._C._GLIBCXX_USE_CXX11_ABI
+    # https://github.com/pytorch/pytorch/blob/8472c24e3b5b60150096486616d98b7bea01500b/torch/utils/cpp_extension.py#L920
+    if FORCE_CXX11_ABI:
+        torch._C._GLIBCXX_USE_CXX11_ABI = True  # noqa: SLF001
+
+    setup_dir = Path(__file__).parent
+    kernels_dir = setup_dir / "src" / "fouroversix" / "csrc"
+    sources = [
+        path.relative_to(Path(__file__).parent).as_posix()
+        for ext in ["**/*.cu", "**/*.cpp"]
+        for path in kernels_dir.glob(ext)
+    ]
+    ext_modules = [
+        CUDAExtension(
+            "fouroversix._C",
+            sources,
+            extra_compile_args={
+                "cxx": ["-O3", "-std=c++17"],
+                "nvcc": [
+                    "-O3",
+                    "-std=c++17",
+                    "--expt-relaxed-constexpr",
+                    "--use_fast_math",
+                    "-DNDEBUG",
+                    "-Xcompiler",
+                    "-funroll-loops",
+                    "-Xcompiler",
+                    "-ffast-math",
+                    "-Xcompiler",
+                    "-finline-functions",
+                    *get_cuda_gencodes(),
+                ],
+            },
+            include_dirs=[
+                setup_dir / "third_party/cutlass/examples/common",
+                setup_dir / "third_party/cutlass/include",
+                setup_dir / "third_party/cutlass/tools/util/include",
+                kernels_dir / "include",
+            ],
+        ),
+    ]
+
+setup(
+    name=PACKAGE_NAME,
+    version=PACKAGE_VERSION,
+    ext_modules=ext_modules,
+    cmdclass={
+        "bdist_wheel": CachedWheelsCommand,
+        "build_ext": NinjaBuildExtension,
+    },
+    include_package_data=True,
+)
