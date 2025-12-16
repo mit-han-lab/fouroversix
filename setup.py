@@ -212,6 +212,24 @@ if SKIP_CUDA_BUILD:
 
     ext_modules = None
 else:
+    if Path(".git").exists():
+        subprocess.run(
+            [  # noqa: S607
+                "git",
+                "submodule",
+                "update",
+                "--init",
+                "third_party/cutlass",
+            ],
+            check=True,
+        )
+    elif not Path("third_party/cutlass").exists():
+        msg = (
+            "third_party/cutlass is missing, please use source distribution or git "
+            "clone"
+        )
+        raise RuntimeError(msg)
+
     # The compiler flag -D_GLIBCXX_USE_CXX11_ABI is set to be the same as
     # torch._C._GLIBCXX_USE_CXX11_ABI
     # https://github.com/pytorch/pytorch/blob/8472c24e3b5b60150096486616d98b7bea01500b/torch/utils/cpp_extension.py#L920
