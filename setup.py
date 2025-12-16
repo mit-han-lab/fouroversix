@@ -159,4 +159,5 @@ if __name__ == "__main__":
         name="fouroversix",
         ext_modules=ext_modules,
         cmdclass={"build_ext": NinjaBuildExtension},
+        include_package_data=True,
     )

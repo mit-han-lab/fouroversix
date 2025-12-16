@@ -88,9 +88,8 @@ class PTQEvaluator(PTQEvaluatorImpl):
         logs_path = (
             FOUROVERSIX_CACHE_PATH
             / "ptq_logs"
-            / (
-                f"{model_name}_{ptq_method.value}-{datetime.now(tz=tzlocal()).strftime('%Y%m%d%H%M%S')}.json"
-            )
+            / ptq_method.value
+            / f"{datetime.now(tz=tzlocal()).strftime('%Y%m%d%H%M%S')}_{model_name}.json"
         )
         logs_path.parent.mkdir(parents=True, exist_ok=True)
 

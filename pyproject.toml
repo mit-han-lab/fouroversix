@@ -1,13 +1,26 @@
 [build-system]
-requires = ["setuptools>=77.0.3"]
+requires = [
+    "ninja~=1.13.0",
+    "psutil~=7.1.3",
+    "setuptools>=77.0.3",
+    "torch~=2.9.1",
+    "wheel~=0.45.1",
+]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "fouroversix"
 version = "0.1.0"
+authors = [
+    { name="Jack Cook", email="cookj@mit.edu" },
+    { name="Junxian Guo", email="junxian@mit.edu" },
+]
+description = "More Accurate FP4 Quantization with Adaptive Block Scaling"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE.md"]
 dependencies = [
-    "ninja~=1.13.0",
-    "psutil~=7.1.3",
     "torch~=2.9.1",
 ]
 

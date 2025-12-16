@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import modal
+import tomllib
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -70,7 +71,7 @@ def install_qutlass() -> None:
     )
 
 
-def get_image(  # noqa: C901
+def get_image(  # noqa: C901, PLR0912
     dependencies: list[Dependency] | None = None,
     *,
     cuda_version: str = "12.9",
@@ -84,6 +85,14 @@ def get_image(  # noqa: C901
     if dependencies is None:
         dependencies = [Dependency.fouroversix]
 
+    pyproject_path = Path(__file__).parent.parent / "pyproject.toml"
+
+    if not pyproject_path.exists():
+        pyproject_path = Path(__file__).parent.parent / "fouroversix" / "pyproject.toml"
+
+    with pyproject_path.open("rb") as f:
+        build_dependencies = tomllib.load(f)["build-system"]["requires"]
+
     img = (
         modal.Image.from_registry(
             cuda_version_to_image_tag[cuda_version],
@@ -91,11 +100,7 @@ def get_image(  # noqa: C901
         )
         .entrypoint([])
         .apt_install("clang", "git")
-        .pip_install_from_pyproject(
-            "pyproject.toml",
-            optional_dependencies=["tests"],
-        )
-        .uv_pip_install("numpy", "wheel")
+        .uv_pip_install(*build_dependencies, "numpy")
         .uv_pip_install(
             f"torch=={pytorch_version}",
             extra_index_url=(

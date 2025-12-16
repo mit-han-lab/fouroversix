@@ -117,7 +117,7 @@ Here are our highest-priority items at the moment:
 
 - [ ] Match numerics of PyTorch and Triton backends to the CUDA backend
 - [ ] Add support for other options (MXFP4, stochastic rounding, RHT, 2D block scaling, transposed inputs) in the CUDA implementation
-- [ ] Release PTQ implementations for AWQ, GPTQ, and SmoothQuant
+- [x] Release PTQ implementations for AWQ, GPTQ, and SmoothQuant
 - [ ] Unit tests
 - [ ] Training implementation + full NVFP4 linear layer with 4/6
 
