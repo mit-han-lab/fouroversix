@@ -85,7 +85,7 @@ jobs:
           # default method is "local", and we're hitting some error with caching for CUDA 11.8 and 12.1
           # method: ${{ (inputs.cuda-version == '11.8.0' || inputs.cuda-version == '12.1.0') && 'network' || 'local' }}
           method: "network"
-          sub-packages: '["nvcc"]'
+          sub-packages: '["nvcc", "cusparse"]'
 
       - name: Install PyTorch ${{ inputs.torch-version }}+cu${{ inputs.cuda-version }}
         run: |
