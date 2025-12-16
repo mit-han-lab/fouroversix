@@ -82,11 +82,14 @@ out = fp4_matmul(
 ## PTQ Evaluation with LM Evaluation Harness
 
 ```bash
-# Standard NVFP4 round-to-nearest (RTN) quantization:
+# Round-to-nearest quantization with 4/6:
 python -m scripts.ptq --model-name meta-llama/Llama-3.2-1B --ptq-method rtn --task wikitext
 
-# Round-to-nearest quantization with 4/6:
-python -m scripts.ptq --model-name meta-llama/Llama-3.2-1B --ptq-method rtn --task wikitext --a-scale-rule mse --w-scale-rule mse
+# Standard NVFP4 round-to-nearest (RTN) quantization:
+python -m scripts.ptq --model-name meta-llama/Llama-3.2-1B --ptq-method rtn --task wikitext --a-scale-rule always_6 --w-scale-rule always_6
+
+# AWQ with 4/6:
+python -m scripts.ptq --model-name meta-llama/Llama-3.2-1B --ptq-method awq --task wikitext
 
 # High-precision baseline, no NVFP4 quantization:
 python -m scripts.ptq --model-name meta-llama/Llama-3.2-1B --ptq-method high_precision --task wikitext
