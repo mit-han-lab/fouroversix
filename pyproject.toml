@@ -32,6 +32,8 @@ tests = [
     "pytest~=9.0.2",
     "python-dateutil~=2.9.0.post0",
     "ruff~=0.14.9",
+    "scipy~=1.16.3",
+    "typer~=0.20.0",
 ]
 
 [tool.pytest.ini_options]

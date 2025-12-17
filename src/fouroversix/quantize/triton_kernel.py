@@ -699,7 +699,7 @@ def quantize_to_fp4(  # noqa: C901, PLR0912
         scale_dtype = torch.float8_e4m3fn
 
         if norm_constant is None:
-            norm_constant = get_nvfp4_tensor_scale(x)
+            norm_constant = get_nvfp4_tensor_scale(x, scale_rule=scale_rule)
 
     padded_m = M + (block_size_m - M % block_size_m) % block_size_m
     padded_n = N + (block_size_n - N % block_size_n) % block_size_n

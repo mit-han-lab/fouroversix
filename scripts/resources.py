@@ -50,7 +50,6 @@ def install_fouroversix() -> None:
         [  # noqa: S607
             "pip",
             "install",
-            "--no-build-isolation",
             "--no-deps",
             "-e",
             FOUROVERSIX_INSTALL_PATH.as_posix(),
@@ -78,6 +77,7 @@ def get_image(  # noqa: C901, PLR0912
     deploy: bool = False,
     extra_env: dict[str, str] | None = None,
     extra_pip_dependencies: list[str] | None = None,
+    include_tests: bool = False,
     python_version: str = "3.12",
     pytorch_version: str = "2.9.1",
     run_before_copy: Callable[[modal.Image], modal.Image] | None = None,
@@ -91,10 +91,7 @@ def get_image(  # noqa: C901, PLR0912
         pyproject_path = Path(__file__).parent.parent / "fouroversix" / "pyproject.toml"
 
     with pyproject_path.open("rb") as f:
-        build_dependencies = filter(
-            lambda x: not x.startswith("torch"),
-            tomllib.load(f)["build-system"]["requires"],
-        )
+        pyproject_data = tomllib.load(f)
 
     img = (
         modal.Image.from_registry(
@@ -103,7 +100,13 @@ def get_image(  # noqa: C901, PLR0912
         )
         .entrypoint([])
         .apt_install("clang", "git")
-        .uv_pip_install(*build_dependencies, "numpy")
+        .uv_pip_install(
+            *filter(
+                lambda x: not x.startswith("torch"),
+                pyproject_data["build-system"]["requires"],
+            ),
+            "numpy",
+        )
         .uv_pip_install(
             f"torch=={pytorch_version}",
             extra_index_url=(
@@ -199,6 +202,14 @@ def get_image(  # noqa: C901, PLR0912
         img = img.uv_pip_install(*extra_pip_dependencies)
 
     img = img.env({"HF_HOME": FOUROVERSIX_CACHE_PATH.as_posix(), **(extra_env or {})})
+
+    if include_tests:
+        img = img.uv_pip_install(
+            *pyproject_data["project"]["optional-dependencies"]["tests"],
+        ).add_local_dir(
+            "tests",
+            f"{FOUROVERSIX_INSTALL_PATH}/tests",
+        )
 
     if run_before_copy is not None:
         img = run_before_copy(img)

@@ -46,7 +46,7 @@ namespace fouroversix
         constexpr int kNumGroupsInRow = Kernel_traits::kNumGroupsInRow;
         constexpr float E4M3_MAX_VALUE = Kernel_traits::E4M3_MAX_VALUE;
         constexpr float E2M1_MAX_VALUE = Kernel_traits::E2M1_MAX_VALUE;
-        constexpr float TS_SCALE = Is_4o6 ? (384 * 4) : (E4M3_MAX_VALUE * E2M1_MAX_VALUE);
+        constexpr float TS_SCALE = Is_4o6 ? (384 * 4) : (E4M3_MAX_VALUE * (kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::ALL_4 ? 4 : E2M1_MAX_VALUE));
 
         const int tidx = threadIdx.x;
         const int num_groups = kNumGroupsInRow * kBlockM;

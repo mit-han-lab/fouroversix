@@ -100,15 +100,16 @@ def pack_unpacked_fp4(x: torch.Tensor) -> torch.Tensor:
 def get_nvfp4_tensor_scale(
     x: torch.Tensor,
     *,
-    enable_four_over_six: bool = False,
+    scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
 ) -> torch.Tensor:
-    return x.abs().max().unsqueeze(0) / (
-        # 384 is the largest E4M3 value for which the value * (4/6) can be represented
-        # perfectly in E4M3 (256).
-        384 * 4
-        if enable_four_over_six
-        else E4M3_MAX_VALUE * E2M1_MAX_VALUE
-    )
+    # 384 is the largest E4M3 value for which the value * (4/6) can be represented
+    # perfectly in E4M3 (256).
+    scale = {
+        AdaptiveBlockScalingRule.always_4: 4 * E4M3_MAX_VALUE,
+        AdaptiveBlockScalingRule.always_6: E2M1_MAX_VALUE * E4M3_MAX_VALUE,
+    }.get(scale_rule, 384 * 4)
+
+    return x.abs().max().unsqueeze(0) / scale
 
 
 def quantize_bf16_to_scaled_fp4(  # noqa: C901, PLR0912, PLR0915
@@ -130,10 +131,7 @@ def quantize_bf16_to_scaled_fp4(  # noqa: C901, PLR0912, PLR0915
 ):
     if use_norm_constant:
         if norm_constant is None:
-            norm_constant = get_nvfp4_tensor_scale(
-                x,
-                enable_four_over_six=scale_rule != AdaptiveBlockScalingRule.always_6,
-            )
+            norm_constant = get_nvfp4_tensor_scale(x, scale_rule=scale_rule)
 
         x = x / norm_constant.to(x.dtype)
 
@@ -249,8 +247,16 @@ def quantize_bf16_to_scaled_fp4(  # noqa: C901, PLR0912, PLR0915
             x_error_4 = ((x_dequantized_4 - x) ** 2).reshape(-1, block_size).sum(dim=-1)
             x_error_6 = ((x_dequantized_6 - x) ** 2).reshape(-1, block_size).sum(dim=-1)
         elif scale_rule == AdaptiveBlockScalingRule.always_4:
-            x_error_4 = torch.zeros(x.numel() // block_size, dtype=x.dtype)
-            x_error_6 = torch.ones(x.numel() // block_size, dtype=x.dtype)
+            x_error_4 = torch.zeros(
+                x.numel() // block_size,
+                dtype=x.dtype,
+                device=x.device,
+            )
+            x_error_6 = torch.ones(
+                x.numel() // block_size,
+                dtype=x.dtype,
+                device=x.device,
+            )
         else:
             msg = f"Invalid scale rule: {scale_rule}"
             raise ValueError(msg)
