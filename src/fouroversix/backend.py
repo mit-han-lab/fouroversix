@@ -26,18 +26,18 @@ class MatmulBackend(str, Enum):
     pytorch = "pytorch"
 
     @classmethod
-    def auto_select(cls, **kwargs: dict[str, Any]) -> MatmulBackend:
+    def auto_select(cls) -> MatmulBackend:
         """Select the fastest backend for the given parameters."""
 
         for backend in [cls.cutlass, cls.pytorch]:
-            if backend.is_supported(**kwargs):
+            if backend.is_available():
                 return backend
 
-        msg = f"No backend found for the given parameters: {kwargs}"
+        msg = "No available backend found"
         raise ValueError(msg)
 
-    def is_supported(self, **kwargs: dict[str, Any]) -> bool:  # noqa: ARG002
-        """Check if the backend supports the given parameters."""
+    def is_available(self) -> bool:
+        """Check if the backend is available given the CUDA device and installation."""
 
         if self == MatmulBackend.cutlass:
             return torch.cuda.is_available() and torch.cuda.get_device_capability()[

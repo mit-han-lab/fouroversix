@@ -92,8 +92,8 @@ def test_backend_outputs_are_consistent(
         **kwargs,
     )
     assert torch.allclose(x_normconst_a, x_normconst_b)
-    assert torch.allclose(x_e2m1_a, x_e2m1_b)
     assert torch.allclose(x_sf_a.bfloat16(), x_sf_b.bfloat16())
+    assert torch.allclose(x_e2m1_a, x_e2m1_b)
 
 
 @pytest.mark.parametrize(
@@ -130,5 +130,5 @@ def test_zeros(scale_rule: AdaptiveBlockScalingRule) -> None:
     )
 
     assert torch.allclose(x_normconst, x_normconst_expected)
-    assert torch.allclose(x_e2m1, x_e2m1_expected)
     assert torch.allclose(x_sf.bfloat16(), x_sf_expected.bfloat16())
+    assert torch.allclose(x_e2m1, x_e2m1_expected)

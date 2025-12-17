@@ -70,9 +70,7 @@ jobs:
           python-version: "3.10"
       - name: Install dependencies
         run: |
-          pip install ninja packaging wheel twine
-          # Install latest setuptools with support for pypi metadata 2.2 (improved compat w/ uv)
-          pip install setuptools==75.8.0
+          pip install -U ninja packaging setuptools wheel twine
           # We don't want to download anything CUDA-related here
           pip install torch --index-url https://download.pytorch.org/whl/cpu
       - name: Build core package

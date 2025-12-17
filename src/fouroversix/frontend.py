@@ -53,9 +53,9 @@ def fp4_matmul(
     }
 
     if backend is None:
-        backend = MatmulBackend.auto_select(**kwargs)
-    elif not backend.is_supported(**kwargs):
-        msg = f"Backend {backend} does not support the given parameters"
+        backend = MatmulBackend.auto_select()
+    elif not backend.is_available():
+        msg = f"Backend {backend} is not available"
         raise ValueError(msg)
 
     return backend.fp4_matmul(
