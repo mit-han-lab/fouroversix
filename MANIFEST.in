@@ -4,9 +4,9 @@ recursive-include src *.cpp
 recursive-include src *.hpp
 recursive-include src *.py
 
-recursive-include third_party *.cu
-recursive-include third_party *.h
-recursive-include third_party *.cuh
-recursive-include third_party *.cpp
-recursive-include third_party *.hpp
-recursive-include third_party *.inl
+recursive-include third_party/cutlass *.cu
+recursive-include third_party/cutlass *.h
+recursive-include third_party/cutlass *.cuh
+recursive-include third_party/cutlass *.cpp
+recursive-include third_party/cutlass *.hpp
+recursive-include third_party/cutlass *.inl
