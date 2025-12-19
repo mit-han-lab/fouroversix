@@ -12,6 +12,8 @@ from .utils import AdaptiveBlockScalingRule, DataType, FP4Format
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from .backend import MatmulBackend
+
 
 def build_forward(
     *,
@@ -21,6 +23,7 @@ def build_forward(
     a_scale_rule: AdaptiveBlockScalingRule,
     w_scale_rule: AdaptiveBlockScalingRule,
     w_scale_2d: bool,
+    matmul_backend: MatmulBackend | None,
     a_quantize_kwargs: dict[str, Any],
     w_quantize_kwargs: dict[str, Any],
     **kwargs: dict[str, Any],  # noqa: ARG001
@@ -56,6 +59,7 @@ def build_forward(
         for i in range(input.shape[0]):
             out[i] = fp4_matmul(
                 input[i],
+                backend=matmul_backend,
                 b_e2m1=self.weight_e2m1,
                 b_sf=self.weight_sf,
                 b_normconst=self.weight_normconst,
@@ -90,6 +94,7 @@ def apply_ptq(
     a_scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
     w_scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
     w_scale_2d: bool = False,
+    matmul_backend: MatmulBackend | None = None,
     a_quantize_kwargs: dict[str, Any] | None = None,
     w_quantize_kwargs: dict[str, Any] | None = None,
     build_forward_fn: Callable | None = None,
@@ -119,6 +124,7 @@ def apply_ptq(
                 a_scale_rule=a_scale_rule,
                 w_scale_rule=w_scale_rule,
                 w_scale_2d=w_scale_2d,
+                matmul_backend=matmul_backend,
                 a_quantize_kwargs=a_quantize_kwargs,
                 w_quantize_kwargs=w_quantize_kwargs,
                 **kwargs,

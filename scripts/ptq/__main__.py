@@ -3,7 +3,7 @@ from typing import Any
 
 import click
 import modal
-from fouroversix import QuantizeBackend
+from fouroversix import MatmulBackend, QuantizeBackend
 from fouroversix.utils import AdaptiveBlockScalingRule, DataType, FP4Format
 
 from ..resources import app, get_image
@@ -62,6 +62,7 @@ def run_ptq(
 @click.option("--dtype", type=DataType, default=DataType.bfloat16)
 @click.option("--fp4-format", type=FP4Format, default=FP4Format.nvfp4)
 @click.option("--limit", type=int)
+@click.option("--matmul-backend", type=MatmulBackend, default=None)
 @click.option("--modal", is_flag=True)
 @click.option("--model-name", "-m", type=str, multiple=True, required=True)
 @click.option("--ptq-method", "-p", type=PTQMethod, multiple=True, required=True)

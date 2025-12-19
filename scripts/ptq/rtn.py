@@ -32,8 +32,8 @@ class RTNEvaluatorImpl(PTQEvaluator):
         *,
         device: str,
         dtype: DataType,
-        model_kwargs: dict[str, Any] | None = None,
         quantize_backend: QuantizeBackend | None = None,
+        model_kwargs: dict[str, Any] | None = None,
         **kwargs: dict[str, Any],
     ) -> AutoModelForCausalLM:
         """Quantize a model using round-to-nearest quantization."""

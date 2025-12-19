@@ -2,7 +2,7 @@
 
 [![arXiv](https://img.shields.io/badge/arXiv-2512.02010-b31b1b.svg)](https://arxiv.org/abs/2512.02010)
 
-_A method for improving the accuracy of NVFP4 quantization with Adaptive Block Scaling._
+_Improving the accuracy of NVFP4 quantization with Adaptive Block Scaling._
 
 ![](/assets/four-over-six.png)
 
