@@ -168,14 +168,14 @@ namespace fouroversix
             N_sf = 16;
             // N_sf = int(N_rounded / 16 * 4);
             x_sf = torch::zeros({M_sf, N_sf}, x.options().dtype(torch::kFloat8_e4m3fn));
-            x_sft = torch::zeros({M_rounded, int(N_rounded / 16)}, x.options());
+            x_sft = torch::zeros({M_rounded, int(N_rounded / 16)}, x.options().dtype(torch::kFloat32));
         }
         else
         {
             M_sf = int(M_rounded / 128 * 32) * int(N_rounded / 128);
             N_sf = 16;
             x_sf = torch::zeros({M_sf, N_sf}, x.options().dtype(torch::kUInt8));
-            x_sft = torch::zeros({M_rounded, int(N_rounded / 32)}, x.options());
+            x_sft = torch::zeros({M_rounded, int(N_rounded / 32)}, x.options().dtype(torch::kFloat32));
         }
         at::Tensor ts = torch::zeros({1}, x.options().dtype(torch::kFloat32));
 
@@ -212,7 +212,7 @@ namespace fouroversix
             ts.fill_(0);
         }
 
-        return std::make_tuple(x_e2m1, x_sf.flatten(), ts.to(x.dtype()));
+        return std::make_tuple(x_e2m1, x_sf.flatten(), ts);
     }
 
     TORCH_LIBRARY_IMPL(fouroversix, CUDA, m)

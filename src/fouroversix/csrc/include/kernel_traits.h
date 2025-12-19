@@ -110,7 +110,7 @@ struct FP4_quant_kernel_traits : public Base
     using SmemLayout = SmemLayoutX;
     static constexpr int kSmemXSize = size(SmemLayout{}) * sizeof(Element);
     static constexpr int kSmemXe2m1Size = kSmemXSize / 4;
-    static constexpr int kSmemSFTSize = size(SmemLayoutSFT{}) * sizeof(Element);
+    static constexpr int kSmemSFTSize = size(SmemLayoutSFT{}) * sizeof(float);
     static constexpr int kSmemSFSize = size(SmemLayoutSF{}) * sizeof(ElementScaleFactor);
     static constexpr int kSmemSize = kSmemXSize + kSmemXe2m1Size + kSmemSFTSize + kSmemSFSize;
 
@@ -127,7 +127,7 @@ struct FP4_quant_kernel_traits : public Base
                                                     GmemLayoutAtomX{},
                                                     Layout<Shape<_1, _8>>{}));
 
-    using Gmem_copy_atom_sft = Copy_Atom<AutoVectorizingCopyWithAssumedAlignment<64>, Element>;
+    using Gmem_copy_atom_sft = Copy_Atom<AutoVectorizingCopyWithAssumedAlignment<64>, float>;
 
     using GmemLayoutAtomSFT = Layout<
         Shape<_64, _1>,

@@ -24,7 +24,7 @@ ValueSimulationMode = (
 )
 
 
-def fake_quantize_positive_bf16(
+def fake_quantize_positive_to_e2m1(
     x: torch.Tensor,
     *,
     stochastic_rounding: bool = False,
@@ -111,10 +111,10 @@ def get_nvfp4_tensor_scale(
         AdaptiveBlockScalingRule.always_6: E2M1_MAX_VALUE * E4M3_MAX_VALUE,
     }.get(scale_rule, 384 * 4)
 
-    return (x.abs().max().unsqueeze(0) / scale).clamp(min=MIN_ALLOWED_NORM_CONSTANT)
+    return (x.abs().max().float() / scale).clamp(min=MIN_ALLOWED_NORM_CONSTANT)
 
 
-def quantize_bf16_to_scaled_fp4(  # noqa: C901, PLR0912, PLR0915
+def quantize_bf16_to_scaled_fp4(
     x: torch.Tensor,
     block_size: int,
     scale_dtype: torch.dtype,
@@ -124,157 +124,111 @@ def quantize_bf16_to_scaled_fp4(  # noqa: C901, PLR0912, PLR0915
     scale_factors_simulation_mode: ScaleFactorsSimulationMode = None,
     scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
     stochastic_rounding: bool = True,
-    values_simulation_mode: ValueSimulationMode = None,
-    values_simulation_threshold: float | None = None,
-    use_norm_constant: bool = False,
+    # TODO(jack): Reimplement simulations
+    values_simulation_mode: ValueSimulationMode = None,  # noqa: ARG001
+    values_simulation_threshold: float | None = None,  # noqa: ARG001
 ) -> (
     tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]
     | tuple[torch.Tensor, torch.Tensor, torch.Tensor | None, torch.Tensor]
 ):
-    if use_norm_constant:
-        if norm_constant is None:
-            norm_constant = get_nvfp4_tensor_scale(x, scale_rule=scale_rule)
+    x_scale_blocks = x.reshape(-1, block_size).float()
 
-        x = x / norm_constant.to(x.dtype)
+    x_scales_hp_6 = (
+        x_scale_blocks.abs().max(axis=-1).values / (E2M1_MAX_VALUE * norm_constant)
+    ).clamp(min=E4M3_MIN_POSITIVE_NORMAL, max=E4M3_MAX_VALUE)
+    x_scales_hp_4 = (
+        x_scale_blocks.abs().max(axis=-1).values / (4 * norm_constant)
+    ).clamp(min=E4M3_MIN_POSITIVE_NORMAL, max=E4M3_MAX_VALUE)
 
-    scales, _ = x.reshape(-1, block_size).abs().max(axis=-1)
+    x_scales_6 = x_scales_hp_6.to(scale_dtype)
+    x_scales_4 = x_scales_hp_4.to(scale_dtype)
 
-    if scale_rule == AdaptiveBlockScalingRule.always_6:
-        # Handle separately from other scale rules to deal with simulations
-        scales /= E2M1_MAX_VALUE
+    x_scales_hp_6 = x_scales_6.float() * norm_constant
+    x_scales_hp_4 = x_scales_4.float() * norm_constant
 
-        if scale_factors_simulation_mode != "high_precision":
-            scales = (
-                scales.clamp(max=torch.finfo(scale_dtype).max)
-                .to(scale_dtype)
-                .to(x.dtype)
-            )
+    x_block_scaled_6 = x_scale_blocks / x_scales_hp_6[:, None]
+    x_block_scaled_4 = x_scale_blocks / x_scales_hp_4[:, None]
 
-        scales.clamp_(min=torch.finfo(scale_dtype).tiny)
-        x = x / scales.repeat_interleave(block_size).reshape_as(x)
+    x_quantized_4 = x_scale_blocks.sign() * fake_quantize_positive_to_e2m1(
+        x_block_scaled_4.abs(),
+        stochastic_rounding=stochastic_rounding,
+    )
+    x_quantized_6 = x_scale_blocks.sign() * fake_quantize_positive_to_e2m1(
+        x_block_scaled_6.abs(),
+        stochastic_rounding=stochastic_rounding,
+    )
+    x_dequantized_4 = x_quantized_4 * x_scales_hp_4[:, None]
+    x_dequantized_6 = x_quantized_6 * x_scales_hp_6[:, None]
 
-        if values_simulation_mode == "all_in_high_precision":
-            x_quantized = x
-        elif values_simulation_mode == "nvint4":
-            x_quantized = x.sign() * torch.where(
-                x.abs() > 39 / 7,
-                42 / 7,
-                torch.where(
-                    x.abs() > 33 / 7,
-                    36 / 7,
-                    torch.where(
-                        x.abs() > 27 / 7,
-                        30 / 7,
-                        torch.where(
-                            x.abs() > 21 / 7,
-                            24 / 7,
-                            torch.where(
-                                x.abs() > 15 / 7,
-                                18 / 7,
-                                torch.where(
-                                    x.abs() > 9 / 7,
-                                    12 / 7,
-                                    torch.where(x.abs() > 3 / 7, 6 / 7, 0),
-                                ),
-                            ),
-                        ),
-                    ),
-                ),
-            )
-        else:
-            x_e2m1 = x.sign() * fake_quantize_positive_bf16(
-                x.abs(),
-                stochastic_rounding=stochastic_rounding,
-            )
-
-            if values_simulation_mode == "nonzeros_in_high_precision":
-                x_quantized = torch.where(x_e2m1 != 0, x, x_e2m1)
-            elif values_simulation_mode == "zeros_in_high_precision":
-                x_quantized = torch.where(x_e2m1 == 0, x, x_e2m1)
-            elif values_simulation_mode == "greater_than_threshold_in_high_precision":
-                x_quantized = torch.where(
-                    (x / E2M1_MAX_VALUE).abs() >= values_simulation_threshold,
-                    x,
-                    x_e2m1,
-                )
-            elif values_simulation_mode == "less_than_threshold_in_high_precision":
-                x_quantized = torch.where(
-                    (x / E2M1_MAX_VALUE).abs() <= values_simulation_threshold,
-                    x,
-                    x_e2m1,
-                )
-            else:
-                x_quantized = pack_unpacked_fp4(
-                    quantize_bf16_to_unpacked_fp4(x_e2m1),
-                )
+    if scale_rule == AdaptiveBlockScalingRule.abs_max:
+        x_error_4 = (
+            (x_dequantized_4 - x_scale_blocks)
+            .abs()
+            .reshape(-1, block_size)
+            .max(dim=-1)
+            .values
+        )
+        x_error_6 = (
+            (x_dequantized_6 - x_scale_blocks)
+            .abs()
+            .reshape(-1, block_size)
+            .max(dim=-1)
+            .values
+        )
+    elif scale_rule == AdaptiveBlockScalingRule.l1_norm:
+        x_error_4 = (
+            (x_dequantized_4 - x_scale_blocks).abs().reshape(-1, block_size).sum(dim=-1)
+        )
+        x_error_6 = (
+            (x_dequantized_6 - x_scale_blocks).abs().reshape(-1, block_size).sum(dim=-1)
+        )
+    elif scale_rule == AdaptiveBlockScalingRule.mse:
+        x_error_4 = (
+            ((x_dequantized_4 - x_scale_blocks) ** 2)
+            .reshape(-1, block_size)
+            .sum(dim=-1)
+        )
+        x_error_6 = (
+            ((x_dequantized_6 - x_scale_blocks) ** 2)
+            .reshape(-1, block_size)
+            .sum(dim=-1)
+        )
+    elif scale_rule in (
+        AdaptiveBlockScalingRule.always_4,
+        AdaptiveBlockScalingRule.always_6,
+    ):
+        x_error_4 = torch.full(
+            (x.numel() // block_size,),
+            0 if scale_rule == AdaptiveBlockScalingRule.always_4 else 1,
+            dtype=x.dtype,
+            device=x.device,
+        )
+        x_error_6 = torch.full(
+            (x.numel() // block_size,),
+            1 if scale_rule == AdaptiveBlockScalingRule.always_4 else 0,
+            dtype=x.dtype,
+            device=x.device,
+        )
     else:
-        scales_4 = (
-            (scales / 4)
-            .to(scale_dtype)
-            .to(x.dtype)
-            .clamp_(min=torch.finfo(scale_dtype).tiny)
-        )
-        scales_6 = (
-            (scales / 6)
-            .to(scale_dtype)
-            .to(x.dtype)
-            .clamp_(min=torch.finfo(scale_dtype).tiny)
-        )
-        x_quantized_4 = x.sign() * fake_quantize_positive_bf16(
-            (x / scales_4.repeat_interleave(block_size).reshape_as(x)).abs(),
-            stochastic_rounding=stochastic_rounding,
-        )
-        x_quantized_6 = x.sign() * fake_quantize_positive_bf16(
-            (x / scales_6.repeat_interleave(block_size).reshape_as(x)).abs(),
-            stochastic_rounding=stochastic_rounding,
-        )
-        x_dequantized_4 = x_quantized_4 * scales_4.repeat_interleave(
-            block_size,
-        ).reshape_as(x)
-        x_dequantized_6 = x_quantized_6 * scales_6.repeat_interleave(
-            block_size,
-        ).reshape_as(x)
+        msg = f"Invalid scale rule: {scale_rule}"
+        raise ValueError(msg)
 
-        if scale_rule == AdaptiveBlockScalingRule.abs_max:
-            x_error_4 = (
-                (x_dequantized_4 - x).abs().reshape(-1, block_size).max(dim=-1).values
-            )
-            x_error_6 = (
-                (x_dequantized_6 - x).abs().reshape(-1, block_size).max(dim=-1).values
-            )
-        elif scale_rule == AdaptiveBlockScalingRule.l1_norm:
-            x_error_4 = (x_dequantized_4 - x).abs().reshape(-1, block_size).sum(dim=-1)
-            x_error_6 = (x_dequantized_6 - x).abs().reshape(-1, block_size).sum(dim=-1)
-        elif scale_rule == AdaptiveBlockScalingRule.mse:
-            x_error_4 = ((x_dequantized_4 - x) ** 2).reshape(-1, block_size).sum(dim=-1)
-            x_error_6 = ((x_dequantized_6 - x) ** 2).reshape(-1, block_size).sum(dim=-1)
-        elif scale_rule == AdaptiveBlockScalingRule.always_4:
-            x_error_4 = torch.zeros(
-                x.numel() // block_size,
-                dtype=x.dtype,
-                device=x.device,
-            )
-            x_error_6 = torch.ones(
-                x.numel() // block_size,
-                dtype=x.dtype,
-                device=x.device,
-            )
-        else:
-            msg = f"Invalid scale rule: {scale_rule}"
-            raise ValueError(msg)
-
-        select_4 = (x_error_4 < x_error_6)[:, None]
-        x_quantized = torch.where(
+    select_4 = (x_error_4 < x_error_6)[:, None]
+    x_quantized = (
+        torch.where(
             select_4,
             x_quantized_4.reshape(-1, 16),
             x_quantized_6.reshape(-1, 16),
-        ).reshape_as(x)
-        x_quantized = pack_unpacked_fp4(quantize_bf16_to_unpacked_fp4(x_quantized))
-        scales = torch.where(
-            select_4,
-            scales_4.reshape(-1, 1),
-            scales_6.reshape(-1, 1),
         )
+        .reshape_as(x)
+        .bfloat16()
+    )
+    x_quantized = pack_unpacked_fp4(quantize_bf16_to_unpacked_fp4(x_quantized))
+    scales = torch.where(
+        select_4,
+        x_scales_4.reshape(-1, 1),
+        x_scales_6.reshape(-1, 1),
+    )
 
     reshaped_scales = to_blocked(
         scales.reshape(
@@ -318,13 +272,19 @@ def quantize_to_fp4(
     if had is not None:
         x = (x.reshape(-1, had.shape[0]) @ had).reshape_as(x)
 
+    if norm_constant is None:
+        norm_constant = (
+            torch.ones(1, device=x.device, dtype=x.dtype)
+            if fp4_format == FP4Format.mxfp4
+            else get_nvfp4_tensor_scale(x, scale_rule=scale_rule)
+        )
+
     return quantize_bf16_to_scaled_fp4(
         x,
         fp4_format.block_size(),
         fp4_format.scale_dtype(),
         stochastic_rounding=round_style == RoundStyle.stochastic,
         norm_constant=norm_constant,
-        use_norm_constant=fp4_format == FP4Format.nvfp4,
         scale_factors_simulation_mode=scale_factors_simulation_mode,
         scale_rule=scale_rule,
         values_simulation_mode=values_simulation_mode,

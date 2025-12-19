@@ -242,11 +242,14 @@ class QuantizeBackend(str, Enum):
         if not self.is_available():
             return False
 
-        if (
-            fp4_format == FP4Format.mxfp4
-            and scale_rule != AdaptiveBlockScalingRule.always_6
+        if fp4_format == FP4Format.mxfp4 and scale_rule not in (
+            AdaptiveBlockScalingRule.always_6,
+            AdaptiveBlockScalingRule.always_4,
         ):
-            msg = "MXFP4 quantization only supports the `always_6` scale rule"
+            msg = (
+                "MXFP4 quantization only supports the `always_6` and `always_4` scale "
+                "rules"
+            )
             raise ValueError(msg)
 
         if self == QuantizeBackend.cuda:

@@ -11,7 +11,6 @@ from fouroversix.quantize.reference import (
     E2M1_MAX_VALUE,
     E4M3_MAX_VALUE,
     E4M3_MIN_POSITIVE_NORMAL,
-    MIN_ALLOWED_NORM_CONSTANT,
     get_nvfp4_tensor_scale,
 )
 from fouroversix.utils import AdaptiveBlockScalingRule
@@ -24,7 +23,6 @@ E2M1_MAX_VALUE = tl.constexpr(E2M1_MAX_VALUE)
 E4M3_MAX_VALUE = tl.constexpr(E4M3_MAX_VALUE)
 E4M3_MIN_POSITIVE_NORMAL = tl.constexpr(E4M3_MIN_POSITIVE_NORMAL)
 FOUROVERSIX_AUTOTUNE = os.getenv("FOUROVERSIX_AUTOTUNE", "0") == "1"
-MIN_ALLOWED_NORM_CONSTANT = tl.constexpr(MIN_ALLOWED_NORM_CONSTANT)
 SCALE_MEGABLOCK_SIZE = tl.constexpr(512)
 
 SCALE_RULE_ABS_MAX = tl.constexpr(AdaptiveBlockScalingRule.abs_max.value)
@@ -32,271 +30,6 @@ SCALE_RULE_ALWAYS_4 = tl.constexpr(AdaptiveBlockScalingRule.always_4.value)
 SCALE_RULE_ALWAYS_6 = tl.constexpr(AdaptiveBlockScalingRule.always_6.value)
 SCALE_RULE_L1_NORM = tl.constexpr(AdaptiveBlockScalingRule.l1_norm.value)
 SCALE_RULE_MSE = tl.constexpr(AdaptiveBlockScalingRule.mse.value)
-
-
-@triton.jit
-def fp32_to_scaled_fp4_kernel_four_over_six(  # noqa: C901, PLR0912, PLR0915
-    x_block,
-    norm_constant_ptr,
-    BLOCK_SIZE_M: tl.constexpr,
-    BLOCK_SIZE_N: tl.constexpr,
-    ROUND_STYLE: tl.constexpr,
-    BLOCK_SCALE_2D: tl.constexpr,
-    scale_rule: tl.constexpr,
-) -> None:
-    norm_constant = tl.load(norm_constant_ptr)
-
-    if BLOCK_SCALE_2D:
-        x_scale_blocks = (
-            x_block.reshape(8, 16, 4, 16).permute(0, 2, 1, 3).reshape(8, 4, 256)
-        )
-    else:
-        x_scale_blocks = x_block.reshape(128, 4, 16)
-
-    # Calculate six blocks
-    x_scales_hp_6 = tl.max(x_scale_blocks.abs(), axis=-1) / tl.maximum(
-        E2M1_MAX_VALUE * norm_constant,
-        MIN_ALLOWED_NORM_CONSTANT,
-    )
-    x_scales_hp_6 = tl.clamp(x_scales_hp_6, E4M3_MIN_POSITIVE_NORMAL, E4M3_MAX_VALUE)
-    x_scales_6 = x_scales_hp_6.to(tl.float8e4nv)
-
-    if BLOCK_SCALE_2D:
-        x_scale_blocks = x_block.reshape(128, 4, 16)
-        x_scales_6 = (
-            x_scales_6[None, :, :]
-            .broadcast_to(16, 8, 4)
-            .permute(1, 0, 2)
-            .reshape(128, 4)
-        )
-
-    x_scales_hp_6 = x_scales_6.to(norm_constant.dtype) * norm_constant
-    (x_block_scaled_6_b1, x_block_scaled_6_b2) = (
-        (x_scale_blocks / tl.maximum(x_scales_hp_6[:, :, None], 1e-12))
-        .reshape(BLOCK_SIZE_M, BLOCK_SIZE_N // 2, 2)
-        .split()
-    )
-
-    if BLOCK_SCALE_2D:
-        x_scale_blocks = (
-            x_block.reshape(8, 16, 4, 16).permute(0, 2, 1, 3).reshape(8, 4, 256)
-        )
-
-    # Calculate four blocks
-    x_scales_hp_4 = tl.max(x_scale_blocks.abs(), axis=-1) / tl.maximum(
-        (4 * norm_constant.to(tl.bfloat16)).to(tl.float32),
-        MIN_ALLOWED_NORM_CONSTANT,
-    )
-    x_scales_hp_4 = tl.clamp(x_scales_hp_4, E4M3_MIN_POSITIVE_NORMAL, E4M3_MAX_VALUE)
-    x_scales_4 = x_scales_hp_4.to(tl.float8e4nv)
-
-    if BLOCK_SCALE_2D:
-        x_scale_blocks = x_block.reshape(128, 4, 16)
-        x_scales_4 = (
-            x_scales_4[None, :, :]
-            .broadcast_to(16, 8, 4)
-            .permute(1, 0, 2)
-            .reshape(128, 4)
-        )
-
-    x_scales_hp_4 = x_scales_4.to(norm_constant.dtype) * norm_constant
-    (x_block_scaled_4_b1, x_block_scaled_4_b2) = (
-        (x_scale_blocks / tl.maximum(x_scales_hp_4[:, :, None], 1e-12))
-        .reshape(BLOCK_SIZE_M, BLOCK_SIZE_N // 2, 2)
-        .split()
-    )
-
-    if ROUND_STYLE == "nearest":
-        (x_e2m1_6, x_e2m1_4, x_fp16x2_6, x_fp16x2_4) = tl.inline_asm_elementwise(
-            asm="""
-                {
-                .reg .b8 byte0, byte1, byte2, byte3;
-
-                cvt.rn.satfinite.e2m1x2.f32 byte0, $28, $20;
-                cvt.rn.f16x2.e2m1x2 $4, byte0;
-                cvt.rn.satfinite.e2m1x2.f32 byte1, $29, $21;
-                cvt.rn.f16x2.e2m1x2 $5, byte1;
-                cvt.rn.satfinite.e2m1x2.f32 byte2, $30, $22;
-                cvt.rn.f16x2.e2m1x2 $6, byte2;
-                cvt.rn.satfinite.e2m1x2.f32 byte3, $31, $23;
-                cvt.rn.f16x2.e2m1x2 $7, byte3;
-                mov.b32 $0, {byte0, byte1, byte2, byte3};
-
-                cvt.rn.satfinite.e2m1x2.f32 byte0, $32, $24;
-                cvt.rn.f16x2.e2m1x2 $8, byte0;
-                cvt.rn.satfinite.e2m1x2.f32 byte1, $33, $25;
-                cvt.rn.f16x2.e2m1x2 $9, byte1;
-                cvt.rn.satfinite.e2m1x2.f32 byte2, $34, $26;
-                cvt.rn.f16x2.e2m1x2 $10, byte2;
-                cvt.rn.satfinite.e2m1x2.f32 byte3, $35, $27;
-                cvt.rn.f16x2.e2m1x2 $11, byte3;
-                mov.b32 $1, {byte0, byte1, byte2, byte3};
-
-                cvt.rn.satfinite.e2m1x2.f32 byte0, $44, $36;
-                cvt.rn.f16x2.e2m1x2 $12, byte0;
-                cvt.rn.satfinite.e2m1x2.f32 byte1, $45, $37;
-                cvt.rn.f16x2.e2m1x2 $13, byte1;
-                cvt.rn.satfinite.e2m1x2.f32 byte2, $46, $38;
-                cvt.rn.f16x2.e2m1x2 $14, byte2;
-                cvt.rn.satfinite.e2m1x2.f32 byte3, $47, $39;
-                cvt.rn.f16x2.e2m1x2 $15, byte3;
-                mov.b32 $2, {byte0, byte1, byte2, byte3};
-
-                cvt.rn.satfinite.e2m1x2.f32 byte0, $48, $40;
-                cvt.rn.f16x2.e2m1x2 $16, byte0;
-                cvt.rn.satfinite.e2m1x2.f32 byte1, $49, $41;
-                cvt.rn.f16x2.e2m1x2 $17, byte1;
-                cvt.rn.satfinite.e2m1x2.f32 byte2, $50, $42;
-                cvt.rn.f16x2.e2m1x2 $18, byte2;
-                cvt.rn.satfinite.e2m1x2.f32 byte3, $51, $43;
-                cvt.rn.f16x2.e2m1x2 $19, byte3;
-                mov.b32 $3, {byte0, byte1, byte2, byte3};
-                }
-                """,
-            constraints="=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r",
-            args=[
-                x_block_scaled_6_b1.to(tl.float32),
-                x_block_scaled_6_b2.to(tl.float32),
-                x_block_scaled_4_b1.to(tl.float32),
-                x_block_scaled_4_b2.to(tl.float32),
-            ],
-            dtype=(tl.uint8, tl.uint8, tl.uint32, tl.uint32),
-            is_pure=True,
-            pack=8,
-        )
-    elif ROUND_STYLE == "stochastic":
-        rbits = tl.rand(
-            0,
-            tl.arange(0, BLOCK_SIZE_M)[:, None] * BLOCK_SIZE_N // 2
-            + tl.arange(0, BLOCK_SIZE_N // 2)[None, :],
-        ).cast(tl.uint32, bitcast=True)
-        (x_e2m1_6, x_e2m1_4, x_fp16x2_6, x_fp16x2_4) = tl.inline_asm_elementwise(
-            asm="""
-                {
-                .reg .b16 tmp0, tmp1;
-                .reg .b8 byte0, byte1;
-
-                cvt.rs.satfinite.e2m1x4.f32 tmp0, {$29, $21, $28, $20}, $52;
-                mov.b16 {byte1, byte0}, tmp0;
-                cvt.rn.f16x2.e2m1x2 $4, byte0;
-                cvt.rn.f16x2.e2m1x2 $5, byte1;
-                cvt.rs.satfinite.e2m1x4.f32 tmp1, {$31, $23, $30, $22}, $53;
-                mov.b16 {byte1, byte0}, tmp1;
-                cvt.rn.f16x2.e2m1x2 $6, byte0;
-                cvt.rn.f16x2.e2m1x2 $7, byte1;
-                mov.b32 $0, {tmp0, tmp1};
-
-                cvt.rs.satfinite.e2m1x4.f32 tmp0, {$33, $25, $32, $24}, $54;
-                mov.b16 {byte1, byte0}, tmp0;
-                cvt.rn.f16x2.e2m1x2 $8, byte0;
-                cvt.rn.f16x2.e2m1x2 $9, byte1;
-                cvt.rs.satfinite.e2m1x4.f32 tmp1, {$35, $27, $34, $26}, $55;
-                mov.b16 {byte1, byte0}, tmp1;
-                cvt.rn.f16x2.e2m1x2 $10, byte0;
-                cvt.rn.f16x2.e2m1x2 $11, byte1;
-                mov.b32 $1, {tmp0, tmp1};
-
-                cvt.rs.satfinite.e2m1x4.f32 tmp0, {$45, $37, $44, $36}, $56;
-                mov.b16 {byte1, byte0}, tmp0;
-                cvt.rn.f16x2.e2m1x2 $12, byte0;
-                cvt.rn.f16x2.e2m1x2 $13, byte1;
-                cvt.rs.satfinite.e2m1x4.f32 tmp1, {$47, $39, $46, $38}, $57;
-                mov.b16 {byte1, byte0}, tmp1;
-                cvt.rn.f16x2.e2m1x2 $14, byte0;
-                cvt.rn.f16x2.e2m1x2 $15, byte1;
-                mov.b32 $2, {tmp0, tmp1};
-
-                cvt.rs.satfinite.e2m1x4.f32 tmp0, {$49, $41, $48, $40}, $58;
-                mov.b16 {byte1, byte0}, tmp0;
-                cvt.rn.f16x2.e2m1x2 $16, byte0;
-                cvt.rn.f16x2.e2m1x2 $17, byte1;
-                cvt.rs.satfinite.e2m1x4.f32 tmp1, {$51, $43, $50, $42}, $59;
-                mov.b16 {byte1, byte0}, tmp1;
-                cvt.rn.f16x2.e2m1x2 $18, byte0;
-                cvt.rn.f16x2.e2m1x2 $19, byte1;
-                mov.b32 $3, {tmp0, tmp1};
-                }
-                """,
-            constraints="=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r",
-            args=[
-                x_block_scaled_6_b1.to(tl.float32),
-                x_block_scaled_6_b2.to(tl.float32),
-                x_block_scaled_4_b1.to(tl.float32),
-                x_block_scaled_4_b2.to(tl.float32),
-                rbits,
-            ],
-            dtype=(tl.uint8, tl.uint8, tl.uint32, tl.uint32),
-            is_pure=True,
-            pack=8,
-        )
-
-    x_fp16_6_lo = (x_fp16x2_6 & 0xFFFF).cast(tl.uint16).cast(tl.float16, bitcast=True)
-    x_fp16_6_hi = (x_fp16x2_6 >> 16).cast(tl.uint16).cast(tl.float16, bitcast=True)
-    x_hp_6 = (
-        tl.join(x_fp16_6_lo, x_fp16_6_hi).reshape(128, 4, 16).to(norm_constant.dtype)
-    )
-
-    if scale_rule == SCALE_RULE_ABS_MAX:
-        six_error = tl.max(
-            tl.abs(x_hp_6 * x_scales_hp_6[:, :, None] - x_scale_blocks),
-            axis=-1,
-        )
-    elif scale_rule == SCALE_RULE_ALWAYS_4:
-        six_error = tl.full(x_scales_hp_6.shape, 1, tl.float16)
-    elif scale_rule == SCALE_RULE_L1_NORM:
-        six_error = tl.sum(
-            tl.abs(x_hp_6 * x_scales_hp_6[:, :, None] - x_scale_blocks),
-            axis=-1,
-        )
-    elif scale_rule == SCALE_RULE_MSE:
-        six_error = tl.sum(
-            (x_hp_6 * x_scales_hp_6[:, :, None] - x_scale_blocks)
-            * (x_hp_6 * x_scales_hp_6[:, :, None] - x_scale_blocks),
-            axis=-1,
-        )
-
-    x_fp16_4_lo = (x_fp16x2_4 & 0xFFFF).cast(tl.uint16).cast(tl.float16, bitcast=True)
-    x_fp16_4_hi = (x_fp16x2_4 >> 16).cast(tl.uint16).cast(tl.float16, bitcast=True)
-    x_hp_4 = (
-        tl.join(x_fp16_4_lo, x_fp16_4_hi).reshape(128, 4, 16).to(norm_constant.dtype)
-    )
-
-    if scale_rule == SCALE_RULE_ABS_MAX:
-        four_error = tl.max(
-            tl.abs(x_hp_4 * x_scales_hp_4[:, :, None] - x_scale_blocks),
-            axis=-1,
-        )
-    elif scale_rule == SCALE_RULE_ALWAYS_4:
-        four_error = tl.full(x_scales_hp_4.shape, 0, tl.float16)
-    elif scale_rule == SCALE_RULE_L1_NORM:
-        four_error = tl.sum(
-            tl.abs(x_hp_4 * x_scales_hp_4[:, :, None] - x_scale_blocks),
-            axis=-1,
-        )
-    elif scale_rule == SCALE_RULE_MSE:
-        four_error = tl.sum(
-            (x_hp_4 * x_scales_hp_4[:, :, None] - x_scale_blocks)
-            * (x_hp_4 * x_scales_hp_4[:, :, None] - x_scale_blocks),
-            axis=-1,
-        )
-
-    x_e2m1 = tl.where(
-        (four_error < six_error)[:, :, None],
-        x_e2m1_4.reshape(128, 4, 8),
-        x_e2m1_6.reshape(128, 4, 8),
-    ).reshape(128, 32)
-    x_scales = (
-        tl.where(
-            four_error < six_error,
-            x_scales_4,
-            x_scales_6,
-        )
-        .reshape(4, 32, 4)
-        .permute(1, 0, 2)
-        .ravel()
-    )
-
-    return x_e2m1, x_scales
 
 
 @triton.jit
@@ -308,11 +41,13 @@ def fp32_to_scaled_fp4_kernel(
     FP4_FORMAT: tl.constexpr,
     ROUND_STYLE: tl.constexpr,
     BLOCK_SCALE_2D: tl.constexpr,
+    SCALE_RULE: tl.constexpr,
 ) -> None:
-    # Get scale factors
     if FP4_FORMAT == "mxfp4":
         x_scale_blocks = x_block.reshape(128, 4, 32)
-        x_scales = tl.max(x_scale_blocks.abs(), axis=-1) / E2M1_MAX_VALUE
+        x_scales = tl.max(x_scale_blocks.abs(), axis=-1) / (
+            E2M1_MAX_VALUE if SCALE_RULE == "always_6" else 4
+        )
 
         # Use the 8-bit exponent as the scale factor, and then add one in order to
         # round up
@@ -335,9 +70,9 @@ def fp32_to_scaled_fp4_kernel(
         else:
             x_scale_blocks = x_block.reshape(128, 4, 16)
 
-        x_scales_hp = tl.max(x_scale_blocks.abs(), axis=-1) / tl.maximum(
-            E2M1_MAX_VALUE * norm_constant,
-            1e-12,
+        # Calculate six blocks
+        x_scales_hp = tl.max(x_scale_blocks.abs(), axis=-1) / (
+            (E2M1_MAX_VALUE if SCALE_RULE == "always_6" else 4) * norm_constant
         )
         x_scales_hp = tl.clamp(x_scales_hp, E4M3_MIN_POSITIVE_NORMAL, E4M3_MAX_VALUE)
         x_scales = x_scales_hp.to(tl.float8e4nv)
@@ -412,6 +147,283 @@ def fp32_to_scaled_fp4_kernel(
 
 
 @triton.jit
+def fp32_to_scaled_fp4_kernel_fouroversix(
+    x_block,
+    norm_constant_ptr,
+    BLOCK_SIZE_M: tl.constexpr,
+    BLOCK_SIZE_N: tl.constexpr,
+    ROUND_STYLE: tl.constexpr,
+    BLOCK_SCALE_2D: tl.constexpr,
+    SCALE_RULE: tl.constexpr,
+) -> None:
+    norm_constant = tl.load(norm_constant_ptr)
+
+    if BLOCK_SCALE_2D:
+        x_scale_blocks = (
+            x_block.reshape(8, 16, 4, 16).permute(0, 2, 1, 3).reshape(8, 4, 256)
+        )
+    else:
+        x_scale_blocks = x_block.reshape(128, 4, 16)
+
+    # Calculate six blocks
+    x_scales_hp_6 = tl.max(x_scale_blocks.abs(), axis=-1) / (
+        E2M1_MAX_VALUE * norm_constant
+    )
+    x_scales_hp_6 = tl.clamp(x_scales_hp_6, E4M3_MIN_POSITIVE_NORMAL, E4M3_MAX_VALUE)
+    x_scales_6 = x_scales_hp_6.to(tl.float8e4nv)
+
+    if BLOCK_SCALE_2D:
+        x_scale_blocks = x_block.reshape(128, 4, 16)
+        x_scales_6 = (
+            x_scales_6[None, :, :]
+            .broadcast_to(16, 8, 4)
+            .permute(1, 0, 2)
+            .reshape(128, 4)
+        )
+
+    x_scales_hp_6 = x_scales_6.to(norm_constant.dtype) * norm_constant
+    (x_block_scaled_6_b1, x_block_scaled_6_b2) = (
+        (x_scale_blocks / x_scales_hp_6[:, :, None])
+        .reshape(BLOCK_SIZE_M, BLOCK_SIZE_N // 2, 2)
+        .split()
+    )
+
+    if BLOCK_SCALE_2D:
+        x_scale_blocks = (
+            x_block.reshape(8, 16, 4, 16).permute(0, 2, 1, 3).reshape(8, 4, 256)
+        )
+
+    # Calculate four blocks
+    x_scales_hp_4 = tl.max(x_scale_blocks.abs(), axis=-1) / (4 * norm_constant)
+    x_scales_hp_4 = tl.clamp(x_scales_hp_4, E4M3_MIN_POSITIVE_NORMAL, E4M3_MAX_VALUE)
+    x_scales_4 = x_scales_hp_4.to(tl.float8e4nv)
+
+    if BLOCK_SCALE_2D:
+        x_scale_blocks = x_block.reshape(128, 4, 16)
+        x_scales_4 = (
+            x_scales_4[None, :, :]
+            .broadcast_to(16, 8, 4)
+            .permute(1, 0, 2)
+            .reshape(128, 4)
+        )
+
+    x_scales_hp_4 = x_scales_4.to(norm_constant.dtype) * norm_constant
+    (x_block_scaled_4_b1, x_block_scaled_4_b2) = (
+        (x_scale_blocks / x_scales_hp_4[:, :, None])
+        .reshape(BLOCK_SIZE_M, BLOCK_SIZE_N // 2, 2)
+        .split()
+    )
+
+    if ROUND_STYLE == "nearest":
+        (x_e2m1_6, x_e2m1_4, x_fp16x2_6, x_fp16x2_4) = tl.inline_asm_elementwise(
+            asm="""
+                {
+                .reg .b8 byte0, byte1, byte2, byte3;
+
+                cvt.rn.satfinite.e2m1x2.f32 byte0, $28, $20;
+                cvt.rn.f16x2.e2m1x2 $4, byte0;
+                cvt.rn.satfinite.e2m1x2.f32 byte1, $29, $21;
+                cvt.rn.f16x2.e2m1x2 $5, byte1;
+                cvt.rn.satfinite.e2m1x2.f32 byte2, $30, $22;
+                cvt.rn.f16x2.e2m1x2 $6, byte2;
+                cvt.rn.satfinite.e2m1x2.f32 byte3, $31, $23;
+                cvt.rn.f16x2.e2m1x2 $7, byte3;
+                mov.b32 $0, {byte0, byte1, byte2, byte3};
+
+                cvt.rn.satfinite.e2m1x2.f32 byte0, $32, $24;
+                cvt.rn.f16x2.e2m1x2 $8, byte0;
+                cvt.rn.satfinite.e2m1x2.f32 byte1, $33, $25;
+                cvt.rn.f16x2.e2m1x2 $9, byte1;
+                cvt.rn.satfinite.e2m1x2.f32 byte2, $34, $26;
+                cvt.rn.f16x2.e2m1x2 $10, byte2;
+                cvt.rn.satfinite.e2m1x2.f32 byte3, $35, $27;
+                cvt.rn.f16x2.e2m1x2 $11, byte3;
+                mov.b32 $1, {byte0, byte1, byte2, byte3};
+
+                cvt.rn.satfinite.e2m1x2.f32 byte0, $44, $36;
+                cvt.rn.f16x2.e2m1x2 $12, byte0;
+                cvt.rn.satfinite.e2m1x2.f32 byte1, $45, $37;
+                cvt.rn.f16x2.e2m1x2 $13, byte1;
+                cvt.rn.satfinite.e2m1x2.f32 byte2, $46, $38;
+                cvt.rn.f16x2.e2m1x2 $14, byte2;
+                cvt.rn.satfinite.e2m1x2.f32 byte3, $47, $39;
+                cvt.rn.f16x2.e2m1x2 $15, byte3;
+                mov.b32 $2, {byte0, byte1, byte2, byte3};
+
+                cvt.rn.satfinite.e2m1x2.f32 byte0, $48, $40;
+                cvt.rn.f16x2.e2m1x2 $16, byte0;
+                cvt.rn.satfinite.e2m1x2.f32 byte1, $49, $41;
+                cvt.rn.f16x2.e2m1x2 $17, byte1;
+                cvt.rn.satfinite.e2m1x2.f32 byte2, $50, $42;
+                cvt.rn.f16x2.e2m1x2 $18, byte2;
+                cvt.rn.satfinite.e2m1x2.f32 byte3, $51, $43;
+                cvt.rn.f16x2.e2m1x2 $19, byte3;
+                mov.b32 $3, {byte0, byte1, byte2, byte3};
+                }
+                """,
+            constraints="=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r",
+            args=[
+                x_block_scaled_6_b1,
+                x_block_scaled_6_b2,
+                x_block_scaled_4_b1,
+                x_block_scaled_4_b2,
+            ],
+            dtype=(tl.uint8, tl.uint8, tl.uint32, tl.uint32),
+            is_pure=True,
+            pack=8,
+        )
+    elif ROUND_STYLE == "stochastic":
+        rbits = tl.rand(
+            0,
+            tl.arange(0, BLOCK_SIZE_M)[:, None] * BLOCK_SIZE_N // 2
+            + tl.arange(0, BLOCK_SIZE_N // 2)[None, :],
+        ).cast(tl.uint32, bitcast=True)
+        (x_e2m1_6, x_e2m1_4, x_fp16x2_6, x_fp16x2_4) = tl.inline_asm_elementwise(
+            asm="""
+                {
+                .reg .b16 tmp0, tmp1;
+                .reg .b8 byte0, byte1;
+
+                cvt.rs.satfinite.e2m1x4.f32 tmp0, {$29, $21, $28, $20}, $52;
+                mov.b16 {byte1, byte0}, tmp0;
+                cvt.rn.f16x2.e2m1x2 $4, byte0;
+                cvt.rn.f16x2.e2m1x2 $5, byte1;
+                cvt.rs.satfinite.e2m1x4.f32 tmp1, {$31, $23, $30, $22}, $53;
+                mov.b16 {byte1, byte0}, tmp1;
+                cvt.rn.f16x2.e2m1x2 $6, byte0;
+                cvt.rn.f16x2.e2m1x2 $7, byte1;
+                mov.b32 $0, {tmp0, tmp1};
+
+                cvt.rs.satfinite.e2m1x4.f32 tmp0, {$33, $25, $32, $24}, $54;
+                mov.b16 {byte1, byte0}, tmp0;
+                cvt.rn.f16x2.e2m1x2 $8, byte0;
+                cvt.rn.f16x2.e2m1x2 $9, byte1;
+                cvt.rs.satfinite.e2m1x4.f32 tmp1, {$35, $27, $34, $26}, $55;
+                mov.b16 {byte1, byte0}, tmp1;
+                cvt.rn.f16x2.e2m1x2 $10, byte0;
+                cvt.rn.f16x2.e2m1x2 $11, byte1;
+                mov.b32 $1, {tmp0, tmp1};
+
+                cvt.rs.satfinite.e2m1x4.f32 tmp0, {$45, $37, $44, $36}, $56;
+                mov.b16 {byte1, byte0}, tmp0;
+                cvt.rn.f16x2.e2m1x2 $12, byte0;
+                cvt.rn.f16x2.e2m1x2 $13, byte1;
+                cvt.rs.satfinite.e2m1x4.f32 tmp1, {$47, $39, $46, $38}, $57;
+                mov.b16 {byte1, byte0}, tmp1;
+                cvt.rn.f16x2.e2m1x2 $14, byte0;
+                cvt.rn.f16x2.e2m1x2 $15, byte1;
+                mov.b32 $2, {tmp0, tmp1};
+
+                cvt.rs.satfinite.e2m1x4.f32 tmp0, {$49, $41, $48, $40}, $58;
+                mov.b16 {byte1, byte0}, tmp0;
+                cvt.rn.f16x2.e2m1x2 $16, byte0;
+                cvt.rn.f16x2.e2m1x2 $17, byte1;
+                cvt.rs.satfinite.e2m1x4.f32 tmp1, {$51, $43, $50, $42}, $59;
+                mov.b16 {byte1, byte0}, tmp1;
+                cvt.rn.f16x2.e2m1x2 $18, byte0;
+                cvt.rn.f16x2.e2m1x2 $19, byte1;
+                mov.b32 $3, {tmp0, tmp1};
+                }
+                """,
+            constraints="=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r",
+            args=[
+                x_block_scaled_6_b1,
+                x_block_scaled_6_b2,
+                x_block_scaled_4_b1,
+                x_block_scaled_4_b2,
+                rbits,
+            ],
+            dtype=(tl.uint8, tl.uint8, tl.uint32, tl.uint32),
+            is_pure=True,
+            pack=8,
+        )
+
+    x_fp16_6_lo = (
+        (x_fp16x2_6 & 0xFFFF)
+        .cast(tl.uint16)
+        .cast(tl.float16, bitcast=True)
+        .cast(norm_constant.dtype)
+    )
+    x_fp16_6_hi = (
+        (x_fp16x2_6 >> 16)
+        .cast(tl.uint16)
+        .cast(tl.float16, bitcast=True)
+        .cast(norm_constant.dtype)
+    )
+    x_hp_6 = tl.join(x_fp16_6_lo, x_fp16_6_hi).reshape(128, 4, 16)
+
+    # HACK: Add a fake data dependency barrier to prevent Triton from reordering
+    # instructions in a way that causes slight numerical differences to the PyTorch
+    # implementation.
+    x_dequantized_6 = x_hp_6 * x_scales_hp_6[:, :, None] + 0 * tl.program_id(0)
+
+    x_fp16_4_lo = (
+        (x_fp16x2_4 & 0xFFFF)
+        .cast(tl.uint16)
+        .cast(tl.float16, bitcast=True)
+        .cast(norm_constant.dtype)
+    )
+    x_fp16_4_hi = (
+        (x_fp16x2_4 >> 16)
+        .cast(tl.uint16)
+        .cast(tl.float16, bitcast=True)
+        .cast(norm_constant.dtype)
+    )
+    x_hp_4 = tl.join(x_fp16_4_lo, x_fp16_4_hi).reshape(128, 4, 16)
+
+    # HACK: Add a fake data dependency barrier to prevent Triton from reordering
+    # instructions in a way that causes slight numerical differences to the PyTorch
+    # implementation.
+    x_dequantized_4 = x_hp_4 * x_scales_hp_4[:, :, None] + 0 * tl.program_id(0)
+
+    if SCALE_RULE == SCALE_RULE_ABS_MAX:
+        six_error = tl.max(
+            tl.abs(x_dequantized_6 - x_scale_blocks),
+            axis=-1,
+        )
+        four_error = tl.max(
+            tl.abs(x_dequantized_4 - x_scale_blocks),
+            axis=-1,
+        )
+    elif SCALE_RULE == SCALE_RULE_L1_NORM:
+        six_error = tl.sum(
+            tl.abs(x_dequantized_6 - x_scale_blocks),
+            axis=-1,
+        )
+        four_error = tl.sum(
+            tl.abs(x_dequantized_4 - x_scale_blocks),
+            axis=-1,
+        )
+    elif SCALE_RULE == SCALE_RULE_MSE:
+        six_error = tl.sum(
+            (x_dequantized_6 - x_scale_blocks) * (x_dequantized_6 - x_scale_blocks),
+            axis=-1,
+        )
+        four_error = tl.sum(
+            (x_dequantized_4 - x_scale_blocks) * (x_dequantized_4 - x_scale_blocks),
+            axis=-1,
+        )
+
+    x_e2m1 = tl.where(
+        (four_error < six_error)[:, :, None],
+        x_e2m1_4.reshape(128, 4, 8),
+        x_e2m1_6.reshape(128, 4, 8),
+    ).reshape(128, 32)
+    x_scales = (
+        tl.where(
+            four_error < six_error,
+            x_scales_4,
+            x_scales_6,
+        )
+        .reshape(4, 32, 4)
+        .permute(1, 0, 2)
+        .ravel()
+    )
+
+    return x_e2m1, x_scales
+
+
+@triton.jit
 def fp4_quantization_kernel(
     x_ptr,
     norm_constant_ptr,
@@ -430,7 +442,7 @@ def fp4_quantization_kernel(
     FP4_FORMAT: tl.constexpr,
     ROUND_STYLE: tl.constexpr,
     BLOCK_SCALE_2D: tl.constexpr,
-    scale_rule: tl.constexpr,
+    SCALE_RULE: tl.constexpr,
 ) -> None:
     pid_m = tl.program_id(0).to(tl.int64)
     pid_n = tl.program_id(1).to(tl.int64)
@@ -470,27 +482,26 @@ def fp4_quantization_kernel(
                 other=0.0,
             ).T
 
-        x_block = x_block.to(tl.float32)
-
-        if scale_rule != SCALE_RULE_ALWAYS_6:
-            x_e2m1, x_scales = fp32_to_scaled_fp4_kernel_four_over_six(
-                x_block,
-                norm_constant_ptr,
-                BLOCK_SIZE_M,
-                BLOCK_SIZE_N,
-                ROUND_STYLE,
-                BLOCK_SCALE_2D,
-                scale_rule,
-            )
-        else:
+        if SCALE_RULE == "always_4" or SCALE_RULE == "always_6":  # noqa: PLR1714
             x_e2m1, x_scales = fp32_to_scaled_fp4_kernel(
-                x_block,
+                x_block.to(tl.float32),
                 norm_constant_ptr,
                 BLOCK_SIZE_M,
                 BLOCK_SIZE_N,
                 FP4_FORMAT,
                 ROUND_STYLE,
                 BLOCK_SCALE_2D,
+                SCALE_RULE,
+            )
+        elif FP4_FORMAT == "nvfp4":
+            x_e2m1, x_scales = fp32_to_scaled_fp4_kernel_fouroversix(
+                x_block.to(tl.float32),
+                norm_constant_ptr,
+                BLOCK_SIZE_M,
+                BLOCK_SIZE_N,
+                ROUND_STYLE,
+                BLOCK_SCALE_2D,
+                SCALE_RULE,
             )
 
         offs_n_e2m1 = (
@@ -569,7 +580,7 @@ def fp4_quantization_with_rht_kernel(
     FP4_FORMAT: tl.constexpr,
     ROUND_STYLE: tl.constexpr,
     BLOCK_SCALE_2D: tl.constexpr,
-    scale_rule: tl.constexpr,
+    SCALE_RULE: tl.constexpr,
 ) -> None:
     HAD_BLOCK_SIZE: tl.constexpr = h_desc.block_shape[0]
 
@@ -600,25 +611,26 @@ def fp4_quantization_with_rht_kernel(
             h_block,
         ).reshape(BLOCK_SIZE_M, BLOCK_SIZE_N)
 
-        if scale_rule != SCALE_RULE_ALWAYS_6:
-            x_e2m1, x_scales = fp32_to_scaled_fp4_kernel_four_over_six(
-                x_block,
-                norm_constant_ptr,
-                BLOCK_SIZE_M,
-                BLOCK_SIZE_N,
-                ROUND_STYLE,
-                BLOCK_SCALE_2D,
-                scale_rule,
-            )
-        else:
+        if SCALE_RULE == "always_4" or SCALE_RULE == "always_6":  # noqa: PLR1714
             x_e2m1, x_scales = fp32_to_scaled_fp4_kernel(
-                x_block,
+                x_block.to(tl.float32),
                 norm_constant_ptr,
                 BLOCK_SIZE_M,
                 BLOCK_SIZE_N,
                 FP4_FORMAT,
                 ROUND_STYLE,
                 BLOCK_SCALE_2D,
+                SCALE_RULE,
+            )
+        elif FP4_FORMAT == "nvfp4":
+            x_e2m1, x_scales = fp32_to_scaled_fp4_kernel_fouroversix(
+                x_block.to(tl.float32),
+                norm_constant_ptr,
+                BLOCK_SIZE_M,
+                BLOCK_SIZE_N,
+                ROUND_STYLE,
+                BLOCK_SCALE_2D,
+                SCALE_RULE,
             )
 
         offs_m_e2m1 = pid_m * BLOCK_SIZE_M * GROUP_SIZE_M + m * BLOCK_SIZE_M
@@ -747,7 +759,7 @@ def quantize_to_fp4(  # noqa: C901, PLR0912
             FP4_FORMAT=fp4_format,
             ROUND_STYLE=round_style,
             BLOCK_SCALE_2D=block_scale_2d,
-            scale_rule=scale_rule.value,
+            SCALE_RULE=scale_rule.value,
             num_warps=1,
             num_stages=3,
         )
@@ -816,7 +828,7 @@ def quantize_to_fp4(  # noqa: C901, PLR0912
             FP4_FORMAT=fp4_format,
             ROUND_STYLE=round_style,
             BLOCK_SCALE_2D=block_scale_2d,
-            scale_rule=scale_rule.value,
+            SCALE_RULE=scale_rule.value,
             num_warps=4,
             num_stages=3 if fp4_format == "nvfp4" else 1,
         )

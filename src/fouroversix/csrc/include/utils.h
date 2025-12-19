@@ -351,10 +351,17 @@ namespace fouroversix
             OutputType
             convert(InputType const &x,
                     // Only used when Is_4o6 is true
-                    const ScaleFactorType *sf /*nullable*/,
+                    const ScaleFactorType sf /*nullable*/,
                     // Usage depends on Is_rtn
                     ErrorType *err /*nullable*/)
         {
+            InputType x_scaled;
+
+            #pragma unroll
+            for (int i = 0; i < 8; ++i)
+            {
+                x_scaled[i] = x[i] / sf;
+            }
 
             unsigned out;
 
@@ -380,8 +387,8 @@ namespace fouroversix
                         "cvt.rn.f16x2.e2m1x2 %3, byte2;\n"
                         "cvt.rn.f16x2.e2m1x2 %4, byte3;\n"
                         "}"
-                        : "=r"(out), "=r"(out_dequant_1), "=r"(out_dequant_2), "=r"(out_dequant_3), "=r"(out_dequant_4) : "f"(x[0]), "f"(x[1]), "f"(x[2]), "f"(x[3]),
-                                                                                                                          "f"(x[4]), "f"(x[5]), "f"(x[6]), "f"(x[7]));
+                        : "=r"(out), "=r"(out_dequant_1), "=r"(out_dequant_2), "=r"(out_dequant_3), "=r"(out_dequant_4) : "f"(x_scaled[0]), "f"(x_scaled[1]), "f"(x_scaled[2]), "f"(x_scaled[3]),
+                                                                                                                          "f"(x_scaled[4]), "f"(x_scaled[5]), "f"(x_scaled[6]), "f"(x_scaled[7]));
 
                     unsigned short out_dequant_1_hi = (out_dequant_1 >> 16) & 0xFFFF;
                     unsigned short out_dequant_1_lo = out_dequant_1 & 0xFFFF;
@@ -403,50 +410,50 @@ namespace fouroversix
 
                     if constexpr (kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::L1_NORM_4o6)
                     {
-                        *err += std::abs((val0 - x[0]) * sf[0]);
-                        *err += std::abs((val1 - x[1]) * sf[0]);
-                        *err += std::abs((val2 - x[2]) * sf[0]);
-                        *err += std::abs((val3 - x[3]) * sf[0]);
-                        *err += std::abs((val4 - x[4]) * sf[0]);
-                        *err += std::abs((val5 - x[5]) * sf[0]);
-                        *err += std::abs((val6 - x[6]) * sf[0]);
-                        *err += std::abs((val7 - x[7]) * sf[0]);
+                        *err += std::abs(val0 * sf - x[0]);
+                        *err += std::abs(val1 * sf - x[1]);
+                        *err += std::abs(val2 * sf - x[2]);
+                        *err += std::abs(val3 * sf - x[3]);
+                        *err += std::abs(val4 * sf - x[4]);
+                        *err += std::abs(val5 * sf - x[5]);
+                        *err += std::abs(val6 * sf - x[6]);
+                        *err += std::abs(val7 * sf - x[7]);
                     }
                     else if constexpr (kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::MSE_4o6)
                     {
-                        *err += (val0 - x[0]) * (val0 - x[0]) * sf[0] * sf[0];
-                        *err += (val1 - x[1]) * (val1 - x[1]) * sf[0] * sf[0];
-                        *err += (val2 - x[2]) * (val2 - x[2]) * sf[0] * sf[0];
-                        *err += (val3 - x[3]) * (val3 - x[3]) * sf[0] * sf[0];
-                        *err += (val4 - x[4]) * (val4 - x[4]) * sf[0] * sf[0];
-                        *err += (val5 - x[5]) * (val5 - x[5]) * sf[0] * sf[0];
-                        *err += (val6 - x[6]) * (val6 - x[6]) * sf[0] * sf[0];
-                        *err += (val7 - x[7]) * (val7 - x[7]) * sf[0] * sf[0];
+                        *err += (val0 * sf - x[0]) * (val0 * sf - x[0]);
+                        *err += (val1 * sf - x[1]) * (val1 * sf - x[1]);
+                        *err += (val2 * sf - x[2]) * (val2 * sf - x[2]);
+                        *err += (val3 * sf - x[3]) * (val3 * sf - x[3]);
+                        *err += (val4 * sf - x[4]) * (val4 * sf - x[4]);
+                        *err += (val5 * sf - x[5]) * (val5 * sf - x[5]);
+                        *err += (val6 * sf - x[6]) * (val6 * sf - x[6]);
+                        *err += (val7 * sf - x[7]) * (val7 * sf - x[7]);
                     }
                     else if constexpr (kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::ABS_MAX_4o6)
                     {
-                        float val0_err = std::abs((val0 - x[0]) * sf[0]);
+                        float val0_err = std::abs(val0 * sf - x[0]);
                         if (val0_err > *err)
                             *err = val0_err;
-                        float val1_err = std::abs((val1 - x[1]) * sf[0]);
+                        float val1_err = std::abs(val1 * sf - x[1]);
                         if (val1_err > *err)
                             *err = val1_err;
-                        float val2_err = std::abs((val2 - x[2]) * sf[0]);
+                        float val2_err = std::abs(val2 * sf - x[2]);
                         if (val2_err > *err)
                             *err = val2_err;
-                        float val3_err = std::abs((val3 - x[3]) * sf[0]);
+                        float val3_err = std::abs(val3 * sf - x[3]);
                         if (val3_err > *err)
                             *err = val3_err;
-                        float val4_err = std::abs((val4 - x[4]) * sf[0]);
+                        float val4_err = std::abs(val4 * sf - x[4]);
                         if (val4_err > *err)
                             *err = val4_err;
-                        float val5_err = std::abs((val5 - x[5]) * sf[0]);
+                        float val5_err = std::abs(val5 * sf - x[5]);
                         if (val5_err > *err)
                             *err = val5_err;
-                        float val6_err = std::abs((val6 - x[6]) * sf[0]);
+                        float val6_err = std::abs(val6 * sf - x[6]);
                         if (val6_err > *err)
                             *err = val6_err;
-                        float val7_err = std::abs((val7 - x[7]) * sf[0]);
+                        float val7_err = std::abs(val7 * sf - x[7]);
                         if (val7_err > *err)
                             *err = val7_err;
                     }
@@ -469,8 +476,8 @@ namespace fouroversix
                         "cvt.rn.satfinite.e2m1x2.f32   byte3, %8, %7;\n"
                         "mov.b32 %0, {byte0, byte1, byte2, byte3};\n"
                         "}"
-                        : "=r"(out) : "f"(x[0]), "f"(x[1]), "f"(x[2]), "f"(x[3]),
-                                      "f"(x[4]), "f"(x[5]), "f"(x[6]), "f"(x[7]));
+                        : "=r"(out) : "f"(x_scaled[0]), "f"(x_scaled[1]), "f"(x_scaled[2]), "f"(x_scaled[3]),
+                                      "f"(x_scaled[4]), "f"(x_scaled[5]), "f"(x_scaled[6]), "f"(x_scaled[7]));
                     return reinterpret_cast<OutputType const &>(out);
                 }
             }
@@ -481,8 +488,8 @@ namespace fouroversix
         }
     };
 
-    template <bool Is_nvfp4, bool Is_4o6, bool Is_rtn, AdaptiveBlockScalingRuleType kAdaptiveBlockScalingRuleType, typename Engine, typename Layout, typename Element, typename OutputType>
-    __forceinline__ __device__ float fp4_convertion(Tensor<Engine, Layout> const &tensor, const Element ts, float *sf_, OutputType *res)
+    template <bool Is_nvfp4, bool Is_4o6, bool Is_rtn, AdaptiveBlockScalingRuleType kAdaptiveBlockScalingRuleType, typename Engine, typename Layout, typename OutputType>
+    __forceinline__ __device__ float fp4_convertion(Tensor<Engine, Layout> const &tensor, const float ts, float *sf_, OutputType *res)
     {
         constexpr int numel = decltype(size(tensor))::value;
         static_assert((numel == 16 && Is_nvfp4) || numel == 32);
@@ -499,23 +506,24 @@ namespace fouroversix
         {
             float err[2] = {0.0f, 0.0f};
             float sf_4o6[2] = {max(sf_[0], 1e-12f), max(sf_[1], 1e-12f)};
-            float sf_hp_4o6[2] = {max(static_cast<float>(ts * sf_[0]), 1e-12f), max(static_cast<float>(ts * sf_[1]), 1e-12f)};
+            float sf_hp_4o6[2] = {max(ts * sf_[0], 1e-12f), max(ts * sf_[1], 1e-12f)};
             OutputType res_4[num_loops];
             OutputType res_6[num_loops];
 
 #pragma unroll
             for (int i = 0; i < num_loops; ++i)
             {
-                InputType x_4, x_6;
+                InputType x;
 #pragma unroll
                 for (int j = 0; j < loop_size; ++j)
                 {
                     float val = static_cast<float>(tensor(i * loop_size + j));
-                    x_4[j] = val / sf_hp_4o6[0];
-                    x_6[j] = val / sf_hp_4o6[1];
+                    x[j] = val;
+                    // x_4[j] = val / sf_hp_4o6[0];
+                    // x_6[j] = val / sf_hp_4o6[1];
                 }
-                res_4[i] = fp4_array_quant.convert(x_4, &sf_hp_4o6[0], &err[0]);
-                res_6[i] = fp4_array_quant.convert(x_6, &sf_hp_4o6[1], &err[1]);
+                res_4[i] = fp4_array_quant.convert(x, sf_hp_4o6[0], &err[0]);
+                res_6[i] = fp4_array_quant.convert(x, sf_hp_4o6[1], &err[1]);
             }
 
             bool const pick_first = err[0] < err[1];
@@ -529,7 +537,7 @@ namespace fouroversix
         else
         {
             float sf = max(sf_[0], 1e-12f);
-            float sf_hp = max(static_cast<float>(ts * sf_[0]), 1e-12f);
+            float sf_hp = max(ts * sf_[0], 1e-12f);
 // if (cute::thread0()) {
 //     printf("in fp4_convertion, not 4o6, sf = %f, sf_hp = %f\n", sf, sf_hp);
 // }
@@ -544,12 +552,12 @@ namespace fouroversix
                     // if (cute::thread0()) {
                     //     printf("in fp4_convertion, not 4o6, i = %d, j = %d, val = %f\n", i, j, val);
                     // }
-                    x[j] = val / sf_hp;
+                    x[j] = val; // / sf_hp;
                 }
                 // if (cute::thread0()) {
                 //     printf("in fp4_convertion, not 4o6, i = %d, x = %f, %f, %f, %f, %f, %f, %f, %f\n", i, x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7]);
                 // }
-                res[i] = fp4_array_quant.convert(x, nullptr, nullptr);
+                res[i] = fp4_array_quant.convert(x, sf_hp, nullptr);
             }
 
             return sf;

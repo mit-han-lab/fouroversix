@@ -66,7 +66,7 @@ namespace fouroversix
                                make_coord(m_block, n_block));
 
         // Scale Factor Temp SFT (Global Memory)
-        Tensor mSFT = make_tensor(make_gmem_ptr(reinterpret_cast<Element *>(params.x_sft_ptr)),
+        Tensor mSFT = make_tensor(make_gmem_ptr(reinterpret_cast<float *>(params.x_sft_ptr)),
                                   make_shape(params.M, params.N_rounded / kGroupN),
                                   make_stride(params.x_sft_row_stride, _1{}));
         Tensor gSFT = local_tile(mSFT(_, _), Shape<Int<kBlockM>, Int<kBlockN / kGroupN>>{},
@@ -77,7 +77,8 @@ namespace fouroversix
                                 typename Kernel_traits::SmemLayoutX{});
 
         // SFT in Shared Memory (placed after X)
-        Tensor sSFT = make_tensor(make_smem_ptr(sX.data() + size(sX)),
+        Tensor sSFT = make_tensor(make_smem_ptr(reinterpret_cast<float *>(reinterpret_cast<char *>(sX.data().get()) 
+                                  + sizeof(Element) * size(sX))),
                                   typename Kernel_traits::SmemLayoutSFT{});
 
         // -------------------------------------------------------------------------
@@ -114,17 +115,17 @@ namespace fouroversix
         // Scale Factor Computation
         // -------------------------------------------------------------------------
 
-        Element thr_max_scale_factor = static_cast<Element>(0.0f);
+        float thr_max_scale_factor = static_cast<float>(0.0f);
         for (int group_idx = tidx; group_idx < num_groups; group_idx += blockDim.x)
         {
             const int group_row_idx = group_idx / kNumGroupsInRow;
             const int group_col_idx = group_idx % kNumGroupsInRow;
 
-            Element scale_factor = static_cast<Element>(0.0f);
+            float scale_factor = static_cast<float>(0.0f);
 #pragma unroll
             for (int i = 0; i < kGroupN; ++i)
             {
-                Element val = abs(sX(group_row_idx, group_col_idx * kGroupN + i));
+                float val = abs(static_cast<float>(sX(group_row_idx, group_col_idx * kGroupN + i)));
                 if (val > scale_factor)
                 {
                     scale_factor = val;
@@ -147,10 +148,10 @@ namespace fouroversix
         MaxOp<float> max_op;
         float max_val = static_cast<float>(thr_max_scale_factor);
         max_val = Allreduce<32>::run(max_val, max_op);
-        thr_max_scale_factor = static_cast<Element>(max_val);
+        thr_max_scale_factor = max_val;
 
         // Block-level reduce via Shared Memory
-        Element *sRed = reinterpret_cast<Element *>(smem); // Reuse smem
+        float *sRed = reinterpret_cast<float *>(smem); // Reuse smem
         if (tidx % 32 == 0)
         {
             sRed[tidx / 32] = thr_max_scale_factor;
@@ -159,17 +160,17 @@ namespace fouroversix
 
         if (tidx == 0)
         {
-            Element block_max = static_cast<Element>(0.0f);
+            float block_max = static_cast<float>(0.0f);
 #pragma unroll
             for (int i = 0; i < kNWarps; ++i)
             {
-                Element t = sRed[i];
+                float t = sRed[i];
                 if (t > block_max)
                 {
                     block_max = t;
                 }
             }
-            float block_ts = block_max / static_cast<Element>(TS_SCALE);
+            float block_ts = block_max / TS_SCALE;
             atomicMaxFloat(ts_ptr, block_ts);
         }
 
@@ -177,8 +178,8 @@ namespace fouroversix
         // Write Back SFT (Shared -> Global)
         // -------------------------------------------------------------------------
 
-        using VecType = uint2;
-        constexpr int kVecSize = sizeof(VecType) / sizeof(Element);
+        using VecType = uint4;
+        constexpr int kVecSize = sizeof(VecType) / sizeof(float);
 
         for (int r_idx = tidx; r_idx < kBlockM; r_idx += blockDim.x)
         {
@@ -234,9 +235,9 @@ namespace fouroversix
         const int num_groups = kNumGroupsInRow * kBlockM;
 
         // Pointers
-        const Element ts = static_cast<Element>(*reinterpret_cast<float *>(params.ts_ptr));
-        const Element sf_scale_6 = static_cast<Element>(max(static_cast<float>(ts * E2M1_MAX_VALUE), 1e-12f));
-        const Element sf_scale_4 = static_cast<Element>(max(static_cast<float>(ts * 4), 1e-12f));
+        const float ts = *reinterpret_cast<float *>(params.ts_ptr);
+        const float sf_scale_6 = max(ts * E2M1_MAX_VALUE, 1e-12f);
+        const float sf_scale_4 = max(ts * 4, 1e-12f);
 
         // -------------------------------------------------------------------------
         // Tensor Definitions
@@ -256,7 +257,7 @@ namespace fouroversix
                                    make_coord(m_block, n_block));
 
         // Scale Factor Temp SFT (Global Memory)
-        Tensor mSFT = make_tensor(make_gmem_ptr(reinterpret_cast<Element *>(params.x_sft_ptr)),
+        Tensor mSFT = make_tensor(make_gmem_ptr(reinterpret_cast<float *>(params.x_sft_ptr)),
                                   make_shape(params.M, params.N_rounded / kGroupN),
                                   make_stride(params.x_sft_row_stride, _1{}));
         Tensor gSFT = local_tile(mSFT(_, _), Shape<Int<kBlockM>, Int<kBlockN / kGroupN>>{},
@@ -273,10 +274,12 @@ namespace fouroversix
                                 typename Kernel_traits::SmemLayoutX{});
 
         // SFT in Shared Memory (placed after X)
-        Tensor sSFT = make_tensor(make_smem_ptr(sX.data() + size(sX)),
+        Tensor sSFT = make_tensor(make_smem_ptr(reinterpret_cast<float *>(reinterpret_cast<char *>(sX.data().get()) 
+                                  + sizeof(Element) * size(sX))),
                                   typename Kernel_traits::SmemLayoutSFT{});
 
-        Tensor sXe2m1 = make_tensor(make_smem_ptr(reinterpret_cast<uint8_t *>(reinterpret_cast<char *>(sSFT.data().get()) + sizeof(Element) * size(sSFT))),
+        Tensor sXe2m1 = make_tensor(make_smem_ptr(reinterpret_cast<uint8_t *>(reinterpret_cast<char *>(sSFT.data().get()) 
+                                  + sizeof(float) * size(sSFT))),
                                     Shape<Int<kBlockM>, Int<kBlockN / 2>>{},
                                     Stride<Int<kBlockN / 2>, _1>{});
 
@@ -315,8 +318,8 @@ namespace fouroversix
         // Data Loading (SFT -> Shared)
         // -------------------------------------------------------------------------
 
-        using VecTypeSFT = uint2;
-        constexpr int kVecSizeSFT = sizeof(VecTypeSFT) / sizeof(Element);
+        using VecTypeSFT = uint4;
+        constexpr int kVecSizeSFT = sizeof(VecTypeSFT) / sizeof(float);
 
         for (int r_idx = tidx; r_idx < kBlockM; r_idx += blockDim.x)
         {
@@ -339,7 +342,7 @@ namespace fouroversix
             const int group_row_idx = group_idx / kNumGroupsInRow;
             const int group_col_idx = group_idx % kNumGroupsInRow;
 
-            const Element group_max = static_cast<Element>(sSFT(group_row_idx, group_col_idx));
+            const float group_max = sSFT(group_row_idx, group_col_idx);
 
             const Tensor sGX = make_tensor(make_smem_ptr(sX.data() + group_idx * kGroupN),
                                            Shape<Int<1>, Int<kGroupN>>{},
@@ -352,10 +355,10 @@ namespace fouroversix
             {
                 float sf_[2] = {
                     clamp(
-                        static_cast<float>(group_max / sf_scale_4),
+                        group_max / sf_scale_4,
                         E4M3_MIN_POSITIVE_NORMAL, E4M3_MAX_VALUE),
                     clamp(
-                        static_cast<float>(group_max / sf_scale_6),
+                        group_max / sf_scale_6,
                         E4M3_MIN_POSITIVE_NORMAL, E4M3_MAX_VALUE)};
 
                 sf_[0] = static_cast<float>(static_cast<ElementScaleFactor>(sf_[0]));
@@ -373,13 +376,13 @@ namespace fouroversix
                 if constexpr (kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::ALL_6)
                 {
                     sf_val = clamp(
-                        static_cast<float>(group_max / sf_scale_6),
+                        group_max / sf_scale_6,
                         E4M3_MIN_POSITIVE_NORMAL, E4M3_MAX_VALUE);
                 }
                 else if constexpr (kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::ALL_4)
                 {
                     sf_val = clamp(
-                        static_cast<float>(group_max / sf_scale_4),
+                        group_max / sf_scale_4,
                         E4M3_MIN_POSITIVE_NORMAL, E4M3_MAX_VALUE);
                 }
                 else
@@ -417,7 +420,7 @@ namespace fouroversix
             // const int col_in_block = group_col_idx % 4;
             // const int row_sf_layout_idx = int(group_row_idx / 128) * 32 + row_in_block % 32;
             // const int col_sf_layout_idx = int(row_in_block / 32) * 4 + col_in_block;
-            sSF(row_sf_layout_idx, col_sf_layout_idx) = static_cast<ElementScaleFactor>(static_cast<Element>(sf));
+            sSF(row_sf_layout_idx, col_sf_layout_idx) = static_cast<ElementScaleFactor>(sf);
         }
 
         constexpr int kVecSizeX = sizeof(ElementXe2m1Packed) / sizeof(uint8_t);
