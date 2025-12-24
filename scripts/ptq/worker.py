@@ -16,6 +16,7 @@ from .smoothquant import (
     SmoothQuantEvaluator,
     get_smoothquant_alpha,
 )
+from .spinquant import SpinQuantEvaluationCoordinator
 from .utils import PTQMethod
 
 if TYPE_CHECKING:
@@ -24,7 +25,7 @@ if TYPE_CHECKING:
     from .evaluator import PTQEvaluator
 
 
-def get_evaluator(
+def get_evaluator(  # noqa: PLR0911
     ptq_method: PTQMethod,
     **kwargs: dict[str, Any],
 ) -> tuple[type[PTQEvaluator], dict[str, Any]]:
@@ -49,6 +50,8 @@ def get_evaluator(
             return SmoothQuantAutoAlphaEvaluator, {}
 
         return SmoothQuantEvaluator, {"smoothquant_alpha": smoothquant_alpha}
+    if ptq_method == PTQMethod.spinquant:
+        return SpinQuantEvaluationCoordinator, {}
 
     msg = f"Unsupported PTQ method: {ptq_method}"
     raise ValueError(msg)

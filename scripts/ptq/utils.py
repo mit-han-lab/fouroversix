@@ -12,6 +12,7 @@ class PTQMethod(str, Enum):
     gptq = "gptq"
     rtn = "rtn"
     smoothquant = "smoothquant"
+    spinquant = "spinquant"
 
 
 def get_model_size(model_name: str | None) -> float:

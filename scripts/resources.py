@@ -32,6 +32,7 @@ class Dependency(str, Enum):
     fouroversix = "fouroversix"
     fp_quant = "fp_quant"
     qutlass = "qutlass"
+    spinquant = "spinquant"
 
 
 cuda_version_to_image_tag = {
@@ -257,6 +258,13 @@ def get_image(  # noqa: C901, PLR0912
                 )
                 .env({"MAX_JOBS": "32"})
                 .run_function(install_qutlass, gpu="B200", cpu=32, memory=64 * 1024)
+            )
+
+        if dependency == Dependency.spinquant:
+            img = img.add_local_dir(
+                "third_party/spinquant",
+                f"{FOUROVERSIX_INSTALL_PATH}/spinquant",
+                copy=True,
             )
 
     if extra_pip_dependencies is not None:
