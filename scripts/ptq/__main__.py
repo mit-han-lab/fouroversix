@@ -61,7 +61,6 @@ def run_ptq(
 @click.option("--device", type=str, default="cuda")
 @click.option("--dtype", type=DataType, default=DataType.bfloat16)
 @click.option("--fp4-format", type=FP4Format, default=FP4Format.nvfp4)
-@click.option("--limit", type=int)
 @click.option("--matmul-backend", type=MatmulBackend, default=None)
 @click.option("--modal", is_flag=True)
 @click.option("--model-name", "-m", type=str, multiple=True, required=True)

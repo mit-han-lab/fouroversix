@@ -43,7 +43,6 @@ class PTQEvaluatorImpl(ABC):
         device: str,
         dtype: str,
         tasks: list[str],
-        limit: int | None = None,
         trust_remote_code: bool = False,
         **kwargs: dict[str, Any],
     ) -> dict[str, Any]:
@@ -67,7 +66,6 @@ class PTQEvaluatorImpl(ABC):
             model=models.huggingface.HFLM(pretrained=model, device=device),
             tasks=tasks,
             device=device,
-            limit=limit,
             task_manager=TaskManager(
                 include_path=(Path(__file__).parent / "tasks").as_posix(),
             ),
