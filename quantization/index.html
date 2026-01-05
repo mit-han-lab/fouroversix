@@ -1,0 +1,1133 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+      
+        <link rel="prev" href="../matmul/">
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+    
+    
+      
+        <title>Quantization - Four Over Six Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#quantization" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Four Over Six Documentation" class="md-header__button md-logo" aria-label="Four Over Six Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Four Over Six Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Quantization
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Four Over Six Documentation" class="md-nav__button md-logo" aria-label="Four Over Six Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Four Over Six Documentation
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Four Over Six
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../matmul/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Matrix Multiplication
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quantization
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quantization
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#fouroversix.quantize_to_fp4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        quantize_to_fp4
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="quantize_to_fp4">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fouroversix.quantize_to_fp4--sample-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sample Code
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Sample Code">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fouroversix.quantize_to_fp4--with-four-over-six" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        With Four Over Six
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fouroversix.quantize_to_fp4--without-four-over-six" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Without Four Over Six
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fouroversix.quantize_to_fp4--with-stochastic-rounding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        With Stochastic Rounding
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fouroversix.quantize_to_fp4--with-the-random-hadamard-transform" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        With the Random Hadamard Transform
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fouroversix.quantize_to_fp4--backends" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Backends
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fouroversix.quantize_to_fp4--parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Parameters
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#fouroversix.quantize_to_fp4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        quantize_to_fp4
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="quantize_to_fp4">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fouroversix.quantize_to_fp4--sample-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sample Code
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Sample Code">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fouroversix.quantize_to_fp4--with-four-over-six" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        With Four Over Six
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fouroversix.quantize_to_fp4--without-four-over-six" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Without Four Over Six
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fouroversix.quantize_to_fp4--with-stochastic-rounding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        With Stochastic Rounding
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fouroversix.quantize_to_fp4--with-the-random-hadamard-transform" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        With the Random Hadamard Transform
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fouroversix.quantize_to_fp4--backends" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Backends
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fouroversix.quantize_to_fp4--parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Parameters
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="quantization">Quantization</h1>
+
+
+<div class="doc doc-object doc-function">
+
+
+
+<a id="fouroversix.quantize_to_fp4"></a>
+    <div class="doc doc-contents first">
+
+        <p>Quantize a tensor to FP4.</p>
+<h3 id="fouroversix.quantize_to_fp4--sample-code">Sample Code</h3>
+<h4 id="fouroversix.quantize_to_fp4--with-four-over-six">With Four Over Six</h4>
+<pre><code>a = torch.tensor(1024, 1024, dtype=torch.bfloat16, device=&quot;cuda&quot;)
+a_e2m1, a_sf, a_normconst = quantize_to_fp4(a)
+</code></pre>
+<h4 id="fouroversix.quantize_to_fp4--without-four-over-six">Without Four Over Six</h4>
+<pre><code>a = torch.tensor(1024, 1024, dtype=torch.bfloat16, device=&quot;cuda&quot;)
+a_e2m1, a_sf, a_normconst = quantize_to_fp4(
+    a,
+    scale_rule=AdaptiveBlockScalingRule.always_6,
+)
+</code></pre>
+<h4 id="fouroversix.quantize_to_fp4--with-stochastic-rounding">With Stochastic Rounding</h4>
+<pre><code>a = torch.tensor(1024, 1024, dtype=torch.bfloat16, device=&quot;cuda&quot;)
+a_e2m1, a_sf, a_normconst = quantize_to_fp4(a, round_style=RoundStyle.stochastic)
+</code></pre>
+<h4 id="fouroversix.quantize_to_fp4--with-the-random-hadamard-transform">With the Random Hadamard Transform</h4>
+<pre><code>from scipy.linalg import hadamard
+
+a = torch.tensor(1024, 1024, dtype=torch.bfloat16, device=&quot;cuda&quot;)
+had = torch.tensor(hadamard(16), dtype=torch.bfloat16, device=&quot;cuda&quot;)
+a_e2m1, a_sf, a_normconst = quantize_to_fp4(a, had=had)
+</code></pre>
+<h3 id="fouroversix.quantize_to_fp4--backends">Backends</h3>
+<p>We provide three different implementations of FP4 quantization:</p>
+<ul>
+<li><strong>CUDA</strong>: A fast implementation written in CUDA which currently does not support
+    the operations required for training (2D block scaling, stochastic rounding,
+    random Hadamard transform). Requires a Blackwell GPU.</li>
+<li><strong>Triton</strong>: A slightly slower implementation written in Triton which supports all
+    operations needed for training. Requires a Blackwell GPU.</li>
+<li><strong>PyTorch</strong>: A slow implementation written in PyTorch which supports all
+    operations and can be run on any GPU.</li>
+</ul>
+<p>If <code>quantize_to_fp4</code> is called with <code>backend=None</code>, a backend will be selected
+automatically based on the following rules:</p>
+<ul>
+<li>If there is no GPU available, or if the available GPU is not a Blackwell GPU,
+    select PyTorch.</li>
+<li>If any quantization options are set other than <code>scale_rule</code>, select Triton.<ul>
+<li>However, if the available GPU is SM120 (i.e. RTX 5090, RTX 6000) and
+    <code>round_style</code> is set to <code>RoundStyle.stochastic</code>, select PyTorch as
+    stochastic rounding does not have hardware support on SM120 GPUs.</li>
+</ul>
+</li>
+<li>Otherwise, select CUDA.</li>
+</ul>
+<h3 id="fouroversix.quantize_to_fp4--parameters">Parameters</h3>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>x</code>
+            </td>
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The input tensor to quantize.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>backend</code>
+            </td>
+            <td>
+                  <code><span title="fouroversix.backend.QuantizeBackend">QuantizeBackend</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The backend to use for quantization, either
+<code>QuantizeBackend.cuda</code>, <code>QuantizeBackend.triton</code>, or
+<code>QuantizeBackend.pytorch</code>. If no backend is provided, one will be selected
+automatically based on the available GPU and the options provided. See above
+for more details.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>scale_rule</code>
+            </td>
+            <td>
+                  <code><span title="fouroversix.utils.AdaptiveBlockScalingRule">AdaptiveBlockScalingRule</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The scaling rule to use during
+quantization. See (Adaptive Block Scaling)[/adaptive_block_scaling] for more
+details.</p>
+              </div>
+            </td>
+            <td>
+                  <code><span title="fouroversix.utils.AdaptiveBlockScalingRule.mse">mse</span></code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>block_scale_2d</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If True, scale factors will be computed across 16x16
+chunks of the input rather than 1x16 chunks. This is useful to apply to the
+weight matrix during training, so that W and W.T will be equivalent after
+quantization.</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>had</code>
+            </td>
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A high-precision Hadamard matrix to apply to the input prior
+to quantization.</p>
+              </div>
+            </td>
+            <td>
+                  <code>None</code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>fp4_format</code>
+            </td>
+            <td>
+                  <code><span title="fouroversix.utils.FP4Format">FP4Format</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The FP4 format to quantize to, either <code>FP4Format.mxfp4</code>
+or <code>FP4Format.nvfp4</code>.</p>
+              </div>
+            </td>
+            <td>
+                  <code><span title="fouroversix.utils.FP4Format.nvfp4">nvfp4</span></code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>round_style</code>
+            </td>
+            <td>
+                  <code><span title="fouroversix.utils.RoundStyle">RoundStyle</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The rounding style to apply during quantization,
+either <code>RoundStyle.nearest</code> for round-to-nearest quantization, or
+<code>RoundStyle.stochastic</code> for stochastic rounding.</p>
+              </div>
+            </td>
+            <td>
+                  <code><span title="fouroversix.utils.RoundStyle.nearest">nearest</span></code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>transpose</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If True, the output will be a quantized version of the
+transposed input. This may be helpful for certain operations during training
+as <code>fp4_matmul</code> requires that both tensors are provided in row-major format.</p>
+              </div>
+            </td>
+            <td>
+                  <code>False</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The packed E2M1 values.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The FP8 scale factors.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="torch.Tensor">Tensor</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The tensor-wide FP32 scale factor.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+            <details class="mkdocstrings-source">
+              <summary>Source code in <code>src/fouroversix/frontend.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">161</span>
+<span class="normal">162</span>
+<span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span>
+<span class="normal">195</span>
+<span class="normal">196</span>
+<span class="normal">197</span>
+<span class="normal">198</span>
+<span class="normal">199</span>
+<span class="normal">200</span>
+<span class="normal">201</span>
+<span class="normal">202</span>
+<span class="normal">203</span>
+<span class="normal">204</span>
+<span class="normal">205</span>
+<span class="normal">206</span>
+<span class="normal">207</span>
+<span class="normal">208</span>
+<span class="normal">209</span>
+<span class="normal">210</span>
+<span class="normal">211</span>
+<span class="normal">212</span>
+<span class="normal">213</span>
+<span class="normal">214</span>
+<span class="normal">215</span>
+<span class="normal">216</span>
+<span class="normal">217</span>
+<span class="normal">218</span>
+<span class="normal">219</span>
+<span class="normal">220</span>
+<span class="normal">221</span>
+<span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span>
+<span class="normal">255</span>
+<span class="normal">256</span>
+<span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">quantize_to_fp4</span><span class="p">(</span>
+    <span class="n">x</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">backend</span><span class="p">:</span> <span class="n">QuantizeBackend</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">scale_rule</span><span class="p">:</span> <span class="n">AdaptiveBlockScalingRule</span> <span class="o">=</span> <span class="n">AdaptiveBlockScalingRule</span><span class="o">.</span><span class="n">mse</span><span class="p">,</span>
+    <span class="n">block_scale_2d</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+    <span class="n">had</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">fp4_format</span><span class="p">:</span> <span class="n">FP4Format</span> <span class="o">=</span> <span class="n">FP4Format</span><span class="o">.</span><span class="n">nvfp4</span><span class="p">,</span>
+    <span class="n">round_style</span><span class="p">:</span> <span class="n">RoundStyle</span> <span class="o">=</span> <span class="n">RoundStyle</span><span class="o">.</span><span class="n">nearest</span><span class="p">,</span>
+    <span class="n">transpose</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Quantize a tensor to FP4.</span>
+
+<span class="sd">    ## Sample Code</span>
+
+<span class="sd">    ### With Four Over Six</span>
+
+<span class="sd">    ```</span>
+<span class="sd">    a = torch.tensor(1024, 1024, dtype=torch.bfloat16, device=&quot;cuda&quot;)</span>
+<span class="sd">    a_e2m1, a_sf, a_normconst = quantize_to_fp4(a)</span>
+<span class="sd">    ```</span>
+
+<span class="sd">    ### Without Four Over Six</span>
+
+<span class="sd">    ```</span>
+<span class="sd">    a = torch.tensor(1024, 1024, dtype=torch.bfloat16, device=&quot;cuda&quot;)</span>
+<span class="sd">    a_e2m1, a_sf, a_normconst = quantize_to_fp4(</span>
+<span class="sd">        a,</span>
+<span class="sd">        scale_rule=AdaptiveBlockScalingRule.always_6,</span>
+<span class="sd">    )</span>
+<span class="sd">    ```</span>
+
+<span class="sd">    ### With Stochastic Rounding</span>
+
+<span class="sd">    ```</span>
+<span class="sd">    a = torch.tensor(1024, 1024, dtype=torch.bfloat16, device=&quot;cuda&quot;)</span>
+<span class="sd">    a_e2m1, a_sf, a_normconst = quantize_to_fp4(a, round_style=RoundStyle.stochastic)</span>
+<span class="sd">    ```</span>
+
+<span class="sd">    ### With the Random Hadamard Transform</span>
+
+<span class="sd">    ```</span>
+<span class="sd">    from scipy.linalg import hadamard</span>
+
+<span class="sd">    a = torch.tensor(1024, 1024, dtype=torch.bfloat16, device=&quot;cuda&quot;)</span>
+<span class="sd">    had = torch.tensor(hadamard(16), dtype=torch.bfloat16, device=&quot;cuda&quot;)</span>
+<span class="sd">    a_e2m1, a_sf, a_normconst = quantize_to_fp4(a, had=had)</span>
+<span class="sd">    ```</span>
+
+<span class="sd">    ## Backends</span>
+
+<span class="sd">    We provide three different implementations of FP4 quantization:</span>
+
+<span class="sd">    - **CUDA**: A fast implementation written in CUDA which currently does not support</span>
+<span class="sd">        the operations required for training (2D block scaling, stochastic rounding,</span>
+<span class="sd">        random Hadamard transform). Requires a Blackwell GPU.</span>
+<span class="sd">    - **Triton**: A slightly slower implementation written in Triton which supports all</span>
+<span class="sd">        operations needed for training. Requires a Blackwell GPU.</span>
+<span class="sd">    - **PyTorch**: A slow implementation written in PyTorch which supports all</span>
+<span class="sd">        operations and can be run on any GPU.</span>
+
+<span class="sd">    If `quantize_to_fp4` is called with `backend=None`, a backend will be selected</span>
+<span class="sd">    automatically based on the following rules:</span>
+
+<span class="sd">    - If there is no GPU available, or if the available GPU is not a Blackwell GPU,</span>
+<span class="sd">        select PyTorch.</span>
+<span class="sd">    - If any quantization options are set other than `scale_rule`, select Triton.</span>
+<span class="sd">        - However, if the available GPU is SM120 (i.e. RTX 5090, RTX 6000) and</span>
+<span class="sd">            `round_style` is set to `RoundStyle.stochastic`, select PyTorch as</span>
+<span class="sd">            stochastic rounding does not have hardware support on SM120 GPUs.</span>
+<span class="sd">    - Otherwise, select CUDA.</span>
+
+<span class="sd">    ## Parameters</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        x (torch.Tensor): The input tensor to quantize.</span>
+<span class="sd">        backend (QuantizeBackend): The backend to use for quantization, either</span>
+<span class="sd">            `QuantizeBackend.cuda`, `QuantizeBackend.triton`, or</span>
+<span class="sd">            `QuantizeBackend.pytorch`. If no backend is provided, one will be selected</span>
+<span class="sd">            automatically based on the available GPU and the options provided. See above</span>
+<span class="sd">            for more details.</span>
+<span class="sd">        scale_rule (AdaptiveBlockScalingRule): The scaling rule to use during</span>
+<span class="sd">            quantization. See (Adaptive Block Scaling)[/adaptive_block_scaling] for more</span>
+<span class="sd">            details.</span>
+<span class="sd">        block_scale_2d (bool): If True, scale factors will be computed across 16x16</span>
+<span class="sd">            chunks of the input rather than 1x16 chunks. This is useful to apply to the</span>
+<span class="sd">            weight matrix during training, so that W and W.T will be equivalent after</span>
+<span class="sd">            quantization.</span>
+<span class="sd">        had (torch.Tensor): A high-precision Hadamard matrix to apply to the input prior</span>
+<span class="sd">            to quantization.</span>
+<span class="sd">        fp4_format (FP4Format): The FP4 format to quantize to, either `FP4Format.mxfp4`</span>
+<span class="sd">            or `FP4Format.nvfp4`.</span>
+<span class="sd">        round_style (RoundStyle): The rounding style to apply during quantization,</span>
+<span class="sd">            either `RoundStyle.nearest` for round-to-nearest quantization, or</span>
+<span class="sd">            `RoundStyle.stochastic` for stochastic rounding.</span>
+<span class="sd">        transpose (bool): If True, the output will be a quantized version of the</span>
+<span class="sd">            transposed input. This may be helpful for certain operations during training</span>
+<span class="sd">            as `fp4_matmul` requires that both tensors are provided in row-major format.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        The packed E2M1 values.</span>
+<span class="sd">        The FP8 scale factors.</span>
+<span class="sd">        The tensor-wide FP32 scale factor.</span>
+
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">kwargs</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s2">&quot;scale_rule&quot;</span><span class="p">:</span> <span class="n">scale_rule</span><span class="p">,</span>
+        <span class="s2">&quot;block_scale_2d&quot;</span><span class="p">:</span> <span class="n">block_scale_2d</span><span class="p">,</span>
+        <span class="s2">&quot;had&quot;</span><span class="p">:</span> <span class="n">had</span><span class="p">,</span>
+        <span class="s2">&quot;fp4_format&quot;</span><span class="p">:</span> <span class="n">fp4_format</span><span class="p">,</span>
+        <span class="s2">&quot;round_style&quot;</span><span class="p">:</span> <span class="n">round_style</span><span class="p">,</span>
+        <span class="s2">&quot;transpose&quot;</span><span class="p">:</span> <span class="n">transpose</span><span class="p">,</span>
+    <span class="p">}</span>
+
+    <span class="k">if</span> <span class="n">backend</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">backend</span> <span class="o">=</span> <span class="n">QuantizeBackend</span><span class="o">.</span><span class="n">auto_select</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="ow">not</span> <span class="n">backend</span><span class="o">.</span><span class="n">is_supported</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="n">msg</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;Backend </span><span class="si">{</span><span class="n">backend</span><span class="si">}</span><span class="s2"> does not support the given parameters&quot;</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">backend</span><span class="o">.</span><span class="n">quantize_to_fp4</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": [], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
