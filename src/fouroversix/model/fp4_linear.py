@@ -14,7 +14,7 @@ class FP4LinearFunction(torch.autograd.Function):
 
     @staticmethod
     def forward(
-        ctx: torch.autograd.function.FunctonCtx,
+        ctx: torch.autograd.function.FunctionCtx,
         input: torch.Tensor,  # noqa: A002
         weight_e2m1: torch.Tensor = None,
         weight_sf: torch.Tensor = None,
@@ -84,7 +84,7 @@ class FP4LinearFunction(torch.autograd.Function):
 
     @staticmethod
     def backward(
-        ctx: torch.autograd.function.FunctonCtx,
+        ctx: torch.autograd.function.FunctionCtx,
         grad_output: torch.Tensor,
     ) -> tuple[torch.Tensor, ...]:
         """Backward pass for the FP4 linear layer."""
