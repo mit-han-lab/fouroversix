@@ -46,16 +46,17 @@ class MatmulBackend(str, Enum):
 
         return True
 
-    def fp4_matmul(
+    def fp4_matmul(  # noqa: C901
         self,
         a_e2m1: torch.Tensor,
         a_sf: torch.Tensor,
-        a_normconst: torch.Tensor,
+        a_amax: torch.Tensor,
         b_e2m1: torch.Tensor,
         b_sf: torch.Tensor,
-        b_normconst: torch.Tensor,
+        b_amax: torch.Tensor,
         *,
         fp4_format: FP4Format,
+        scale_rule: AdaptiveBlockScalingRule,
         out_dtype: torch.dtype,
         out_shape: tuple[int, int] | None = None,
     ) -> torch.Tensor:
@@ -76,7 +77,12 @@ class MatmulBackend(str, Enum):
             if fp4_format == FP4Format.mxfp4:
                 alpha = torch.ones(1, device=a_e2m1.device, dtype=torch.float32)
             elif fp4_format == FP4Format.nvfp4:
-                alpha = (a_normconst * b_normconst).to(torch.float32)
+                if scale_rule == AdaptiveBlockScalingRule.always_6:
+                    alpha = ((a_amax * b_amax) / (6 * 6 * 448 * 448)).to(torch.float32)
+                elif scale_rule == AdaptiveBlockScalingRule.always_4:
+                    alpha = ((a_amax * b_amax) / (4 * 4 * 448 * 448)).to(torch.float32)
+                else:
+                    alpha = ((a_amax * b_amax) / (6 * 6 * 256 * 256)).to(torch.float32)
 
             gemm_fns = {
                 (
@@ -118,7 +124,11 @@ class MatmulBackend(str, Enum):
                 raise ValueError(msg)
 
             out = gemm_fn(a_e2m1, b_e2m1, a_sf, b_sf, alpha)
-            return out[: out_shape[0], : out_shape[1]] if out_shape is not None else out
+
+            if out_shape is not None and out.shape != out_shape:
+                out = out[: out_shape[0], : out_shape[1]]
+
+            return out
 
         if self == MatmulBackend.pytorch:
             from .quantize.reference import dequantize_from_fp4
@@ -142,7 +152,9 @@ class MatmulBackend(str, Enum):
             elif b.shape[1] > a.shape[1]:
                 a = F.pad(a, (0, b.shape[1] - a.shape[1]))
 
-            out = ((a @ b.T).float() * a_normconst * b_normconst).to(out_dtype)
+            out = ((a @ b.T).float() * a_amax / (6 * 448) * b_amax / (6 * 448)).to(
+                out_dtype,
+            )
 
             return out[: out_shape[0], : out_shape[1]] if out_shape is not None else out
 
@@ -163,6 +175,7 @@ class QuantizeBackend(str, Enum):
 
     cuda = "cuda"
     pytorch = "pytorch"
+    transformer_engine = "transformer_engine"
     triton = "triton"
 
     @classmethod
@@ -184,24 +197,22 @@ class QuantizeBackend(str, Enum):
         """Check if the backend can be used given the CUDA device and installation."""
 
         if self == QuantizeBackend.cuda:
+            # TODO(jack, junxian): Re-enable CUDA backend once precision issues are
+            # resolved
+            return False
+
+        if self == QuantizeBackend.triton:  # noqa: SIM102
             if not torch.cuda.is_available() or torch.cuda.get_device_capability()[
                 0
             ] not in [SM_100, SM_110, SM_120]:
                 return False
 
-            try:
-                import fouroversix._C  # noqa: F401
-            except ModuleNotFoundError:
-                return False
-        elif self == QuantizeBackend.triton:
-            if not torch.cuda.is_available() or torch.cuda.get_device_capability()[
-                0
-            ] not in [SM_100, SM_110, SM_120]:
-                return False
+        if self == QuantizeBackend.transformer_engine:
+            return torch.cuda.is_available()
 
         return True
 
-    def is_supported(
+    def is_supported(  # noqa: C901, PLR0911
         self,
         x: torch.Tensor,
         *,
@@ -248,6 +259,21 @@ class QuantizeBackend(str, Enum):
 
             return True
 
+        if self == QuantizeBackend.transformer_engine:
+            if (
+                fp4_format != FP4Format.nvfp4
+                or scale_rule != AdaptiveBlockScalingRule.always_6
+            ):
+                return False
+
+            if not transpose and had is not None:
+                return False
+
+            if transpose and had is not None and block_scale_2d:  # noqa: SIM103
+                return False
+
+            return True
+
         msg = f"Invalid backend: {self}"
         raise ValueError(msg)
 
@@ -276,6 +302,32 @@ class QuantizeBackend(str, Enum):
                 transpose,
                 scale_rule.cuda_id(),
                 **kwargs,
+            )
+
+        if self == QuantizeBackend.transformer_engine:
+            from transformer_engine.pytorch.tensor.nvfp4_tensor import NVFP4Quantizer
+
+            from .quantize.reference import to_blocked
+
+            q = NVFP4Quantizer(
+                with_2d_quantization=block_scale_2d,
+                with_rht=had is not None,
+                with_post_rht_amax=had is not None,
+                stochastic_rounding=round_style == RoundStyle.stochastic,
+            )
+
+            out = q.quantize(x)
+
+            if transpose:
+                return (
+                    out._columnwise_data,  # noqa: SLF001
+                    to_blocked(out._columnwise_scale_inv.view(torch.float8_e4m3fn)),  # noqa: SLF001
+                    out._amax_columnwise,  # noqa: SLF001
+                )
+            return (
+                out._rowwise_data,  # noqa: SLF001
+                to_blocked(out._rowwise_scale_inv.view(torch.float8_e4m3fn)),  # noqa: SLF001
+                out._amax_rowwise,  # noqa: SLF001
             )
 
         if self == QuantizeBackend.triton:

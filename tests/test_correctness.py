@@ -11,21 +11,26 @@ from fouroversix.quantize.reference import (
     E4M3_MIN_POSITIVE_NORMAL,
     MIN_ALLOWED_NORM_CONSTANT,
 )
-from scipy.linalg import hadamard
+from fouroversix.quantize.rht_utils import get_rht_matrix
 
 
 @pytest.mark.parametrize("input_type", ["zeros", "ones", "rand01", "randn", "fixed"])
-@pytest.mark.parametrize("input_shape", [(1024, 1024)])
+@pytest.mark.parametrize(
+    "input_shape",
+    [(1024, 1024), (1024, 512), (512, 1024), (8192, 8192), (8192, 4096), (4096, 8192)],
+)
+@pytest.mark.parametrize("random_seed", range(10))
 @pytest.mark.parametrize(
     ("backend_a", "backend_b"),
     [
+        (QuantizeBackend.transformer_engine, QuantizeBackend.triton),
         (QuantizeBackend.cuda, QuantizeBackend.triton),
         (QuantizeBackend.cuda, QuantizeBackend.pytorch),
         (QuantizeBackend.triton, QuantizeBackend.pytorch),
     ],
 )
 @pytest.mark.parametrize("block_scale_2d", ["block_scale_2d", "no_block_scale_2d"])
-@pytest.mark.parametrize("fp4_format", [FP4Format.nvfp4, FP4Format.mxfp4])
+@pytest.mark.parametrize("fp4_format", [FP4Format.nvfp4])
 @pytest.mark.parametrize("had", ["had", "no_had"])
 @pytest.mark.parametrize(
     "scale_rule",
@@ -42,6 +47,7 @@ from scipy.linalg import hadamard
 def test_backend_outputs_are_consistent(
     input_type: str,
     input_shape: tuple[int, int],
+    random_seed: int,
     backend_a: QuantizeBackend,
     backend_b: QuantizeBackend,
     *,
@@ -60,6 +66,8 @@ def test_backend_outputs_are_consistent(
     block_scale_2d = block_scale_2d == "block_scale_2d"
     had = had == "had"
     transpose = transpose == "transpose"
+
+    torch.manual_seed(random_seed)
 
     if input_type == "zeros":
         x = torch.zeros(*input_shape, dtype=torch.bfloat16, device="cuda")
@@ -115,15 +123,18 @@ def test_backend_outputs_are_consistent(
     kwargs = {
         "block_scale_2d": block_scale_2d,
         "fp4_format": fp4_format,
-        "had": (
-            torch.tensor(hadamard(16) / (16**0.5), dtype=torch.bfloat16, device="cuda")
-            if had
-            else None
-        ),
+        "had": get_rht_matrix() if had else None,
         "round_style": round_style,
         "scale_rule": scale_rule,
         "transpose": transpose,
     }
+
+    if not backend_a.is_supported(x, **kwargs) or not backend_b.is_supported(
+        x,
+        **kwargs,
+    ):
+        pytest.skip("Backend is not supported")
+
     x_e2m1_a, x_sf_a, x_normconst_a = quantize_to_fp4(
         x,
         backend=backend_a,

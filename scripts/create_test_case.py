@@ -10,12 +10,12 @@ with img.imports():
 
 @app.function(image=img, gpu="B200")
 def create_test_case(
-    backend_a: str = "cuda",
+    backend_a: str = "transformer_engine",
     backend_b: str = "triton",
-    scale_rule: str = "mse",
+    scale_rule: str = "always_6",
 ) -> None:
-    torch.random.manual_seed(2)
-    torch.cuda.manual_seed(2)
+    torch.random.manual_seed(4)
+    torch.cuda.manual_seed(4)
     torch.set_printoptions(precision=10)
 
     backend_a = QuantizeBackend(backend_a)
@@ -45,7 +45,12 @@ def create_test_case(
         return
 
     if not torch.allclose(x_sf_a.bfloat16(), x_sf_b.bfloat16()):
-        print("Backends A and B have different scale factors!")
+        mismatch_prop = (x_sf_a != x_sf_b).sum() / x_sf_a.numel()
+        print(
+            "Backends A and B have different scale factors! "
+            f"{mismatch_prop:.2%} mismatch",
+        )
+
         [i, *_], [j, *_] = torch.where(x_sf_a != x_sf_b)
         print(backend_a)
         print("sf", x_sf_a[i, j])
@@ -58,7 +63,12 @@ def create_test_case(
         return
 
     if not torch.allclose(x_e2m1_a, x_e2m1_b):
-        print("Backends A and B have different e2m1 values!")
+        mismatch_prop = (x_e2m1_a != x_e2m1_b).sum() / x_e2m1_a.numel()
+        print(
+            "Backends A and B have different e2m1 values! "
+            f"{mismatch_prop:.2%} mismatch",
+        )
+
         [i, *_], [j, *_] = torch.where(x_e2m1_a != x_e2m1_b)
         print(i, j)
         print("normconst", x_normconst_a)

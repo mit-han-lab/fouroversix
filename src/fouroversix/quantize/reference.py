@@ -197,12 +197,12 @@ def quantize_bf16_to_scaled_fp4(  # noqa: C901, PLR0912
     elif scale_rule == AdaptiveBlockScalingRule.mse:
         x_error_4 = (
             ((x_dequantized_4 - x_scale_blocks) ** 2)
-            .reshape(-1, block_size)
+            .reshape(-1, block_size * block_size if block_scale_2d else block_size)
             .sum(dim=-1)
         )
         x_error_6 = (
             ((x_dequantized_6 - x_scale_blocks) ** 2)
-            .reshape(-1, block_size)
+            .reshape(-1, block_size * block_size if block_scale_2d else block_size)
             .sum(dim=-1)
         )
 
@@ -212,24 +212,18 @@ def quantize_bf16_to_scaled_fp4(  # noqa: C901, PLR0912
     elif scale_rule == AdaptiveBlockScalingRule.always_6:
         x_quantized = x_quantized_6
         scales = x_scales_6
-
-        if block_scale_2d:
-            x_quantized = (
-                x_quantized.reshape(
-                    -1,
-                    x.shape[1] // block_size,
-                    block_size,
-                    block_size,
-                )
-                .permute(0, 2, 1, 3)
-                .reshape_as(x_quantized)
-            )
     else:
         select_4 = (x_error_4 < x_error_6)[:, None]
         x_quantized = torch.where(
             select_4,
-            x_quantized_4.reshape(-1, 16),
-            x_quantized_6.reshape(-1, 16),
+            x_quantized_4.reshape(
+                -1,
+                block_size * block_size if block_scale_2d else block_size,
+            ),
+            x_quantized_6.reshape(
+                -1,
+                block_size * block_size if block_scale_2d else block_size,
+            ),
         )
         scales = torch.where(
             select_4,
@@ -238,6 +232,17 @@ def quantize_bf16_to_scaled_fp4(  # noqa: C901, PLR0912
         )
 
     if block_scale_2d:
+        x_quantized = (
+            x_quantized.reshape(
+                -1,
+                x.shape[1] // block_size,
+                block_size,
+                block_size,
+            )
+            .permute(0, 2, 1, 3)
+            .reshape_as(x_quantized)
+        )
+
         scales = (
             scales.reshape(1, x.shape[0] // block_size, x.shape[1] // block_size)
             .broadcast_to(
@@ -391,8 +396,9 @@ def unpack_packed_fp4(
 def dequantize_from_fp4(
     x: torch.Tensor,
     scales: torch.Tensor,
-    norm_constant: torch.Tensor | None = None,
+    x_amax: torch.Tensor | None = None,
     *,
+    scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
     dtype: torch.dtype = torch.bfloat16,
     fp4_format: FP4Format = FP4Format.nvfp4,
     values_simulation_mode: ValueSimulationMode = None,
@@ -424,8 +430,13 @@ def dequantize_from_fp4(
         )
         result = result * x_sign
     elif fp4_format == FP4Format.nvfp4:
-        if norm_constant is not None:
-            result = (result.to(torch.float32) * norm_constant).to(dtype)
+        if x_amax is not None:
+            if scale_rule == AdaptiveBlockScalingRule.always_6:
+                result = (result.to(torch.float32) * x_amax / (6 * 448)).to(dtype)
+            elif scale_rule == AdaptiveBlockScalingRule.always_4:
+                result = (result.to(torch.float32) * x_amax / (4 * 448)).to(dtype)
+            else:
+                result = (result.to(torch.float32) * x_amax / (6 * 256)).to(dtype)
 
     return result
 

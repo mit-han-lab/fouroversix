@@ -15,13 +15,14 @@ def fp4_matmul(
     backend: MatmulBackend | None = None,
     a_e2m1: torch.Tensor | None = None,
     a_sf: torch.Tensor | None = None,
-    a_normconst: torch.Tensor | None = None,
+    a_amax: torch.Tensor | None = None,
     b_e2m1: torch.Tensor | None = None,
     b_sf: torch.Tensor | None = None,
-    b_normconst: torch.Tensor | None = None,
+    b_amax: torch.Tensor | None = None,
     a_quantize_kwargs: dict[str, Any] | None = None,
     b_quantize_kwargs: dict[str, Any] | None = None,
     fp4_format: FP4Format = FP4Format.nvfp4,
+    scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
     out_dtype: torch.dtype = torch.bfloat16,
     out_shape: tuple[int, int] | None = None,
 ) -> torch.Tensor:
@@ -88,13 +89,11 @@ def fp4_matmul(
         a_e2m1 (torch.Tensor): The values of the first input tensor in packed E2M1
             format (2 values per byte).
         a_sf (torch.Tensor): The scale factors of the first input tensor.
-        a_normconst (torch.Tensor): The per-tensor normalization constant of the
-            first input tensor.
+        a_amax (torch.Tensor): The absolute maximum value of the first input tensor.
         b_e2m1 (torch.Tensor): The values of the second input tensor in packed E2M1
             format (2 values per byte).
         b_sf (torch.Tensor): The scale factors of the second input tensor.
-        b_normconst (torch.Tensor): The per-tensor normalization constant of the
-            second input tensor.
+        b_amax (torch.Tensor): The absolute maximum value of the second input tensor.
         a_quantize_kwargs (dict): If `a` is provided in high precision, these parameters
             will be passed to the `quantize_to_fp4` call done prior to the matrix
             multiplication.
@@ -103,6 +102,8 @@ def fp4_matmul(
             multiplication.
         fp4_format (FP4Format): The FP4 format of the input tensors, either
             `FP4Format.nvfp4` or `FP4Format.mxfp4`.
+        scale_rule (AdaptiveBlockScalingRule): The scaling rule that was used during
+            quantization of the input tensors.
         out_dtype (DataType): The data type of the output tensor, either
             `DataType.bfloat16` or `DataType.float16`.
         out_shape (tuple[int, int] | None): The shape of the output tensor. This is
@@ -129,13 +130,14 @@ def fp4_matmul(
         b_quantize_kwargs = {}
 
     if a_e2m1 is None or a_sf is None:
-        a_e2m1, a_sf, a_normconst = quantize_to_fp4(a, **a_quantize_kwargs)
+        a_e2m1, a_sf, a_amax = quantize_to_fp4(a, **a_quantize_kwargs)
 
     if b_e2m1 is None or b_sf is None:
-        b_e2m1, b_sf, b_normconst = quantize_to_fp4(b, **b_quantize_kwargs)
+        b_e2m1, b_sf, b_amax = quantize_to_fp4(b, **b_quantize_kwargs)
 
     kwargs = {
         "fp4_format": fp4_format,
+        "scale_rule": scale_rule,
         "out_dtype": out_dtype,
         "out_shape": out_shape,
     }
@@ -149,10 +151,10 @@ def fp4_matmul(
     return backend.fp4_matmul(
         a_e2m1,
         a_sf,
-        a_normconst,
+        a_amax,
         b_e2m1,
         b_sf,
-        b_normconst,
+        b_amax,
         **kwargs,
     )
 
@@ -200,10 +202,10 @@ def quantize_to_fp4(
     ### With the Random Hadamard Transform
 
     ```
-    from scipy.linalg import hadamard
+    from fouroversix.quantize import get_rht_matrix
 
     a = torch.tensor(1024, 1024, dtype=torch.bfloat16, device="cuda")
-    had = torch.tensor(hadamard(16), dtype=torch.bfloat16, device="cuda")
+    had = get_rht_matrix()
     a_e2m1, a_sf, a_normconst = quantize_to_fp4(a, had=had)
     ```
 

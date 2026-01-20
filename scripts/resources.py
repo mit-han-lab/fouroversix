@@ -34,6 +34,7 @@ class Dependency(str, Enum):
     fp_quant = "fp_quant"
     qutlass = "qutlass"
     spinquant = "spinquant"
+    transformer_engine = "transformer_engine"
 
 
 class Submodule(str, Enum):
@@ -82,14 +83,17 @@ class Submodule(str, Enum):
     def get_remote_url(self) -> str:
         """Get the remote URL of the submodule."""
 
-        config = configparser.ConfigParser()
+        gitmodules_path = Path(__file__).parent.parent / ".gitmodules"
 
-        if Path(".gitmodules").exists():
-            # Runs locally
-            config.read(".gitmodules")
-        else:
-            # Runs on Modal container
-            config.read(f"{FOUROVERSIX_INSTALL_PATH}/.gitmodules")
+        if not gitmodules_path.exists():
+            gitmodules_path = FOUROVERSIX_INSTALL_PATH / ".gitmodules"
+
+        with gitmodules_path.open() as f:
+            # Remove leading whitespace to make it a valid INI file
+            gitmodules_contents = "\n".join(line.lstrip() for line in f.readlines())
+
+        config = configparser.ConfigParser()
+        config.read_string(gitmodules_contents)
 
         for section in config.sections():
             if config[section]["path"] == self.get_local_path():
@@ -328,6 +332,12 @@ def get_image(  # noqa: C901, PLR0912
 
         if dependency == Dependency.spinquant:
             img = add_submodule(img, Submodule.spinquant)
+
+        if dependency == Dependency.transformer_engine:
+            img = img.uv_pip_install(
+                "transformer_engine[pytorch]",
+                extra_options="--no-build-isolation",
+            )
 
     if extra_pip_dependencies is not None:
         img = img.uv_pip_install(*extra_pip_dependencies)
