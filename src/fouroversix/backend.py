@@ -290,6 +290,9 @@ class QuantizeBackend(str, Enum):
 
         original_shape = x.shape
 
+        if transpose:
+            original_shape = (original_shape[1], original_shape[0])
+
         if self == QuantizeBackend.cuda:
             msg = "The CUDA backend is currently disabled and will be updated soon"
             raise NotImplementedError(msg)
@@ -346,13 +349,17 @@ class QuantizeBackend(str, Enum):
                     x,
                     (
                         0,
-                        cols_div - (x.shape[1] % cols_div)
-                        if x.shape[1] % cols_div > 0
-                        else 0,
+                        (
+                            cols_div - (x.shape[1] % cols_div)
+                            if x.shape[1] % cols_div > 0
+                            else 0
+                        ),
                         0,
-                        rows_div - (x.shape[0] % rows_div)
-                        if x.shape[0] % rows_div > 0
-                        else 0,
+                        (
+                            rows_div - (x.shape[0] % rows_div)
+                            if x.shape[0] % rows_div > 0
+                            else 0
+                        ),
                     ),
                 )
 

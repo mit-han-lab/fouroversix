@@ -62,7 +62,7 @@ def rht_kernel(
         x_block.reshape(
             BLOCK_SIZE_M * BLOCK_SIZE_N // HAD_BLOCK_SIZE,
             HAD_BLOCK_SIZE,
-        ),
+        ).to(tl.bfloat16),
         h_block,
     ).reshape(BLOCK_SIZE_M, BLOCK_SIZE_N)
 
@@ -83,7 +83,9 @@ def fp32_to_scaled_fp4_kernel_fouroversix(  # noqa: C901, PLR0912
     x_scale_blocks = x_block.reshape(128, 4, 16)
 
     # Calculate six blocks
-    if SCALE_RULE == SCALE_RULE_ALWAYS_6 or SCALE_RULE == SCALE_RULE_ALWAYS_4:  # noqa: SIM109, PLR1714
+    if (
+        SCALE_RULE == SCALE_RULE_ALWAYS_6 or SCALE_RULE == SCALE_RULE_ALWAYS_4
+    ):  # noqa: SIM109, PLR1714
         x_scales_hp = tl.max(x_scale_blocks.abs(), axis=-1) * E4M3_MAX_VALUE / x_amax
     else:
         x_scales_hp = (
@@ -109,7 +111,9 @@ def fp32_to_scaled_fp4_kernel_fouroversix(  # noqa: C901, PLR0912
         x_scales_6 = (x_scales_hp * (4 / 6)).to(tl.float8e4nv)
         x_scales_4 = x_scales_hp.to(tl.float8e4nv)
 
-    if SCALE_RULE == SCALE_RULE_ALWAYS_6 or SCALE_RULE == SCALE_RULE_ALWAYS_4:  # noqa: SIM109, PLR1714
+    if (
+        SCALE_RULE == SCALE_RULE_ALWAYS_6 or SCALE_RULE == SCALE_RULE_ALWAYS_4
+    ):  # noqa: SIM109, PLR1714
         (x_block_scaled_6_b1, x_block_scaled_6_b2) = (
             tl.where(
                 x_scales_6.expand_dims(2).to(x_amax.dtype) != 0,
@@ -510,7 +514,7 @@ def quantize_to_fp4(  # noqa: C901
             msg = "H must have dimensions that are a power of two"
             raise ValueError(msg)
 
-        x_rht = torch.empty((M, N), device=x.device, dtype=x.dtype)
+        x_rht = torch.empty((M, N), device=x.device, dtype=torch.bfloat16)
 
         h_desc = TensorDescriptor.from_tensor(
             had,

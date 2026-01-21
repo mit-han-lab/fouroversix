@@ -29,18 +29,19 @@ class Dependency(str, Enum):
 
     awq = "awq"
     fast_hadamard_transform = "fast_hadamard_transform"
+    flame = "flame"
     flash_attention = "flash_attention"
     fouroversix = "fouroversix"
     fp_quant = "fp_quant"
     qutlass = "qutlass"
     spinquant = "spinquant"
-    transformer_engine = "transformer_engine"
 
 
 class Submodule(str, Enum):
     """Submodules of Four Over Six to add to the base image."""
 
     cutlass = "cutlass"
+    flame = "flame"
     fast_hadamard_transform = "fast_hadamard_transform"
     fp_quant = "fp_quant"
     llm_awq = "llm_awq"
@@ -79,6 +80,7 @@ class Submodule(str, Enum):
     def get_local_path(self) -> str:
         """Get the path of the submodule relative to the root directory."""
         return f"third_party/{self.value.replace('_', '-')}"
+        #return (Path(__file__).parent / "third_party" / self.value.replace("_", "-")).as_posix()
 
     def get_remote_url(self) -> str:
         """Get the remote URL of the submodule."""
@@ -254,6 +256,23 @@ def get_image(  # noqa: C901, PLR0912
                 f"pip install {Submodule.fast_hadamard_transform.get_install_path()}",
             )
 
+        if dependency == Dependency.flame:
+            img = (
+                img.apt_install("pciutils")
+                .uv_pip_install(
+                    "flash-linear-attention",
+                    "ninja",
+                    "psutil",
+                    "git+https://github.com/pytorch/torchtitan.git@0b44d4c",
+                    "tyro",
+                    "wheel",
+                )
+                .run_commands(
+                    f"git clone https://github.com/fla-org/flame.git {FOUROVERSIX_INSTALL_PATH}/third_party/flame",
+                    f"pip install -e {FOUROVERSIX_INSTALL_PATH}/third_party/flame",
+                )
+            )
+
         if dependency == Dependency.flash_attention:
             img = img.run_function(
                 install_flash_attn,
@@ -333,12 +352,6 @@ def get_image(  # noqa: C901, PLR0912
         if dependency == Dependency.spinquant:
             img = add_submodule(img, Submodule.spinquant)
 
-        if dependency == Dependency.transformer_engine:
-            img = img.uv_pip_install(
-                "transformer_engine[pytorch]",
-                extra_options="--no-build-isolation",
-            )
-
     if extra_pip_dependencies is not None:
         img = img.uv_pip_install(*extra_pip_dependencies)
 
@@ -350,6 +363,22 @@ def get_image(  # noqa: C901, PLR0912
     # Add source files after all dependencies are added so we can avoid rebuilding when
     # they change
     for dependency in dependencies:
+        if dependency == Dependency.flame:
+            img = (
+                img.add_local_dir(
+                    "third_party/flame/custom_models",
+                    f"{FOUROVERSIX_INSTALL_PATH}/third_party/flame/custom_models",
+                )
+                .add_local_dir(
+                    "scripts/train/configs",
+                    f"{FOUROVERSIX_INSTALL_PATH}/scripts/train/configs",
+                )
+                .add_local_file(
+                    "third_party/flame/train.sh",
+                    f"{FOUROVERSIX_INSTALL_PATH}/third_party/flame/train.sh",
+                )
+            )
+
         if dependency == Dependency.fouroversix:
             img = img.add_local_dir(
                 "src",

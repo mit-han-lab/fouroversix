@@ -33,7 +33,9 @@ class FP4LinearFunction(torch.autograd.Function):
         provided in low precision.
         """
 
-        assert input.ndim == 2 or input.ndim == 3, "Input must be 2D or 3D"  # noqa: S101, PLR1714, PLR2004
+        assert (
+            input.ndim == 2 or input.ndim == 3
+        ), "Input must be 2D or 3D"  # noqa: S101, PLR1714, PLR2004
 
         if isinstance(weight, torch.Tensor):
             ctx.save_for_backward(input, weight, bias)
@@ -126,7 +128,6 @@ class FP4LinearFunction(torch.autograd.Function):
                 "block_scale_2d": ctx.w_scale_2d,
             },
             out_dtype=torch.bfloat16,
-            out_shape=(grad_output.shape[1], weight.shape[1]),
         ).unsqueeze(0)
 
         grad_weight = fp4_matmul(
@@ -148,7 +149,6 @@ class FP4LinearFunction(torch.autograd.Function):
                 "had": had,
             },
             out_dtype=torch.bfloat16,
-            out_shape=(grad_output.shape[2], input.shape[2]),
         ).unsqueeze(0)
 
         grad_bias = (
