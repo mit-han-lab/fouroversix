@@ -39,7 +39,7 @@ class FP4LinearWithSmoothing(FP4Linear):
         weight when doing PTQ with SmoothQuant.
         """
 
-    def forward(self, input: torch.Tensor) -> torch.Tensor:  # noqa: A002
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
         """Forward pass for the FP4 linear layer with SmoothQuant-style scaling."""
 
         out = torch.empty(

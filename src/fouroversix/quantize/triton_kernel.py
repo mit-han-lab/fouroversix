@@ -112,7 +112,7 @@ def fp32_to_scaled_fp4_kernel_fouroversix(  # noqa: C901, PLR0912
     if SCALE_RULE == SCALE_RULE_ALWAYS_6 or SCALE_RULE == SCALE_RULE_ALWAYS_4:  # noqa: SIM109, PLR1714
         (x_block_scaled_6_b1, x_block_scaled_6_b2) = (
             tl.where(
-                x_scales_hp.expand_dims(2) > 0,
+                x_scales_6.expand_dims(2).to(x_amax.dtype) != 0,
                 (x_scale_blocks * E2M1_MAX_VALUE * E4M3_MAX_VALUE)
                 / (x_amax * x_scales_6.to(x_amax.dtype).expand_dims(2)),
                 0,
@@ -123,7 +123,7 @@ def fp32_to_scaled_fp4_kernel_fouroversix(  # noqa: C901, PLR0912
 
         (x_block_scaled_4_b1, x_block_scaled_4_b2) = (
             tl.where(
-                x_scales_hp.expand_dims(2) > 0,
+                x_scales_4.expand_dims(2).to(x_amax.dtype) != 0,
                 (x_scale_blocks * E2M1_MAX_FOUR * E4M3_MAX_VALUE)
                 / (x_amax * x_scales_4.to(x_amax.dtype).expand_dims(2)),
                 0,
@@ -134,7 +134,7 @@ def fp32_to_scaled_fp4_kernel_fouroversix(  # noqa: C901, PLR0912
     else:
         (x_block_scaled_6_b1, x_block_scaled_6_b2) = (
             tl.where(
-                x_scales_hp.expand_dims(2) > 0,
+                x_scales_6.expand_dims(2).to(x_amax.dtype) != 0,
                 (x_scale_blocks * E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX)
                 / (x_amax * x_scales_6.to(x_amax.dtype).expand_dims(2)),
                 0,
@@ -145,7 +145,7 @@ def fp32_to_scaled_fp4_kernel_fouroversix(  # noqa: C901, PLR0912
 
         (x_block_scaled_4_b1, x_block_scaled_4_b2) = (
             tl.where(
-                x_scales_hp.expand_dims(2) > 0,
+                x_scales_4.expand_dims(2).to(x_amax.dtype) != 0,
                 (x_scale_blocks * E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX)
                 / (x_amax * x_scales_4.to(x_amax.dtype).expand_dims(2)),
                 0,

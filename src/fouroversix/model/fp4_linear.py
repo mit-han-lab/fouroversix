@@ -1,10 +1,9 @@
 from typing import Any
 
 import torch
-from fouroversix.backend import MatmulBackend, QuantizeBackend
-from fouroversix.fp4_tensor import FP4Tensor
+from fouroversix.backend import QuantizeBackend
 from fouroversix.frontend import fp4_matmul, quantize_to_fp4
-from fouroversix.quantize import get_rht_matrix
+from fouroversix.quantize import FP4Tensor, get_rht_matrix
 from fouroversix.utils import AdaptiveBlockScalingRule, FP4Format, RoundStyle
 from torch import nn
 
@@ -26,7 +25,7 @@ class FP4LinearFunction(torch.autograd.Function):
         g_scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
         w_scale_2d: bool = False,  # noqa: FBT001, FBT002
         out_dtype: torch.dtype = torch.bfloat16,
-        quantize_backend: QuantizeBackend = QuantizeBackend.triton,
+        quantize_backend: QuantizeBackend | None = None,
     ) -> tuple[torch.Tensor,]:
         """
         Perform an FP4 matrix multiplication. The input is provided in high precision
@@ -63,7 +62,6 @@ class FP4LinearFunction(torch.autograd.Function):
             out = fp4_matmul(
                 input[0],
                 weight,
-                backend=MatmulBackend.cutlass,
                 input_quantize_kwargs={
                     "backend": quantize_backend,
                     "fp4_format": fp4_format,
@@ -84,7 +82,6 @@ class FP4LinearFunction(torch.autograd.Function):
                 out[i] = fp4_matmul(
                     input[i],
                     weight,
-                    backend=MatmulBackend.cutlass,
                     input_quantize_kwargs={
                         "backend": quantize_backend,
                         "fp4_format": fp4_format,
@@ -115,7 +112,6 @@ class FP4LinearFunction(torch.autograd.Function):
         grad_input = fp4_matmul(
             grad_output[0],
             weight,
-            backend=MatmulBackend.cutlass,
             input_quantize_kwargs={
                 "backend": ctx.quantize_backend,
                 "scale_rule": ctx.g_scale_rule,
@@ -136,7 +132,6 @@ class FP4LinearFunction(torch.autograd.Function):
         grad_weight = fp4_matmul(
             grad_output[0],
             input[0],
-            backend=MatmulBackend.cutlass,
             input_quantize_kwargs={
                 "backend": ctx.quantize_backend,
                 "transpose": True,
@@ -189,7 +184,7 @@ class FP4Linear(nn.Linear):
         a_scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
         w_scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
         w_scale_2d: bool = False,
-        quantize_backend: QuantizeBackend = QuantizeBackend.triton,
+        quantize_backend: QuantizeBackend | None = None,
         **kwargs: dict[str, Any],  # noqa: ARG002
     ) -> None:
         super().__init__(in_features, out_features, bias, device, dtype)
@@ -266,7 +261,7 @@ class TrainableFP4Linear(FP4Linear):
         a_scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
         w_scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
         g_scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
-        quantize_backend: QuantizeBackend = QuantizeBackend.triton,
+        quantize_backend: QuantizeBackend | None = None,
     ) -> None:
         super().__init__(
             in_features,

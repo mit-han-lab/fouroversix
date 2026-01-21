@@ -6,7 +6,7 @@ from typing import Any
 import torch
 import torch.nn.functional as F  # noqa: N812
 
-from .fp4_tensor import FP4Tensor
+from .quantize import FP4Tensor
 from .utils import AdaptiveBlockScalingRule, FP4Format, RoundStyle
 
 SM_100 = 10
@@ -47,7 +47,7 @@ class MatmulBackend(str, Enum):
 
         return True
 
-    def fp4_matmul(  # noqa: C901
+    def fp4_matmul(
         self,
         input: FP4Tensor,
         other: FP4Tensor,
@@ -144,18 +144,10 @@ class MatmulBackend(str, Enum):
             )
 
         elif self == MatmulBackend.pytorch:
-            from .quantize.reference import dequantize_from_fp4
-
-            a = dequantize_from_fp4(input, dtype=torch.float32)
-            b = dequantize_from_fp4(other, dtype=torch.float32)
-
-            # Fix mismatched shapes introduced by padding during quantization
-            if a.shape[1] > b.shape[1]:
-                b = F.pad(b, (0, a.shape[1] - b.shape[1]))
-            elif b.shape[1] > a.shape[1]:
-                a = F.pad(a, (0, b.shape[1] - a.shape[1]))
-
-            out = ((a @ b.T).float() * alpha).to(out_dtype)
+            out = torch.matmul(
+                input.dequantize(dtype=torch.float32),
+                other.dequantize(dtype=torch.float32).T,
+            ).to(out_dtype)
 
         else:
             msg = f"Invalid backend: {self}"
@@ -296,6 +288,8 @@ class QuantizeBackend(str, Enum):
     ) -> FP4Tensor:
         """Quantize a tensor to FP4. See frontend.py for more details."""
 
+        original_shape = x.shape
+
         if self == QuantizeBackend.cuda:
             msg = "The CUDA backend is currently disabled and will be updated soon"
             raise NotImplementedError(msg)
@@ -352,9 +346,13 @@ class QuantizeBackend(str, Enum):
                     x,
                     (
                         0,
-                        cols_div - (x.shape[1] % cols_div),
+                        cols_div - (x.shape[1] % cols_div)
+                        if x.shape[1] % cols_div > 0
+                        else 0,
                         0,
-                        rows_div - (x.shape[0] % rows_div),
+                        rows_div - (x.shape[0] % rows_div)
+                        if x.shape[0] % rows_div > 0
+                        else 0,
                     ),
                 )
 
@@ -378,7 +376,7 @@ class QuantizeBackend(str, Enum):
             scale_factors,
             amax,
             fp4_format,
-            x.shape,
+            original_shape,
             scale_rule,
         )
 
