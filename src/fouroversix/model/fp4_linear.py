@@ -35,7 +35,7 @@ class FP4LinearFunction(torch.autograd.Function):
 
         assert (
             input.ndim == 2 or input.ndim == 3
-        ), "Input must be 2D or 3D"  # noqa: S101, PLR1714, PLR2004
+        ), "Input must be 2D or 3D"
 
         if isinstance(weight, torch.Tensor):
             ctx.save_for_backward(input, weight, bias)

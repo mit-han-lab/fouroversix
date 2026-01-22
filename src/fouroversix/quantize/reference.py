@@ -366,13 +366,9 @@ def quantize_to_fp4(
     )
 
 
-def ceil_div(a: int, b: int) -> int:
-    return (a + b - 1) // b
-
-
 def to_blocked(a: torch.Tensor) -> torch.Tensor:
     return (
-        a.view(ceil_div(a.shape[0], 128), 128, ceil_div(a.shape[1], 4), 4)
+        a.view(a.shape[0] // 128, 128, a.shape[1] // 4, 4)
         .transpose(1, 2)
         .reshape(-1, 4, 32, 4)
         .transpose(1, 2)

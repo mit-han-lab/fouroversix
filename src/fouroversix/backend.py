@@ -4,7 +4,7 @@ from enum import Enum
 from typing import Any
 
 import torch
-import torch.nn.functional as F  # noqa: N812
+import torch.nn.functional as F
 
 from .quantize import FP4Tensor
 from .utils import AdaptiveBlockScalingRule, FP4Format, RoundStyle
@@ -342,7 +342,7 @@ class QuantizeBackend(str, Enum):
             from .quantize.reference import quantize_to_fp4
 
             rows_div = 128
-            cols_div = 64
+            cols_div = 64 if fp4_format == FP4Format.nvfp4 else 128
 
             if x.shape[0] % rows_div != 0 or x.shape[1] % cols_div != 0:
                 x = F.pad(

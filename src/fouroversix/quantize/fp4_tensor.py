@@ -1,9 +1,8 @@
 import torch
+import torch.nn.functional as F
 from fouroversix.utils import AdaptiveBlockScalingRule, FP4Format
 
-
-def ceil_div(a: int, b: int) -> int:
-    return (a + b - 1) // b
+from .reference import to_blocked
 
 
 def from_blocked(a: torch.Tensor, orig_shape: tuple[int, int]) -> torch.Tensor:
@@ -11,7 +10,7 @@ def from_blocked(a: torch.Tensor, orig_shape: tuple[int, int]) -> torch.Tensor:
     return (
         a.view(-1, 32, 4, 4)
         .transpose(1, 2)
-        .reshape(-1, ceil_div(cols, 4), 128, 4)
+        .reshape(-1, cols // 4, 128, 4)
         .transpose(1, 2)
         .reshape(rows, cols)
     )
@@ -100,6 +99,8 @@ class FP4Tensor:
     original_shape: tuple[int, int]
     scale_rule: AdaptiveBlockScalingRule
 
+    padded_shape: tuple[int, int]
+
     def __init__(
         self,
         e2m1_values: torch.Tensor,
@@ -116,6 +117,69 @@ class FP4Tensor:
         self.original_shape = original_shape
         self.scale_rule = scale_rule
 
+        rows_div = 128
+        # The scale factor layout requires 4 layouts along the K dimension for both
+        # MXFP4 and NVFP4. See:
+        # https://docs.nvidia.com/cutlass/latest/media/docs/cpp/blackwell_functionality.html#scale-factor-layouts
+        cols_div = 4 * fp4_format.block_size()
+
+        self.padded_shape = (
+            original_shape[0] + (rows_div - original_shape[0] % rows_div) % rows_div,
+            original_shape[1] + (cols_div - original_shape[1] % cols_div) % cols_div,
+        )
+
+        expected_packed_elements = self.padded_shape[0] * self.padded_shape[1] // 2
+        expected_scale_factors = expected_packed_elements * 2 // fp4_format.block_size()
+
+        if self.e2m1_values.numel() != expected_packed_elements:
+            self.e2m1_values = F.pad(
+                self.e2m1_values,
+                (
+                    0,
+                    # Divide by 2 because these are packed values
+                    self.padded_shape[1] // 2 - self.e2m1_values.shape[1],
+                    0,
+                    self.padded_shape[0] - self.e2m1_values.shape[0],
+                ),
+            )
+
+        # If the scale factors are 1D, we assume that they are already in the
+        # correct layout for Blackwell. See:
+        # https://docs.nvidia.com/cutlass/latest/media/docs/cpp/blackwell_functionality.html#scale-factor-layouts
+        if (
+            self.scale_factors.ndim > 1
+            and self.scale_factors.numel() != expected_scale_factors
+        ):
+            self.scale_factors = F.pad(
+                self.scale_factors,
+                (
+                    0,
+                    (
+                        self.padded_shape[1] // fp4_format.block_size()
+                        - self.scale_factors.shape[1]
+                    ),
+                    0,
+                    self.padded_shape[0] - self.scale_factors.shape[0],
+                ),
+                value=0 if fp4_format == FP4Format.nvfp4 else 1,
+            )
+
+            self.scale_factors = to_blocked(self.scale_factors)
+
+        if self.e2m1_values.numel() != expected_packed_elements:
+            msg = (
+                f"Expected {expected_packed_elements} e2m1 values, got "
+                f"{self.e2m1_values.numel()}"
+            )
+            raise ValueError(msg)
+
+        if self.scale_factors.numel() != expected_scale_factors:
+            msg = (
+                f"Expected {expected_scale_factors} scale factors, got "
+                f"{self.scale_factors.numel()}"
+            )
+            raise ValueError(msg)
+
     def dequantize(self, dtype: torch.dtype = torch.bfloat16) -> torch.Tensor:
         """Return a high-precision tensor with the dequantized values."""
 
@@ -127,8 +191,8 @@ class FP4Tensor:
         scales = from_blocked(
             self.scale_factors,
             (
-                self.e2m1_values.shape[0],
-                self.e2m1_values.shape[1] // self.fp4_format.block_size() * 2,
+                self.padded_shape[0],
+                self.padded_shape[1] // self.fp4_format.block_size(),
             ),
         )
 
