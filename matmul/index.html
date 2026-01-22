@@ -533,8 +533,8 @@ in row-major layout.</p>
 <h3 id="fouroversix.fp4_matmul--sample-code">Sample Code</h3>
 <p>Each tensor may be provided in either high or low precision. If provided in high
 precision, tensors will be quantized to FP4 prior to the matrix multiplication, and
-quantization may be configured with the <code>a_quantization_kwargs</code> and
-<code>b_quantization_kwargs</code> parameters. For example, the following two code samples are
+quantization may be configured with the <code>input_quantize_kwargs</code> and
+<code>other_quantize_kwargs</code> parameters. For example, the following two code samples are
 equivalent:</p>
 <h4 id="fouroversix.fp4_matmul--with-high-precision-inputs">With High-Precision Inputs</h4>
 <pre><code>a = torch.tensor(1024, 1024, dtype=torch.bfloat16, device=&quot;cuda&quot;)
@@ -545,17 +545,10 @@ out = fp4_matmul(a, b)
 <pre><code>a = torch.tensor(1024, 1024, dtype=torch.bfloat16, device=&quot;cuda&quot;)
 b = torch.tensor(1024, 1024, dtype=torch.bfloat16, device=&quot;cuda&quot;)
 
-a_e2m1, a_sf, a_normconst = quantize_to_fp4(a)
-b_e2m1, b_sf, b_normconst = quantize_to_fp4(b)
+a_quantized = quantize_to_fp4(a)
+b_quantized = quantize_to_fp4(b)
 
-out = fp4_matmul(
-    a_e2m1=a_e2m1,
-    a_sf=a_sf,
-    a_normconst=a_normconst,
-    b_e2m1=b_e2m1,
-    b_sf=b_sf,
-    b_normconst=b_normconst
-)
+out = fp4_matmul(a_quantized, b_quantized)
 </code></pre>
 <h3 id="fouroversix.fp4_matmul--backends">Backends</h3>
 <p>We provide two different implementations of FP4 matrix multiplication:</p>
@@ -583,34 +576,34 @@ equivalent to simulations done with the PyTorch backend.</p>
       <tbody>
           <tr class="doc-section-item">
             <td>
-                <code>a</code>
+                <code>input</code>
             </td>
             <td>
-                  <code><span title="torch.Tensor">Tensor</span></code>
+                  <code><span title="torch.Tensor">Tensor</span> | <span title="fouroversix.quantize.FP4Tensor">FP4Tensor</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The high-precision input tensor A.</p>
+                <p>The first tensor to be multiplied.</p>
               </div>
             </td>
             <td>
-                  <code>None</code>
+                <em>required</em>
             </td>
           </tr>
           <tr class="doc-section-item">
             <td>
-                <code>b</code>
+                <code>other</code>
             </td>
             <td>
-                  <code><span title="torch.Tensor">Tensor</span></code>
+                  <code><span title="torch.Tensor">Tensor</span> | <span title="fouroversix.quantize.FP4Tensor">FP4Tensor</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The high-precision input tensor B.</p>
+                <p>The second tensor to be multiplied.</p>
               </div>
             </td>
             <td>
-                  <code>None</code>
+                <em>required</em>
             </td>
           </tr>
           <tr class="doc-section-item">
@@ -634,116 +627,16 @@ PyTorch will be used otherwise.</p>
           </tr>
           <tr class="doc-section-item">
             <td>
-                <code>a_e2m1</code>
-            </td>
-            <td>
-                  <code><span title="torch.Tensor">Tensor</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>The values of the first input tensor in packed E2M1
-format (2 values per byte).</p>
-              </div>
-            </td>
-            <td>
-                  <code>None</code>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                <code>a_sf</code>
-            </td>
-            <td>
-                  <code><span title="torch.Tensor">Tensor</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>The scale factors of the first input tensor.</p>
-              </div>
-            </td>
-            <td>
-                  <code>None</code>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                <code>a_normconst</code>
-            </td>
-            <td>
-                  <code><span title="torch.Tensor">Tensor</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>The per-tensor normalization constant of the
-first input tensor.</p>
-              </div>
-            </td>
-            <td>
-                  <code>None</code>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                <code>b_e2m1</code>
-            </td>
-            <td>
-                  <code><span title="torch.Tensor">Tensor</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>The values of the second input tensor in packed E2M1
-format (2 values per byte).</p>
-              </div>
-            </td>
-            <td>
-                  <code>None</code>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                <code>b_sf</code>
-            </td>
-            <td>
-                  <code><span title="torch.Tensor">Tensor</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>The scale factors of the second input tensor.</p>
-              </div>
-            </td>
-            <td>
-                  <code>None</code>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                <code>b_normconst</code>
-            </td>
-            <td>
-                  <code><span title="torch.Tensor">Tensor</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>The per-tensor normalization constant of the
-second input tensor.</p>
-              </div>
-            </td>
-            <td>
-                  <code>None</code>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                <code>a_quantize_kwargs</code>
+                <code>input_quantize_kwargs</code>
             </td>
             <td>
                   <code><span title="dict">dict</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>If <code>a</code> is provided in high precision, these parameters
-will be passed to the <code>quantize_to_fp4</code> call done prior to the matrix
-multiplication.</p>
+                <p>If <code>a</code> is provided in high precision, these
+parameters will be passed to the <code>quantize_to_fp4</code> call done prior to the
+matrix multiplication.</p>
               </div>
             </td>
             <td>
@@ -752,37 +645,20 @@ multiplication.</p>
           </tr>
           <tr class="doc-section-item">
             <td>
-                <code>b_quantize_kwargs</code>
+                <code>other_quantize_kwargs</code>
             </td>
             <td>
                   <code><span title="dict">dict</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>If <code>b</code> is provided in high precision, these parameters
-will be passed to the <code>quantize_to_fp4</code> call done prior to the matrix
-multiplication.</p>
+                <p>If <code>other</code> is provided in high precision, these
+parameters will be passed to the <code>quantize_to_fp4</code> call done prior to the
+matrix multiplication.</p>
               </div>
             </td>
             <td>
                   <code>None</code>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                <code>fp4_format</code>
-            </td>
-            <td>
-                  <code><span title="fouroversix.utils.FP4Format">FP4Format</span></code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>The FP4 format of the input tensors, either
-<code>FP4Format.nvfp4</code> or <code>FP4Format.mxfp4</code>.</p>
-              </div>
-            </td>
-            <td>
-                  <code><span title="fouroversix.utils.FP4Format.nvfp4">nvfp4</span></code>
             </td>
           </tr>
           <tr class="doc-section-item">
@@ -799,25 +675,7 @@ multiplication.</p>
               </div>
             </td>
             <td>
-                  <code><span title="fouroversix.utils.DataType.bfloat16">bfloat16</span></code>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                <code>out_shape</code>
-            </td>
-            <td>
-                  <code><span title="tuple">tuple</span>[<span title="int">int</span>, <span title="int">int</span>] | None</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>The shape of the output tensor. This is
-helpful when the input tensors have shapes that are not multiples of 64,
-but which were padded to multiples of 64 during quantization.</p>
-              </div>
-            </td>
-            <td>
-                  <code>None</code>
+                  <code><span title="torch.bfloat16">bfloat16</span></code>
             </td>
           </tr>
       </tbody>
@@ -849,9 +707,7 @@ but which were padded to multiples of 64 during quantization.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/fouroversix/frontend.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 12</span>
-<span class="normal"> 13</span>
-<span class="normal"> 14</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 14</span>
 <span class="normal"> 15</span>
 <span class="normal"> 16</span>
 <span class="normal"> 17</span>
@@ -945,72 +801,14 @@ but which were padded to multiples of 64 during quantization.</p>
 <span class="normal">105</span>
 <span class="normal">106</span>
 <span class="normal">107</span>
-<span class="normal">108</span>
-<span class="normal">109</span>
-<span class="normal">110</span>
-<span class="normal">111</span>
-<span class="normal">112</span>
-<span class="normal">113</span>
-<span class="normal">114</span>
-<span class="normal">115</span>
-<span class="normal">116</span>
-<span class="normal">117</span>
-<span class="normal">118</span>
-<span class="normal">119</span>
-<span class="normal">120</span>
-<span class="normal">121</span>
-<span class="normal">122</span>
-<span class="normal">123</span>
-<span class="normal">124</span>
-<span class="normal">125</span>
-<span class="normal">126</span>
-<span class="normal">127</span>
-<span class="normal">128</span>
-<span class="normal">129</span>
-<span class="normal">130</span>
-<span class="normal">131</span>
-<span class="normal">132</span>
-<span class="normal">133</span>
-<span class="normal">134</span>
-<span class="normal">135</span>
-<span class="normal">136</span>
-<span class="normal">137</span>
-<span class="normal">138</span>
-<span class="normal">139</span>
-<span class="normal">140</span>
-<span class="normal">141</span>
-<span class="normal">142</span>
-<span class="normal">143</span>
-<span class="normal">144</span>
-<span class="normal">145</span>
-<span class="normal">146</span>
-<span class="normal">147</span>
-<span class="normal">148</span>
-<span class="normal">149</span>
-<span class="normal">150</span>
-<span class="normal">151</span>
-<span class="normal">152</span>
-<span class="normal">153</span>
-<span class="normal">154</span>
-<span class="normal">155</span>
-<span class="normal">156</span>
-<span class="normal">157</span>
-<span class="normal">158</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">fp4_matmul</span><span class="p">(</span>
-    <span class="n">a</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-    <span class="n">b</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="normal">108</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">fp4_matmul</span><span class="p">(</span>
+    <span class="nb">input</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="n">FP4Tensor</span><span class="p">,</span>
+    <span class="n">other</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="n">FP4Tensor</span><span class="p">,</span>
     <span class="o">*</span><span class="p">,</span>
     <span class="n">backend</span><span class="p">:</span> <span class="n">MatmulBackend</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-    <span class="n">a_e2m1</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-    <span class="n">a_sf</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-    <span class="n">a_normconst</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-    <span class="n">b_e2m1</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-    <span class="n">b_sf</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-    <span class="n">b_normconst</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-    <span class="n">a_quantize_kwargs</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-    <span class="n">b_quantize_kwargs</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-    <span class="n">fp4_format</span><span class="p">:</span> <span class="n">FP4Format</span> <span class="o">=</span> <span class="n">FP4Format</span><span class="o">.</span><span class="n">nvfp4</span><span class="p">,</span>
-    <span class="n">out_dtype</span><span class="p">:</span> <span class="n">DataType</span> <span class="o">=</span> <span class="n">DataType</span><span class="o">.</span><span class="n">bfloat16</span><span class="p">,</span>
-    <span class="n">out_shape</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">input_quantize_kwargs</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">other_quantize_kwargs</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">out_dtype</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">dtype</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">bfloat16</span><span class="p">,</span>
 <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Perform a matrix multiplication (`a @ b.T`) with two FP4-quantized tensors provided</span>
@@ -1020,8 +818,8 @@ but which were padded to multiples of 64 during quantization.</p>
 
 <span class="sd">    Each tensor may be provided in either high or low precision. If provided in high</span>
 <span class="sd">    precision, tensors will be quantized to FP4 prior to the matrix multiplication, and</span>
-<span class="sd">    quantization may be configured with the `a_quantization_kwargs` and</span>
-<span class="sd">    `b_quantization_kwargs` parameters. For example, the following two code samples are</span>
+<span class="sd">    quantization may be configured with the `input_quantize_kwargs` and</span>
+<span class="sd">    `other_quantize_kwargs` parameters. For example, the following two code samples are</span>
 <span class="sd">    equivalent:</span>
 
 <span class="sd">    ### With High-Precision Inputs</span>
@@ -1038,17 +836,10 @@ but which were padded to multiples of 64 during quantization.</p>
 <span class="sd">    a = torch.tensor(1024, 1024, dtype=torch.bfloat16, device=&quot;cuda&quot;)</span>
 <span class="sd">    b = torch.tensor(1024, 1024, dtype=torch.bfloat16, device=&quot;cuda&quot;)</span>
 
-<span class="sd">    a_e2m1, a_sf, a_normconst = quantize_to_fp4(a)</span>
-<span class="sd">    b_e2m1, b_sf, b_normconst = quantize_to_fp4(b)</span>
+<span class="sd">    a_quantized = quantize_to_fp4(a)</span>
+<span class="sd">    b_quantized = quantize_to_fp4(b)</span>
 
-<span class="sd">    out = fp4_matmul(</span>
-<span class="sd">        a_e2m1=a_e2m1,</span>
-<span class="sd">        a_sf=a_sf,</span>
-<span class="sd">        a_normconst=a_normconst,</span>
-<span class="sd">        b_e2m1=b_e2m1,</span>
-<span class="sd">        b_sf=b_sf,</span>
-<span class="sd">        b_normconst=b_normconst</span>
-<span class="sd">    )</span>
+<span class="sd">    out = fp4_matmul(a_quantized, b_quantized)</span>
 <span class="sd">    ```</span>
 
 <span class="sd">    ## Backends</span>
@@ -1066,66 +857,37 @@ but which were padded to multiples of 64 during quantization.</p>
 <span class="sd">    ## Parameters</span>
 
 <span class="sd">    Args:</span>
-<span class="sd">        a (torch.Tensor): The high-precision input tensor A.</span>
-<span class="sd">        b (torch.Tensor): The high-precision input tensor B.</span>
+<span class="sd">        input (torch.Tensor | FP4Tensor): The first tensor to be multiplied.</span>
+<span class="sd">        other (torch.Tensor | FP4Tensor): The second tensor to be multiplied.</span>
 <span class="sd">        backend (MatmulBackend): The backend to use for the matrix multiplication,</span>
 <span class="sd">            either `MatmulBackend.cutlass` or `MatmulBackend.pytorch`. If no backend is</span>
 <span class="sd">            provided, CUTLASS will be used if the machine has a Blackwell GPU, and</span>
 <span class="sd">            PyTorch will be used otherwise.</span>
-<span class="sd">        a_e2m1 (torch.Tensor): The values of the first input tensor in packed E2M1</span>
-<span class="sd">            format (2 values per byte).</span>
-<span class="sd">        a_sf (torch.Tensor): The scale factors of the first input tensor.</span>
-<span class="sd">        a_normconst (torch.Tensor): The per-tensor normalization constant of the</span>
-<span class="sd">            first input tensor.</span>
-<span class="sd">        b_e2m1 (torch.Tensor): The values of the second input tensor in packed E2M1</span>
-<span class="sd">            format (2 values per byte).</span>
-<span class="sd">        b_sf (torch.Tensor): The scale factors of the second input tensor.</span>
-<span class="sd">        b_normconst (torch.Tensor): The per-tensor normalization constant of the</span>
-<span class="sd">            second input tensor.</span>
-<span class="sd">        a_quantize_kwargs (dict): If `a` is provided in high precision, these parameters</span>
-<span class="sd">            will be passed to the `quantize_to_fp4` call done prior to the matrix</span>
-<span class="sd">            multiplication.</span>
-<span class="sd">        b_quantize_kwargs (dict): If `b` is provided in high precision, these parameters</span>
-<span class="sd">            will be passed to the `quantize_to_fp4` call done prior to the matrix</span>
-<span class="sd">            multiplication.</span>
-<span class="sd">        fp4_format (FP4Format): The FP4 format of the input tensors, either</span>
-<span class="sd">            `FP4Format.nvfp4` or `FP4Format.mxfp4`.</span>
+<span class="sd">        input_quantize_kwargs (dict): If `a` is provided in high precision, these</span>
+<span class="sd">            parameters will be passed to the `quantize_to_fp4` call done prior to the</span>
+<span class="sd">            matrix multiplication.</span>
+<span class="sd">        other_quantize_kwargs (dict): If `other` is provided in high precision, these</span>
+<span class="sd">            parameters will be passed to the `quantize_to_fp4` call done prior to the</span>
+<span class="sd">            matrix multiplication.</span>
 <span class="sd">        out_dtype (DataType): The data type of the output tensor, either</span>
 <span class="sd">            `DataType.bfloat16` or `DataType.float16`.</span>
-<span class="sd">        out_shape (tuple[int, int] | None): The shape of the output tensor. This is</span>
-<span class="sd">            helpful when the input tensors have shapes that are not multiples of 64,</span>
-<span class="sd">            but which were padded to multiples of 64 during quantization.</span>
 
 <span class="sd">    Returns:</span>
 <span class="sd">        The output tensor.</span>
 
 <span class="sd">    &quot;&quot;&quot;</span>
 
-    <span class="k">if</span> <span class="n">a</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">and</span> <span class="p">(</span><span class="n">a_e2m1</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">a_sf</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">):</span>
-        <span class="n">msg</span> <span class="o">=</span> <span class="s2">&quot;If a is None, a_e2m1 and a_sf must be provided&quot;</span>
-        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">input_quantize_kwargs</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">input_quantize_kwargs</span> <span class="o">=</span> <span class="p">{}</span>
 
-    <span class="k">if</span> <span class="n">b</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">and</span> <span class="p">(</span><span class="n">b_e2m1</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">b_sf</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">):</span>
-        <span class="n">msg</span> <span class="o">=</span> <span class="s2">&quot;If b is None, b_e2m1 and b_sf must be provided&quot;</span>
-        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">other_quantize_kwargs</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">other_quantize_kwargs</span> <span class="o">=</span> <span class="p">{}</span>
 
-    <span class="k">if</span> <span class="n">a_quantize_kwargs</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-        <span class="n">a_quantize_kwargs</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="nb">input</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+        <span class="nb">input</span> <span class="o">=</span> <span class="n">quantize_to_fp4</span><span class="p">(</span><span class="nb">input</span><span class="p">,</span> <span class="o">**</span><span class="p">(</span><span class="n">input_quantize_kwargs</span> <span class="ow">or</span> <span class="p">{}))</span>
 
-    <span class="k">if</span> <span class="n">b_quantize_kwargs</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-        <span class="n">b_quantize_kwargs</span> <span class="o">=</span> <span class="p">{}</span>
-
-    <span class="k">if</span> <span class="n">a_e2m1</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">a_sf</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-        <span class="n">a_e2m1</span><span class="p">,</span> <span class="n">a_sf</span><span class="p">,</span> <span class="n">a_normconst</span> <span class="o">=</span> <span class="n">quantize_to_fp4</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="o">**</span><span class="n">a_quantize_kwargs</span><span class="p">)</span>
-
-    <span class="k">if</span> <span class="n">b_e2m1</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">b_sf</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-        <span class="n">b_e2m1</span><span class="p">,</span> <span class="n">b_sf</span><span class="p">,</span> <span class="n">b_normconst</span> <span class="o">=</span> <span class="n">quantize_to_fp4</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="o">**</span><span class="n">b_quantize_kwargs</span><span class="p">)</span>
-
-    <span class="n">kwargs</span> <span class="o">=</span> <span class="p">{</span>
-        <span class="s2">&quot;fp4_format&quot;</span><span class="p">:</span> <span class="n">fp4_format</span><span class="p">,</span>
-        <span class="s2">&quot;out_dtype&quot;</span><span class="p">:</span> <span class="n">out_dtype</span><span class="p">,</span>
-        <span class="s2">&quot;out_shape&quot;</span><span class="p">:</span> <span class="n">out_shape</span><span class="p">,</span>
-    <span class="p">}</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">):</span>
+        <span class="n">other</span> <span class="o">=</span> <span class="n">quantize_to_fp4</span><span class="p">(</span><span class="n">other</span><span class="p">,</span> <span class="o">**</span><span class="p">(</span><span class="n">other_quantize_kwargs</span> <span class="ow">or</span> <span class="p">{}))</span>
 
     <span class="k">if</span> <span class="n">backend</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
         <span class="n">backend</span> <span class="o">=</span> <span class="n">MatmulBackend</span><span class="o">.</span><span class="n">auto_select</span><span class="p">()</span>
@@ -1133,15 +895,7 @@ but which were padded to multiples of 64 during quantization.</p>
         <span class="n">msg</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;Backend </span><span class="si">{</span><span class="n">backend</span><span class="si">}</span><span class="s2"> is not available&quot;</span>
         <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span>
 
-    <span class="k">return</span> <span class="n">backend</span><span class="o">.</span><span class="n">fp4_matmul</span><span class="p">(</span>
-        <span class="n">a_e2m1</span><span class="p">,</span>
-        <span class="n">a_sf</span><span class="p">,</span>
-        <span class="n">a_normconst</span><span class="p">,</span>
-        <span class="n">b_e2m1</span><span class="p">,</span>
-        <span class="n">b_sf</span><span class="p">,</span>
-        <span class="n">b_normconst</span><span class="p">,</span>
-        <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span>
-    <span class="p">)</span>
+    <span class="k">return</span> <span class="n">backend</span><span class="o">.</span><span class="n">fp4_matmul</span><span class="p">(</span><span class="nb">input</span><span class="p">,</span> <span class="n">other</span><span class="p">,</span> <span class="n">out_dtype</span><span class="o">=</span><span class="n">out_dtype</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>

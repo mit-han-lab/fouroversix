@@ -573,26 +573,23 @@
         <p>Quantize a tensor to FP4.</p>
 <h3 id="fouroversix.quantize_to_fp4--sample-code">Sample Code</h3>
 <h4 id="fouroversix.quantize_to_fp4--with-four-over-six">With Four Over Six</h4>
-<pre><code>a = torch.tensor(1024, 1024, dtype=torch.bfloat16, device=&quot;cuda&quot;)
-a_e2m1, a_sf, a_normconst = quantize_to_fp4(a)
+<pre><code>x = torch.tensor(1024, 1024, dtype=torch.bfloat16, device=&quot;cuda&quot;)
+x_quantized = quantize_to_fp4(x)
 </code></pre>
 <h4 id="fouroversix.quantize_to_fp4--without-four-over-six">Without Four Over Six</h4>
-<pre><code>a = torch.tensor(1024, 1024, dtype=torch.bfloat16, device=&quot;cuda&quot;)
-a_e2m1, a_sf, a_normconst = quantize_to_fp4(
-    a,
-    scale_rule=AdaptiveBlockScalingRule.always_6,
-)
+<pre><code>x = torch.tensor(1024, 1024, dtype=torch.bfloat16, device=&quot;cuda&quot;)
+x_quantized = quantize_to_fp4(x, scale_rule=AdaptiveBlockScalingRule.always_6)
 </code></pre>
 <h4 id="fouroversix.quantize_to_fp4--with-stochastic-rounding">With Stochastic Rounding</h4>
-<pre><code>a = torch.tensor(1024, 1024, dtype=torch.bfloat16, device=&quot;cuda&quot;)
-a_e2m1, a_sf, a_normconst = quantize_to_fp4(a, round_style=RoundStyle.stochastic)
+<pre><code>x = torch.tensor(1024, 1024, dtype=torch.bfloat16, device=&quot;cuda&quot;)
+x_quantized = quantize_to_fp4(x, round_style=RoundStyle.stochastic)
 </code></pre>
 <h4 id="fouroversix.quantize_to_fp4--with-the-random-hadamard-transform">With the Random Hadamard Transform</h4>
-<pre><code>from scipy.linalg import hadamard
+<pre><code>from fouroversix.quantize import get_rht_matrix
 
-a = torch.tensor(1024, 1024, dtype=torch.bfloat16, device=&quot;cuda&quot;)
-had = torch.tensor(hadamard(16), dtype=torch.bfloat16, device=&quot;cuda&quot;)
-a_e2m1, a_sf, a_normconst = quantize_to_fp4(a, had=had)
+x = torch.tensor(1024, 1024, dtype=torch.bfloat16, device=&quot;cuda&quot;)
+had = get_rht_matrix()
+x_quantized = quantize_to_fp4(x, had=had)
 </code></pre>
 <h3 id="fouroversix.quantize_to_fp4--backends">Backends</h3>
 <p>We provide three different implementations of FP4 quantization:</p>
@@ -790,31 +787,21 @@ as <code>fp4_matmul</code> requires that both tensors are provided in row-major 
       <tbody>
           <tr class="doc-section-item">
             <td>
-                  <code><span title="torch.Tensor">Tensor</span></code>
+                  <code><span title="fouroversix.quantize.FP4Tensor">FP4Tensor</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The packed E2M1 values.</p>
+                <p>A quantized FP4Tensor, which contains the packed E2M1 values, the FP8 scale</p>
               </div>
             </td>
           </tr>
           <tr class="doc-section-item">
             <td>
-                  <code><span title="torch.Tensor">Tensor</span></code>
+                  <code><span title="fouroversix.quantize.FP4Tensor">FP4Tensor</span></code>
             </td>
             <td>
               <div class="doc-md-description">
-                <p>The FP8 scale factors.</p>
-              </div>
-            </td>
-          </tr>
-          <tr class="doc-section-item">
-            <td>
-                  <code><span title="torch.Tensor">Tensor</span> | None</code>
-            </td>
-            <td>
-              <div class="doc-md-description">
-                <p>The tensor-wide FP32 scale factor.</p>
+                <p>factors, and the tensor-wide FP32 scale factor.</p>
               </div>
             </td>
           </tr>
@@ -824,7 +811,57 @@ as <code>fp4_matmul</code> requires that both tensors are provided in row-major 
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/fouroversix/frontend.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">161</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span>
+<span class="normal">127</span>
+<span class="normal">128</span>
+<span class="normal">129</span>
+<span class="normal">130</span>
+<span class="normal">131</span>
+<span class="normal">132</span>
+<span class="normal">133</span>
+<span class="normal">134</span>
+<span class="normal">135</span>
+<span class="normal">136</span>
+<span class="normal">137</span>
+<span class="normal">138</span>
+<span class="normal">139</span>
+<span class="normal">140</span>
+<span class="normal">141</span>
+<span class="normal">142</span>
+<span class="normal">143</span>
+<span class="normal">144</span>
+<span class="normal">145</span>
+<span class="normal">146</span>
+<span class="normal">147</span>
+<span class="normal">148</span>
+<span class="normal">149</span>
+<span class="normal">150</span>
+<span class="normal">151</span>
+<span class="normal">152</span>
+<span class="normal">153</span>
+<span class="normal">154</span>
+<span class="normal">155</span>
+<span class="normal">156</span>
+<span class="normal">157</span>
+<span class="normal">158</span>
+<span class="normal">159</span>
+<span class="normal">160</span>
+<span class="normal">161</span>
 <span class="normal">162</span>
 <span class="normal">163</span>
 <span class="normal">164</span>
@@ -892,61 +929,7 @@ as <code>fp4_matmul</code> requires that both tensors are provided in row-major 
 <span class="normal">226</span>
 <span class="normal">227</span>
 <span class="normal">228</span>
-<span class="normal">229</span>
-<span class="normal">230</span>
-<span class="normal">231</span>
-<span class="normal">232</span>
-<span class="normal">233</span>
-<span class="normal">234</span>
-<span class="normal">235</span>
-<span class="normal">236</span>
-<span class="normal">237</span>
-<span class="normal">238</span>
-<span class="normal">239</span>
-<span class="normal">240</span>
-<span class="normal">241</span>
-<span class="normal">242</span>
-<span class="normal">243</span>
-<span class="normal">244</span>
-<span class="normal">245</span>
-<span class="normal">246</span>
-<span class="normal">247</span>
-<span class="normal">248</span>
-<span class="normal">249</span>
-<span class="normal">250</span>
-<span class="normal">251</span>
-<span class="normal">252</span>
-<span class="normal">253</span>
-<span class="normal">254</span>
-<span class="normal">255</span>
-<span class="normal">256</span>
-<span class="normal">257</span>
-<span class="normal">258</span>
-<span class="normal">259</span>
-<span class="normal">260</span>
-<span class="normal">261</span>
-<span class="normal">262</span>
-<span class="normal">263</span>
-<span class="normal">264</span>
-<span class="normal">265</span>
-<span class="normal">266</span>
-<span class="normal">267</span>
-<span class="normal">268</span>
-<span class="normal">269</span>
-<span class="normal">270</span>
-<span class="normal">271</span>
-<span class="normal">272</span>
-<span class="normal">273</span>
-<span class="normal">274</span>
-<span class="normal">275</span>
-<span class="normal">276</span>
-<span class="normal">277</span>
-<span class="normal">278</span>
-<span class="normal">279</span>
-<span class="normal">280</span>
-<span class="normal">281</span>
-<span class="normal">282</span>
-<span class="normal">283</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">quantize_to_fp4</span><span class="p">(</span>
+<span class="normal">229</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">quantize_to_fp4</span><span class="p">(</span>
     <span class="n">x</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
     <span class="o">*</span><span class="p">,</span>
     <span class="n">backend</span><span class="p">:</span> <span class="n">QuantizeBackend</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
@@ -956,7 +939,7 @@ as <code>fp4_matmul</code> requires that both tensors are provided in row-major 
     <span class="n">fp4_format</span><span class="p">:</span> <span class="n">FP4Format</span> <span class="o">=</span> <span class="n">FP4Format</span><span class="o">.</span><span class="n">nvfp4</span><span class="p">,</span>
     <span class="n">round_style</span><span class="p">:</span> <span class="n">RoundStyle</span> <span class="o">=</span> <span class="n">RoundStyle</span><span class="o">.</span><span class="n">nearest</span><span class="p">,</span>
     <span class="n">transpose</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
-<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span><span class="p">]:</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">FP4Tensor</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Quantize a tensor to FP4.</span>
 
@@ -965,35 +948,32 @@ as <code>fp4_matmul</code> requires that both tensors are provided in row-major 
 <span class="sd">    ### With Four Over Six</span>
 
 <span class="sd">    ```</span>
-<span class="sd">    a = torch.tensor(1024, 1024, dtype=torch.bfloat16, device=&quot;cuda&quot;)</span>
-<span class="sd">    a_e2m1, a_sf, a_normconst = quantize_to_fp4(a)</span>
+<span class="sd">    x = torch.tensor(1024, 1024, dtype=torch.bfloat16, device=&quot;cuda&quot;)</span>
+<span class="sd">    x_quantized = quantize_to_fp4(x)</span>
 <span class="sd">    ```</span>
 
 <span class="sd">    ### Without Four Over Six</span>
 
 <span class="sd">    ```</span>
-<span class="sd">    a = torch.tensor(1024, 1024, dtype=torch.bfloat16, device=&quot;cuda&quot;)</span>
-<span class="sd">    a_e2m1, a_sf, a_normconst = quantize_to_fp4(</span>
-<span class="sd">        a,</span>
-<span class="sd">        scale_rule=AdaptiveBlockScalingRule.always_6,</span>
-<span class="sd">    )</span>
+<span class="sd">    x = torch.tensor(1024, 1024, dtype=torch.bfloat16, device=&quot;cuda&quot;)</span>
+<span class="sd">    x_quantized = quantize_to_fp4(x, scale_rule=AdaptiveBlockScalingRule.always_6)</span>
 <span class="sd">    ```</span>
 
 <span class="sd">    ### With Stochastic Rounding</span>
 
 <span class="sd">    ```</span>
-<span class="sd">    a = torch.tensor(1024, 1024, dtype=torch.bfloat16, device=&quot;cuda&quot;)</span>
-<span class="sd">    a_e2m1, a_sf, a_normconst = quantize_to_fp4(a, round_style=RoundStyle.stochastic)</span>
+<span class="sd">    x = torch.tensor(1024, 1024, dtype=torch.bfloat16, device=&quot;cuda&quot;)</span>
+<span class="sd">    x_quantized = quantize_to_fp4(x, round_style=RoundStyle.stochastic)</span>
 <span class="sd">    ```</span>
 
 <span class="sd">    ### With the Random Hadamard Transform</span>
 
 <span class="sd">    ```</span>
-<span class="sd">    from scipy.linalg import hadamard</span>
+<span class="sd">    from fouroversix.quantize import get_rht_matrix</span>
 
-<span class="sd">    a = torch.tensor(1024, 1024, dtype=torch.bfloat16, device=&quot;cuda&quot;)</span>
-<span class="sd">    had = torch.tensor(hadamard(16), dtype=torch.bfloat16, device=&quot;cuda&quot;)</span>
-<span class="sd">    a_e2m1, a_sf, a_normconst = quantize_to_fp4(a, had=had)</span>
+<span class="sd">    x = torch.tensor(1024, 1024, dtype=torch.bfloat16, device=&quot;cuda&quot;)</span>
+<span class="sd">    had = get_rht_matrix()</span>
+<span class="sd">    x_quantized = quantize_to_fp4(x, had=had)</span>
 <span class="sd">    ```</span>
 
 <span class="sd">    ## Backends</span>
@@ -1047,9 +1027,8 @@ as <code>fp4_matmul</code> requires that both tensors are provided in row-major 
 <span class="sd">            as `fp4_matmul` requires that both tensors are provided in row-major format.</span>
 
 <span class="sd">    Returns:</span>
-<span class="sd">        The packed E2M1 values.</span>
-<span class="sd">        The FP8 scale factors.</span>
-<span class="sd">        The tensor-wide FP32 scale factor.</span>
+<span class="sd">        A quantized FP4Tensor, which contains the packed E2M1 values, the FP8 scale</span>
+<span class="sd">        factors, and the tensor-wide FP32 scale factor.</span>
 
 <span class="sd">    &quot;&quot;&quot;</span>
 
