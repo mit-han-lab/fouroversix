@@ -209,8 +209,8 @@ class FP4Tensor:
             )
             x_sign = torch.where(
                 ((values >> 3) & 0x1) == 0,
-                torch.tensor(1, dtype=dtype, device=self.e2m1_values.device),
-                torch.tensor(-1, dtype=dtype, device=self.e2m1_values.device),
+                torch.tensor(1, dtype=dtype, device=self.device),
+                torch.tensor(-1, dtype=dtype, device=self.device),
             )
             result = result * x_sign
         elif self.fp4_format == FP4Format.nvfp4:
@@ -221,5 +221,10 @@ class FP4Tensor:
                     / self.scale_rule.get_maximum_allowed_quantized_value()
                 ).to(dtype)
 
-        result = result[:self.original_shape[0], :self.original_shape[1]]
+        if result.shape != self.original_shape:
+            result = result[:self.original_shape[0], :self.original_shape[1]]
         return result
+
+    @property
+    def device(self):
+        return self.e2m1_values.device
