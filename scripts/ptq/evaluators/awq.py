@@ -15,14 +15,9 @@ from .rtn import RTNEvaluatorImpl
 
 awq_img = get_image(dependencies=[Dependency.fouroversix, Dependency.awq])
 
-with awq_img.imports():
-    import torch
-    from awq.quantize.pre_quant import apply_awq, run_awq
-    from fouroversix import quantize_model
-    from transformers import AutoModelForCausalLM, AutoTokenizer
-
 if TYPE_CHECKING:
     from fouroversix.utils import AdaptiveBlockScalingRule, DataType
+    from transformers import AutoModelForCausalLM
 
 
 @app.cls(
@@ -43,14 +38,19 @@ class AWQEvaluator(RTNEvaluatorImpl):
         dtype: DataType,
         a_scale_rule: AdaptiveBlockScalingRule,
         w_scale_rule: AdaptiveBlockScalingRule,
+        save_path: Path,
         model_kwargs: dict[str, Any] | None = None,
         **kwargs: dict[str, Any],
     ) -> AutoModelForCausalLM:
         """Quantize a model using AWQ."""
 
+        import torch
+        from awq.quantize.pre_quant import apply_awq, run_awq
+        from fouroversix import quantize_model
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+
         save_path = (
-            FOUROVERSIX_CACHE_PATH
-            / "ptq"
+            save_path
             / "awq"
             / f"{model_name}-{a_scale_rule.value}-{w_scale_rule.value}"
         )

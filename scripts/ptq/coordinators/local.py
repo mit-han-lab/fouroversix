@@ -9,13 +9,14 @@ from ..evaluators import get_evaluator
 from ..utils import PTQMethod
 from .base import BaseEvaluationCoordinator
 
+FOUROVERSIX_ROOT_DIR = Path(__file__).parent.parent.parent.parent
+
 
 class LocalEvaluationCoordinator(BaseEvaluationCoordinator):
     """Evaluation coordinator for running PTQ experiments locally."""
 
     def __init__(self, group_name: str | None = None) -> None:
-        # Save the database in the fouroversix root directory
-        self.database_path = Path(__file__).parent.parent.parent.parent / "results.db"
+        self.database_path = FOUROVERSIX_ROOT_DIR / "results.db"
         self.group_name = group_name
 
     def evaluate(
@@ -35,6 +36,7 @@ class LocalEvaluationCoordinator(BaseEvaluationCoordinator):
         return evaluator_cls().evaluate(
             model_name=model_name,
             ptq_method=ptq_method,
+            save_path=FOUROVERSIX_ROOT_DIR / "ptq",
             **evaluator_kwargs,
             **kwargs,
         )

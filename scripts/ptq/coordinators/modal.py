@@ -70,6 +70,7 @@ class ModalEvaluationCoordinator(BaseEvaluationCoordinator):
                     model_name=model_name,
                     ptq_method=ptq_method,
                     tasks=tasks_to_evaluate,
+                    save_path=FOUROVERSIX_CACHE_PATH / "ptq",
                     **evaluator_kwargs,
                     **kwargs,
                 ),
