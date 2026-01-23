@@ -91,6 +91,7 @@ class MatmulBackend(str, Enum):
         if self == MatmulBackend.cutlass:
             from .ops import (
                 gemm_mxfp4mxfp4_accum_fp32_out_bf16_tnt,
+                gemm_mxfp4mxfp4_accum_fp32_out_bf16_tnt_sm120,
                 gemm_nvfp4nvfp4_accum_fp32_out_bf16_tnt,
                 gemm_nvfp4nvfp4_accum_fp32_out_bf16_tnt_sm120,
                 gemm_nvfp4nvfp4_accum_fp32_out_fp16_tnt,
@@ -103,6 +104,11 @@ class MatmulBackend(str, Enum):
                     FP4Format.mxfp4,
                     torch.bfloat16,
                 ): gemm_mxfp4mxfp4_accum_fp32_out_bf16_tnt,
+                (
+                    SM_120,
+                    FP4Format.mxfp4,
+                    torch.bfloat16,
+                ): gemm_mxfp4mxfp4_accum_fp32_out_bf16_tnt_sm120,
                 (
                     SM_100,
                     FP4Format.nvfp4,
