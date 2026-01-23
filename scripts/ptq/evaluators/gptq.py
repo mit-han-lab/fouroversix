@@ -1,7 +1,7 @@
 import sys
 from typing import Any
 
-from ..resources import (
+from ...resources import (
     FOUROVERSIX_CACHE_PATH,
     FOUROVERSIX_INSTALL_PATH,
     Dependency,

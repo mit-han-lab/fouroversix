@@ -37,6 +37,7 @@ tests = [
     "pytest~=8.1.1",
     "python-dateutil~=2.9.0.post0",
     "ruff~=0.14.9",
+    "SQLAlchemy~=2.0.46",
     "typer~=0.20.0",
 ]
 

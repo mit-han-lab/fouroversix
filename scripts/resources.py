@@ -104,12 +104,6 @@ class Submodule(str, Enum):
         if url.startswith("https://"):
             return url
 
-        # SCP-style: git@github.com:owner/repo.git
-        if "@" in url and ":" in url:
-            user_host, path = url.split(":", 1)
-            _, host = user_host.split("@", 1)
-            return f"https://{host}/{path}"
-
         msg = f"Unsupported remote URL format: {url}"
         raise ValueError(msg)
 
@@ -118,10 +112,11 @@ cuda_version_to_image_tag = {
     "12.8": "nvcr.io/nvidia/cuda-dl-base:25.03-cuda12.8-devel-ubuntu24.04",
     "12.9": "nvcr.io/nvidia/cuda-dl-base:25.06-cuda12.9-devel-ubuntu24.04",
     "13.0": "nvcr.io/nvidia/cuda-dl-base:25.09-cuda13.0-devel-ubuntu24.04",
+    "13.1": "nvcr.io/nvidia/cuda-dl-base:25.12-cuda13.1-devel-ubuntu24.04",
 }
 
 
-def add_submodule(img: modal.Image, submodule: Submodule) -> None:
+def add_submodule(img: modal.Image, submodule: Submodule) -> modal.Image:
     if submodule.has_untracked_or_unstaged_changes():
         # Submodule has uncommitted changes, build image with local copy
         return img.add_local_dir(
@@ -233,7 +228,6 @@ def get_image(  # noqa: C901, PLR0912
                 lambda x: not x.startswith("torch"),
                 pyproject_data["build-system"]["requires"],
             ),
-            *pyproject_data["project"]["optional-dependencies"]["tests"],
             "numpy",
         )
         .uv_pip_install(
@@ -293,6 +287,14 @@ def get_image(  # noqa: C901, PLR0912
                     "pyproject.toml",
                     f"{FOUROVERSIX_INSTALL_PATH}/pyproject.toml",
                     copy=True,
+                )
+                .uv_pip_install(
+                    *filter(
+                        lambda x: not x.startswith("torch"),
+                        pyproject_data["build-system"]["requires"],
+                    ),
+                    *pyproject_data["project"]["optional-dependencies"]["tests"],
+                    "numpy",
                 )
                 .add_local_file(
                     "setup.py",

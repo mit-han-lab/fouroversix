@@ -12,3 +12,4 @@ ptq_logs/
 dist/
 *.egg-info/
 site/
+results.db

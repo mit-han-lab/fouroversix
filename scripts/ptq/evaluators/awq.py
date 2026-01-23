@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ..resources import (
+from ...resources import (
     FOUROVERSIX_CACHE_PATH,
     Dependency,
     app,
@@ -21,8 +21,8 @@ with awq_img.imports():
     from fouroversix import quantize_model
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    if TYPE_CHECKING:
-        from fouroversix.utils import AdaptiveBlockScalingRule, DataType
+if TYPE_CHECKING:
+    from fouroversix.utils import AdaptiveBlockScalingRule, DataType
 
 
 @app.cls(

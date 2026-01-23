@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from ..resources import (
+from ...resources import (
     FOUROVERSIX_CACHE_PATH,
     app,
     cache_volume,

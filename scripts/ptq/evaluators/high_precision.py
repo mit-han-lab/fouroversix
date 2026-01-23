@@ -2,7 +2,7 @@ from typing import Any
 
 from fouroversix.utils import DataType
 
-from ..resources import (
+from ...resources import (
     FOUROVERSIX_CACHE_PATH,
     app,
     cache_volume,

@@ -2,14 +2,11 @@ from __future__ import annotations
 
 import json
 from abc import ABC, abstractmethod
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import modal
-from dateutil.tz import tzlocal
-
-from ..resources import FOUROVERSIX_CACHE_PATH
+import torch
 
 if TYPE_CHECKING:
     from transformers import AutoModelForCausalLM
@@ -29,14 +26,14 @@ class CustomJSONEncoder(json.JSONEncoder):
         return json.JSONEncoder.default(self, obj)
 
 
-class PTQEvaluatorImpl(ABC):
+class PTQEvaluator(ABC):
     """Base class for post-training quantization evaluators."""
 
     @abstractmethod
     def quantize_model(self, **kwargs: dict[str, Any]) -> AutoModelForCausalLM:
         """Quantize a model."""
 
-    def evaluate_impl(
+    def evaluate(
         self,
         model_name: str,
         *,
@@ -63,7 +60,7 @@ class PTQEvaluatorImpl(ABC):
         else:
             model = model_name
 
-        return evaluator.simple_evaluate(
+        results = evaluator.simple_evaluate(
             model=models.huggingface.HFLM(
                 pretrained=model,
                 device=device,
@@ -76,37 +73,17 @@ class PTQEvaluatorImpl(ABC):
             ),
         )
 
-
-class PTQEvaluator(PTQEvaluatorImpl):
-    """Base class for post-training quantization evaluators."""
-
-    @modal.method()
-    def evaluate(self, *args: list[str], **kwargs: dict[str, Any]) -> dict[str, Any]:
-        """Evaluate a quantized model."""
-        model_name = kwargs["model_name"]
-        ptq_method = kwargs["ptq_method"]
-
-        results = self.evaluate_impl(*args, **kwargs)
-
-        logs_path = (
-            FOUROVERSIX_CACHE_PATH
-            / "ptq_logs"
-            / ptq_method.value
-            / f"{datetime.now(tz=tzlocal()).strftime('%Y%m%d%H%M%S')}_{model_name}.json"
-        )
-        logs_path.parent.mkdir(parents=True, exist_ok=True)
-
-        with logs_path.open("w") as f:
-            json.dump(
-                {
-                    "model_name": model_name,
-                    "ptq_method": ptq_method.value,
-                    "kwargs": kwargs,
-                    "results": results,
-                },
-                f,
-                indent=4,
-                cls=CustomJSONEncoder,
-            )
+        del model
+        torch.cuda.empty_cache()
 
         return results
+
+    @modal.method()
+    def evaluate_on_modal(
+        self,
+        *args: list[Any],
+        **kwargs: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Evaluate a quantized model on Modal."""
+
+        return self.evaluate(*args, **kwargs)

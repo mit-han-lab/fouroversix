@@ -1,4 +1,3 @@
-import multiprocessing
 from typing import Any
 
 import click
@@ -6,53 +5,9 @@ import modal
 from fouroversix import MatmulBackend, QuantizeBackend
 from fouroversix.utils import AdaptiveBlockScalingRule, DataType, FP4Format
 
-from ..resources import app, get_image
-from .utils import PTQMethod, print_results
-from .worker import get_evaluator, worker
-
-
-@app.function(
-    image=get_image(),
-    timeout=24 * 60 * 60,
-    nonpreemptible=True,
-)
-def run_ptq(
-    model_names: list[str],
-    ptq_methods: list[PTQMethod],
-    **kwargs: dict[str, Any],
-) -> None:
-    function_calls = []
-
-    for model_name in model_names:
-        for ptq_method in ptq_methods:
-            evaluator_cls, evaluator_kwargs = get_evaluator(
-                ptq_method,
-                model_name=model_name,
-                **kwargs,
-            )
-
-            if modal_gpu := kwargs.pop("modal_gpu"):
-                evaluator_cls = evaluator_cls.with_options(gpu=modal_gpu)
-
-            function_calls.append(
-                evaluator_cls().evaluate.spawn(
-                    model_name=model_name,
-                    ptq_method=ptq_method,
-                    **{**kwargs, **evaluator_kwargs},
-                ),
-            )
-
-    print("Starting PTQ evaluation...")
-    print(kwargs)
-    print()
-
-    results = modal.FunctionCall.gather(*function_calls)
-
-    for i, model_name in enumerate(model_names):
-        for j, ptq_method in enumerate(ptq_methods):
-            print(model_name, ptq_method)
-            print_results(results[i * len(ptq_methods) + j])
-            print()
+from ..resources import app
+from .coordinators import LocalEvaluationCoordinator, ModalEvaluationCoordinator
+from .utils import PTQMethod
 
 
 @click.command()
@@ -65,6 +20,7 @@ def run_ptq(
 @click.option("--device", type=str, default="cuda")
 @click.option("--dtype", type=DataType, default=DataType.auto)
 @click.option("--fp4-format", type=FP4Format, default=FP4Format.nvfp4)
+@click.option("--group-name", type=str, default=None)
 @click.option("--matmul-backend", type=MatmulBackend, default=None)
 @click.option("--max-length", type=int, default=None)
 @click.option("--modal", is_flag=True)
@@ -80,7 +36,7 @@ def run_ptq(
     default=AdaptiveBlockScalingRule.mse,
 )
 @click.option("--weight-scale-2d", is_flag=True)
-def cli(**kwargs: dict[str, Any]) -> None:  # noqa: C901, PLR0912
+def cli(group_name: str | None, **kwargs: dict[str, Any]) -> None:
     detach = kwargs.pop("detach", False)
     model_names = kwargs.pop("model_name")
     ptq_methods = kwargs.pop("ptq_method")
@@ -118,33 +74,11 @@ def cli(**kwargs: dict[str, Any]) -> None:  # noqa: C901, PLR0912
 
     if use_modal:
         with modal.enable_output(), app.run(detach=detach):
-            run_ptq.remote(model_names, ptq_methods, **kwargs)
+            coordinator = ModalEvaluationCoordinator(group_name_str=group_name or "")
+            coordinator.start.remote(model_names, ptq_methods, **kwargs)
     else:
-        import torch
-
-        if not torch.cuda.is_available():
-            msg = "No CUDA devices found"
-            raise RuntimeError(msg)
-
-        multiprocessing.set_start_method("spawn", force=True)
-
-        task_queue = multiprocessing.Queue()
-        workers = []
-
-        for gpu_id in range(torch.cuda.device_count()):
-            p = multiprocessing.Process(target=worker, args=(gpu_id, task_queue))
-            p.start()
-            workers.append(p)
-
-        for model_name in model_names:
-            for ptq_method in ptq_methods:
-                task_queue.put((model_name, ptq_method, kwargs))
-
-        for _ in range(torch.cuda.device_count()):
-            task_queue.put(None)
-
-        for p in workers:
-            p.join()
+        coordinator = LocalEvaluationCoordinator(group_name)
+        coordinator.start(model_names, ptq_methods, **kwargs)
 
 
 if __name__ == "__main__":

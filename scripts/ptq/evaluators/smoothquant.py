@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 import modal
 
-from ..resources import FOUROVERSIX_CACHE_PATH, app, cache_volume, hf_secret
+from ...resources import FOUROVERSIX_CACHE_PATH, app, cache_volume, hf_secret
 from .rtn import RTNEvaluatorImpl, rtn_img
 
 if TYPE_CHECKING:
