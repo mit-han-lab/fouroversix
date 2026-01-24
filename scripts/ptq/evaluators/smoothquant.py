@@ -1,17 +1,16 @@
 from __future__ import annotations
 
-import contextlib
 from typing import TYPE_CHECKING, Any
 
 import modal
 
 from ...resources import FOUROVERSIX_CACHE_PATH, app, cache_volume, hf_secret
+from ..experiment import Experiment
 from .rtn import RTNEvaluatorImpl, rtn_img
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from fouroversix.utils import AdaptiveBlockScalingRule, DataType
+    from sqlalchemy.orm import Session
 
 
 with rtn_img.imports():
@@ -19,6 +18,9 @@ with rtn_img.imports():
     from fouroversix import fp4_matmul, quantize_model
     from fouroversix.model import FP4Linear
     from transformers import AutoModelForCausalLM
+
+
+WIKITEXT_TRAIN_TASK = "wikitext"
 
 
 class FP4LinearWithSmoothing(FP4Linear):
@@ -58,18 +60,14 @@ class FP4LinearWithSmoothing(FP4Linear):
             out[i] = fp4_matmul(
                 input[i] / s[None, :],
                 self.weight * s[None, :],
-                fp4_format=self.fp4_format,
                 out_dtype=self.out_dtype,
-                out_shape=(input.shape[1], self.weight.shape[0]),
-                a_quantize_kwargs={
+                input_quantize_kwargs={
                     "scale_rule": self.a_scale_rule,
                     "fp4_format": self.fp4_format,
-                    **(self.a_quantize_kwargs or {}),
                 },
-                b_quantize_kwargs={
+                other_quantize_kwargs={
                     "scale_rule": self.w_scale_rule,
                     "fp4_format": self.fp4_format,
-                    **(self.w_quantize_kwargs or {}),
                 },
             )
 
@@ -89,14 +87,73 @@ class FP4LinearWithSmoothing(FP4Linear):
 class SmoothQuantEvaluator(RTNEvaluatorImpl):
     """Evaluate a model using SmoothQuant."""
 
+    @classmethod
+    def get_calibration_tasks(
+        cls,
+        model_name: str,
+        a_scale_rule: AdaptiveBlockScalingRule,
+        w_scale_rule: AdaptiveBlockScalingRule,
+        session: Session,
+    ) -> list[dict[str, Any]]:
+        """
+        Get the kwargs for tasks that should be used to calibrate the given model for
+        this PTQ method before running evaluation.
+        """
+
+        smoothquant_alpha = get_smoothquant_alpha(
+            model_name,
+            a_scale_rule,
+            w_scale_rule,
+            session,
+        )
+
+        if smoothquant_alpha is None:
+            return [
+                {"smoothquant_alpha": candidate_alpha, "tasks": [WIKITEXT_TRAIN_TASK]}
+                for candidate_alpha in [x / 10 for x in range(11)]
+            ]
+
+        return []
+
+    @classmethod
+    def get_calibrated_kwargs(
+        cls,
+        model_name: str,
+        a_scale_rule: AdaptiveBlockScalingRule,
+        w_scale_rule: AdaptiveBlockScalingRule,
+        db_session: Session,
+    ) -> dict[str, Any]:
+        """
+        Get the calibrated kwargs for the given model and scale rules. If this model
+        has not yet been calibrated with these scale rules, an error will be raised.
+        """
+
+        smoothquant_alpha = get_smoothquant_alpha(
+            model_name,
+            a_scale_rule,
+            w_scale_rule,
+            db_session,
+        )
+
+        if smoothquant_alpha is None:
+            msg = (
+                "SmoothQuant has not been calibrated for this combination of model and "
+                "scale rules"
+            )
+            raise ValueError(msg)
+
+        return {
+            "smoothquant_alpha": smoothquant_alpha,
+        }
+
     def quantize_model(
         self,
         model_name: str,
         *,
         device: str,
         dtype: DataType,
-        model_kwargs: dict[str, Any] | None = None,
         smoothquant_alpha: float,
+        model_kwargs: dict[str, Any] | None = None,
         **kwargs: dict[str, Any],
     ) -> AutoModelForCausalLM:
         """Quantize a model using SmoothQuant."""
@@ -133,94 +190,25 @@ class SmoothQuantEvaluator(RTNEvaluatorImpl):
         )
 
 
-@app.cls(
-    image=rtn_img,
-    volumes={FOUROVERSIX_CACHE_PATH.as_posix(): cache_volume},
-    timeout=24 * 60 * 60,
-    nonpreemptible=True,
-)
-class SmoothQuantAutoAlphaEvaluator:
-    """Evaluate a model using SmoothQuant."""
-
-    @modal.method()
-    def evaluate(
-        self,
-        model_name: str,
-        **kwargs: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Quantize a model using SmoothQuant."""
-
-        a_scale_rule = kwargs.get("a_scale_rule")
-        w_scale_rule = kwargs.get("w_scale_rule")
-
-        smoothquant_alpha = get_smoothquant_alpha(
-            model_name,
-            a_scale_rule,
-            w_scale_rule,
-        )
-
-        if smoothquant_alpha is None:
-            alpha_candidates = [x / 10 for x in range(11)]
-
-            best_ppl = None
-
-            for i, result in enumerate(
-                SmoothQuantEvaluator().smoothquant_evaluate.starmap(
-                    [(model_name, alpha) for alpha in alpha_candidates],
-                    kwargs={
-                        **kwargs,
-                        "tasks": ["wikitext_train"],
-                    },
-                ),
-            ):
-                ppl = result["results"]["wikitext_train"]["word_perplexity,none"]
-
-                if smoothquant_alpha is None or ppl < best_ppl:
-                    smoothquant_alpha = alpha_candidates[i]
-                    best_ppl = ppl
-
-                print(f"alpha={alpha_candidates[i]}, ppl={ppl}")
-
-            save_path = get_smoothquant_save_path(
-                model_name,
-                a_scale_rule,
-                w_scale_rule,
-            )
-
-            save_path.parent.mkdir(parents=True, exist_ok=True)
-            with save_path.open("w") as f:
-                f.write(str(smoothquant_alpha))
-
-        return SmoothQuantEvaluator().smoothquant_evaluate.remote(
-            model_name,
-            smoothquant_alpha=smoothquant_alpha,
-            **kwargs,
-        )
-
-
-def get_smoothquant_save_path(
-    model_name: str,
-    a_scale_rule: AdaptiveBlockScalingRule,
-    w_scale_rule: AdaptiveBlockScalingRule,
-) -> Path:
-    return (
-        FOUROVERSIX_CACHE_PATH
-        / "ptq"
-        / "smoothquant"
-        / f"{model_name}-{a_scale_rule.value}-{w_scale_rule.value}"
-    )
-
-
 def get_smoothquant_alpha(
     model_name: str,
     a_scale_rule: AdaptiveBlockScalingRule,
     w_scale_rule: AdaptiveBlockScalingRule,
+    db_session: Session,
 ) -> float | None:
-    save_path = get_smoothquant_save_path(model_name, a_scale_rule, w_scale_rule)
-    smoothquant_alpha = None
+    experiments = (
+        db_session.query(Experiment)
+        .filter(
+            Experiment.ptq_method == "smoothquant",
+            Experiment.task == WIKITEXT_TRAIN_TASK,
+            Experiment.model_name == model_name,
+            Experiment.a_scale_rule == a_scale_rule,
+            Experiment.w_scale_rule == w_scale_rule,
+        )
+        .all()
+    )
 
-    if save_path.exists():
-        with save_path.open("r") as f, contextlib.suppress(ValueError):
-            smoothquant_alpha = float(f.read())
+    if len(experiments) == 0:
+        return None
 
-    return smoothquant_alpha
+    return min(experiments, key=lambda x: x.metric_value).smoothquant_alpha

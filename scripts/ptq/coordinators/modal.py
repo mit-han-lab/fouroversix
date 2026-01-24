@@ -59,11 +59,7 @@ class ModalEvaluationCoordinator(BaseEvaluationCoordinator):
             if len(tasks_to_evaluate) == 0:
                 continue
 
-            evaluator_cls, evaluator_kwargs = get_evaluator(
-                ptq_method,
-                model_name=model_name,
-                **kwargs,
-            )
+            evaluator_cls = get_evaluator(ptq_method)
 
             function_calls.append(
                 evaluator_cls().evaluate_on_modal.spawn(
@@ -71,7 +67,6 @@ class ModalEvaluationCoordinator(BaseEvaluationCoordinator):
                     ptq_method=ptq_method,
                     tasks=tasks_to_evaluate,
                     save_path=FOUROVERSIX_CACHE_PATH / "ptq",
-                    **evaluator_kwargs,
                     **kwargs,
                 ),
             )

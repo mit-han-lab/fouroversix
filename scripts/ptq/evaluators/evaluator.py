@@ -9,6 +9,8 @@ import modal
 import torch
 
 if TYPE_CHECKING:
+    from fouroversix import AdaptiveBlockScalingRule
+    from sqlalchemy.orm import Session
     from transformers import AutoModelForCausalLM
 
 
@@ -28,6 +30,34 @@ class CustomJSONEncoder(json.JSONEncoder):
 
 class PTQEvaluator(ABC):
     """Base class for post-training quantization evaluators."""
+
+    @classmethod
+    def get_calibration_tasks(
+        cls,
+        model_name: str,  # noqa: ARG003
+        a_scale_rule: AdaptiveBlockScalingRule,  # noqa: ARG003
+        w_scale_rule: AdaptiveBlockScalingRule,  # noqa: ARG003
+        save_path: Path,  # noqa: ARG003
+    ) -> list[dict[str, Any]]:
+        """
+        Get the kwargs for tasks that should be used to calibrate the given model for
+        this PTQ method before running evaluation.
+        """
+        return []
+
+    @classmethod
+    def get_calibrated_kwargs(
+        cls,
+        model_name: str,  # noqa: ARG003
+        a_scale_rule: AdaptiveBlockScalingRule,  # noqa: ARG003
+        w_scale_rule: AdaptiveBlockScalingRule,  # noqa: ARG003
+        db_session: Session,  # noqa: ARG003
+    ) -> dict[str, Any]:
+        """
+        Get the calibrated kwargs for the given model and scale rules. If this model
+        has not yet been calibrated with these scale rules, an error will be raised.
+        """
+        return {}
 
     @abstractmethod
     def quantize_model(self, **kwargs: dict[str, Any]) -> AutoModelForCausalLM:
@@ -69,7 +99,7 @@ class PTQEvaluator(ABC):
             tasks=tasks,
             device=device,
             task_manager=TaskManager(
-                include_path=(Path(__file__).parent / "tasks").as_posix(),
+                include_path=(Path(__file__).parent.parent / "tasks").as_posix(),
             ),
         )
 

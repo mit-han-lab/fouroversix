@@ -54,6 +54,7 @@ class BaseEvaluationCoordinator(ABC):
         self,
         model_name: str,
         ptq_method: PTQMethod,
+        kwargs: dict[str, Any],
         full_results: dict[str, Any],
     ) -> None:
         """Save the results of a PTQ experiment to the SQLite database."""
@@ -82,6 +83,9 @@ class BaseEvaluationCoordinator(ABC):
                 metric_name=metric_name,
                 metric_value=metric_value,
                 ptq_method=ptq_method.value,
+                a_scale_rule=kwargs.get("a_scale_rule"),
+                w_scale_rule=kwargs.get("w_scale_rule"),
+                smoothquant_alpha=kwargs.get("smoothquant_alpha"),
                 results=result,
             )
             session.add(experiment)

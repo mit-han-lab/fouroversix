@@ -27,19 +27,56 @@ class LocalEvaluationCoordinator(BaseEvaluationCoordinator):
     ) -> dict[str, Any]:
         """Evaluate a model with a given PTQ method."""
 
-        evaluator_cls, evaluator_kwargs = get_evaluator(
-            ptq_method,
-            model_name=model_name,
-            **kwargs,
-        )
+        evaluator_cls = get_evaluator(ptq_method)
 
         return evaluator_cls().evaluate(
             model_name=model_name,
             ptq_method=ptq_method,
             save_path=FOUROVERSIX_ROOT_DIR / "ptq",
-            **evaluator_kwargs,
             **kwargs,
         )
+
+    def run_calibration_tasks(
+        self,
+        model_names: list[str],
+        ptq_methods: list[PTQMethod],
+        tasks: list[str],
+        task_queue: multiprocessing.Queue,
+        result_queue: multiprocessing.Queue,
+        **kwargs: dict[str, Any],
+    ) -> None:
+        """
+        Run any tasks that should be used to calibrate models for a given PTQ method
+        and set of parameters before running evaluation.
+        """
+
+        experiments = 0
+
+        for model_name, ptq_method in itertools.product(model_names, ptq_methods):
+            tasks_to_evaluate = self.get_tasks_to_evaluate(
+                model_name,
+                ptq_method,
+                tasks,
+            )
+
+            if len(tasks_to_evaluate) == 0:
+                continue
+
+            evaluator_cls = get_evaluator(ptq_method)
+
+            for calibration_task_kwargs in evaluator_cls.get_calibration_tasks(
+                model_name,
+                kwargs.get("a_scale_rule"),
+                kwargs.get("w_scale_rule"),
+                self.get_session(),
+            ):
+                task_queue.put(
+                    (model_name, ptq_method, {**kwargs, **calibration_task_kwargs}),
+                )
+                experiments += 1
+
+        for _ in range(experiments):
+            self.save_results(*result_queue.get())
 
     def start(
         self,
@@ -73,6 +110,17 @@ class LocalEvaluationCoordinator(BaseEvaluationCoordinator):
             p.start()
             workers.append(p)
 
+        # Run calibration tasks if necessary for each model and PTQ method
+        self.run_calibration_tasks(
+            model_names,
+            ptq_methods,
+            tasks,
+            task_queue,
+            result_queue,
+            **kwargs,
+        )
+
+        # Run evaluation tasks after models have been calibrated
         experiments = 0
 
         for model_name, ptq_method in itertools.product(model_names, ptq_methods):
@@ -85,8 +133,21 @@ class LocalEvaluationCoordinator(BaseEvaluationCoordinator):
             if len(tasks_to_evaluate) == 0:
                 continue
 
+            evaluator_cls = get_evaluator(ptq_method)
+
+            calibrated_kwargs = evaluator_cls.get_calibrated_kwargs(
+                model_name,
+                kwargs.get("a_scale_rule"),
+                kwargs.get("w_scale_rule"),
+                self.get_session(),
+            )
+
             task_queue.put(
-                (model_name, ptq_method, {**kwargs, "tasks": tasks_to_evaluate}),
+                (
+                    model_name,
+                    ptq_method,
+                    {**kwargs, "tasks": tasks_to_evaluate, **calibrated_kwargs},
+                ),
             )
             experiments += 1
 
@@ -121,4 +182,4 @@ class LocalEvaluationCoordinator(BaseEvaluationCoordinator):
                 ptq_method,
                 **{**kwargs, "device": device},
             )
-            result_queue.put((model_name, ptq_method, result))
+            result_queue.put((model_name, ptq_method, kwargs, result))
