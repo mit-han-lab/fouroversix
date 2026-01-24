@@ -37,6 +37,69 @@ class ModalEvaluationCoordinator(BaseEvaluationCoordinator):
         # Modal doesn't allow None parameters in modal.parameter()
         return self.group_name_str if self.group_name_str != "" else None
 
+    def run_calibration_tasks(
+        self,
+        model_names: list[str],
+        ptq_methods: list[PTQMethod],
+        tasks: list[str],
+        **kwargs: dict[str, Any],
+    ) -> None:
+        """
+        Run any tasks that should be used to calibrate models for a given PTQ method
+        and set of parameters before running evaluation.
+        """
+
+        function_calls_with_inputs = []
+
+        for model_name, ptq_method in itertools.product(model_names, ptq_methods):
+            tasks_to_evaluate = self.get_tasks_to_evaluate(
+                model_name,
+                ptq_method,
+                tasks,
+            )
+
+            if len(tasks_to_evaluate) == 0:
+                continue
+
+            evaluator_cls = get_evaluator(ptq_method)
+
+            function_calls_with_inputs.extend(
+                [
+                    (
+                        model_name,
+                        ptq_method,
+                        {**kwargs, **calibration_task_kwargs},
+                        evaluator_cls().evaluate_on_modal.spawn(
+                            model_name=model_name,
+                            ptq_method=ptq_method,
+                            save_path=FOUROVERSIX_CACHE_PATH / "ptq",
+                            **{
+                                **kwargs,
+                                "tasks": tasks_to_evaluate,
+                                **calibration_task_kwargs,
+                            },
+                        ),
+                    )
+                    for calibration_task_kwargs in evaluator_cls.get_calibration_tasks(
+                        model_name,
+                        kwargs.get("a_scale_rule"),
+                        kwargs.get("w_scale_rule"),
+                        self.get_session(),
+                    )
+                ],
+            )
+
+        results = modal.FunctionCall.gather(
+            *[function_call for _, _, _, function_call in function_calls_with_inputs],
+        )
+
+        for (model_name, ptq_method, function_call_kwargs, _), result in zip(
+            function_calls_with_inputs,
+            results,
+            strict=True,
+        ):
+            self.save_results(model_name, ptq_method, function_call_kwargs, result)
+
     @modal.method()
     def start(
         self,
@@ -46,6 +109,8 @@ class ModalEvaluationCoordinator(BaseEvaluationCoordinator):
         **kwargs: dict[str, Any],
     ) -> None:
         """Start the evaluation coordinator."""
+
+        self.run_calibration_tasks(model_names, ptq_methods, tasks, **kwargs)
 
         function_calls = []
 
@@ -61,13 +126,20 @@ class ModalEvaluationCoordinator(BaseEvaluationCoordinator):
 
             evaluator_cls = get_evaluator(ptq_method)
 
+            calibrated_kwargs = evaluator_cls.get_calibrated_kwargs(
+                model_name,
+                kwargs.get("a_scale_rule"),
+                kwargs.get("w_scale_rule"),
+                self.get_session(),
+            )
+
             function_calls.append(
                 evaluator_cls().evaluate_on_modal.spawn(
                     model_name=model_name,
                     ptq_method=ptq_method,
                     tasks=tasks_to_evaluate,
                     save_path=FOUROVERSIX_CACHE_PATH / "ptq",
-                    **kwargs,
+                    **{**kwargs, **calibrated_kwargs},
                 ),
             )
 

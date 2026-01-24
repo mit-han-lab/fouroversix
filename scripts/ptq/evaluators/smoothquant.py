@@ -202,8 +202,9 @@ def get_smoothquant_alpha(
             Experiment.ptq_method == "smoothquant",
             Experiment.task == WIKITEXT_TRAIN,
             Experiment.model_name == model_name,
-            Experiment.a_scale_rule == a_scale_rule,
-            Experiment.w_scale_rule == w_scale_rule,
+            Experiment.a_scale_rule == a_scale_rule.value,
+            Experiment.w_scale_rule == w_scale_rule.value,
+            Experiment.smoothquant_alpha.isnot(None),
         )
         .all()
     )

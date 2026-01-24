@@ -1,3 +1,4 @@
+import multiprocessing
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -49,6 +50,19 @@ class BaseEvaluationCoordinator(ABC):
             for task in tasks
             if task not in [experiment.task for experiment in experiments]
         ]
+
+    @abstractmethod
+    def run_calibration_tasks(
+        self,
+        model_names: list[str],
+        ptq_methods: list[PTQMethod],
+        tasks: list[str],
+        **kwargs: dict[str, Any],
+    ) -> None:
+        """
+        Run any tasks that should be used to calibrate models for a given PTQ method
+        and set of parameters before running evaluation.
+        """
 
     def save_results(
         self,
