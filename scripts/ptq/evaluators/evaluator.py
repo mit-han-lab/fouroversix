@@ -105,3 +105,13 @@ class PTQEvaluator(ABC):
         torch.cuda.empty_cache()
 
         return results
+
+    @modal.method()
+    def evaluate_on_modal(
+        self,
+        *args: list[Any],
+        **kwargs: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Evaluate a quantized model on Modal."""
+
+        return self.evaluate(*args, **kwargs)
