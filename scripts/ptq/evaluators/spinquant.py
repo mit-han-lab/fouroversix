@@ -62,7 +62,6 @@ SPINQUANT_ARGS = [
 class SpinQuantOptimizer:
     """Optimize a model with SpinQuant."""
 
-    @modal.method()
     def optimize(
         self,
         model_name: str,
@@ -119,6 +118,15 @@ class SpinQuantOptimizer:
         )
 
         cache_volume.commit()
+
+    @modal.method()
+    def optimize_on_modal(
+        self,
+        *args: list[Any],
+        **kwargs: dict[str, Any],
+    ) -> None:
+        """Optimize a model with SpinQuant on Modal."""
+        return self.optimize(*args, **kwargs)
 
 
 @app.cls(
