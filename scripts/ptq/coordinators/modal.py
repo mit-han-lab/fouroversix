@@ -69,7 +69,7 @@ class ModalEvaluationCoordinator(BaseEvaluationCoordinator):
                         model_name,
                         ptq_method,
                         {**kwargs, **calibration_task_kwargs},
-                        evaluator_cls().evaluate_on_modal.spawn(
+                        evaluator_cls().evaluate.spawn(
                             model_name=model_name,
                             ptq_method=ptq_method,
                             save_path=FOUROVERSIX_CACHE_PATH / "ptq",
@@ -82,9 +82,8 @@ class ModalEvaluationCoordinator(BaseEvaluationCoordinator):
                     )
                     for calibration_task_kwargs in evaluator_cls.get_calibration_tasks(
                         model_name,
-                        kwargs.get("a_scale_rule"),
-                        kwargs.get("w_scale_rule"),
                         self.get_session(),
+                        **kwargs,
                     )
                 ],
             )
@@ -128,13 +127,12 @@ class ModalEvaluationCoordinator(BaseEvaluationCoordinator):
 
             calibrated_kwargs = evaluator_cls.get_calibrated_kwargs(
                 model_name,
-                kwargs.get("a_scale_rule"),
-                kwargs.get("w_scale_rule"),
                 self.get_session(),
+                **kwargs,
             )
 
             function_calls.append(
-                evaluator_cls().evaluate_on_modal.spawn(
+                evaluator_cls().evaluate.spawn(
                     model_name=model_name,
                     ptq_method=ptq_method,
                     tasks=tasks_to_evaluate,

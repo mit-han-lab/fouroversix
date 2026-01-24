@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-import modal
-
 from ...resources import FOUROVERSIX_CACHE_PATH, app, cache_volume, hf_secret
 from ..experiment import Experiment
+from ..utils import PTQMethod
 from .rtn import RTNEvaluatorImpl, rtn_img
 
 if TYPE_CHECKING:
@@ -91,9 +90,8 @@ class SmoothQuantEvaluator(RTNEvaluatorImpl):
     def get_calibration_tasks(
         cls,
         model_name: str,
-        a_scale_rule: AdaptiveBlockScalingRule,
-        w_scale_rule: AdaptiveBlockScalingRule,
         session: Session,
+        **kwargs: dict[str, Any],
     ) -> list[dict[str, Any]]:
         """
         Get the kwargs for tasks that should be used to calibrate the given model for
@@ -102,14 +100,17 @@ class SmoothQuantEvaluator(RTNEvaluatorImpl):
 
         smoothquant_alpha = get_smoothquant_alpha(
             model_name,
-            a_scale_rule,
-            w_scale_rule,
+            kwargs.get("a_scale_rule"),
+            kwargs.get("w_scale_rule"),
             session,
         )
 
         if smoothquant_alpha is None:
             return [
-                {"smoothquant_alpha": candidate_alpha, "tasks": [WIKITEXT_TRAIN]}
+                {
+                    "smoothquant_alpha": candidate_alpha,
+                    "tasks": [WIKITEXT_TRAIN],
+                }
                 for candidate_alpha in [x / 10 for x in range(11)]
             ]
 
@@ -119,9 +120,8 @@ class SmoothQuantEvaluator(RTNEvaluatorImpl):
     def get_calibrated_kwargs(
         cls,
         model_name: str,
-        a_scale_rule: AdaptiveBlockScalingRule,
-        w_scale_rule: AdaptiveBlockScalingRule,
-        db_session: Session,
+        session: Session,
+        **kwargs: dict[str, Any],
     ) -> dict[str, Any]:
         """
         Get the calibrated kwargs for the given model and scale rules. If this model
@@ -130,9 +130,9 @@ class SmoothQuantEvaluator(RTNEvaluatorImpl):
 
         smoothquant_alpha = get_smoothquant_alpha(
             model_name,
-            a_scale_rule,
-            w_scale_rule,
-            db_session,
+            kwargs.get("a_scale_rule"),
+            kwargs.get("w_scale_rule"),
+            session,
         )
 
         if smoothquant_alpha is None:
@@ -142,9 +142,7 @@ class SmoothQuantEvaluator(RTNEvaluatorImpl):
             )
             raise ValueError(msg)
 
-        return {
-            "smoothquant_alpha": smoothquant_alpha,
-        }
+        return {"smoothquant_alpha": smoothquant_alpha}
 
     def quantize_model(
         self,
@@ -174,21 +172,6 @@ class SmoothQuantEvaluator(RTNEvaluatorImpl):
 
         return model
 
-    @modal.method()
-    def smoothquant_evaluate(
-        self,
-        model_name: str,
-        smoothquant_alpha: float,
-        **kwargs: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Evaluate a model using SmoothQuant."""
-
-        return super().evaluate_impl(
-            model_name,
-            smoothquant_alpha=smoothquant_alpha,
-            **kwargs,
-        )
-
 
 def get_smoothquant_alpha(
     model_name: str,
@@ -199,7 +182,7 @@ def get_smoothquant_alpha(
     experiments = (
         db_session.query(Experiment)
         .filter(
-            Experiment.ptq_method == "smoothquant",
+            Experiment.ptq_method == PTQMethod.smoothquant.value,
             Experiment.task == WIKITEXT_TRAIN,
             Experiment.model_name == model_name,
             Experiment.a_scale_rule == a_scale_rule.value,

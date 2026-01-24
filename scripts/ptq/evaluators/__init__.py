@@ -8,7 +8,7 @@ from .gptq import GPTQEvaluator
 from .high_precision import HighPrecisionEvaluator
 from .rtn import RTNEvaluator
 from .smoothquant import SmoothQuantEvaluator
-from .spinquant import SpinQuantEvaluationCoordinator
+from .spinquant import SpinQuantEvaluator
 
 if TYPE_CHECKING:
     from .evaluator import PTQEvaluator
@@ -28,7 +28,7 @@ def get_evaluator(ptq_method: PTQMethod) -> type[PTQEvaluator]:
     if ptq_method == PTQMethod.smoothquant:
         return SmoothQuantEvaluator
     if ptq_method == PTQMethod.spinquant:
-        return SpinQuantEvaluationCoordinator
+        return SpinQuantEvaluator
 
     msg = f"Unsupported PTQ method: {ptq_method}"
     raise ValueError(msg)

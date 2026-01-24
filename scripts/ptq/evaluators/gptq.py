@@ -3,6 +3,9 @@ import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import fouroversix
+from fouroversix.utils import AdaptiveBlockScalingRule, DataType
+
 from ...resources import (
     FOUROVERSIX_CACHE_PATH,
     Dependency,
@@ -14,7 +17,6 @@ from ...resources import (
 from .evaluator import PTQEvaluator
 
 if TYPE_CHECKING:
-    from fouroversix.utils import AdaptiveBlockScalingRule, DataType
     from transformers import AutoModelForCausalLM
 
 CALIBRATION_DATASET = "wikitext"
@@ -44,16 +46,13 @@ class GPTQEvaluator(PTQEvaluator):
         model_name: str,
         *,
         device: str,
-        dtype: "DataType",
-        a_scale_rule: "AdaptiveBlockScalingRule",
-        w_scale_rule: "AdaptiveBlockScalingRule",
+        dtype: DataType,
+        a_scale_rule: AdaptiveBlockScalingRule,
+        w_scale_rule: AdaptiveBlockScalingRule,
         save_path: Path,
         **kwargs: dict[str, Any],  # noqa: ARG002
     ) -> "AutoModelForCausalLM":
         """Quantize a model with GPTQ."""
-
-        import fouroversix
-        from fouroversix.utils import DataType
 
         sys.path.extend(
             [

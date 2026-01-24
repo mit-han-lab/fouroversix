@@ -9,7 +9,6 @@ import modal
 import torch
 
 if TYPE_CHECKING:
-    from fouroversix import AdaptiveBlockScalingRule
     from sqlalchemy.orm import Session
     from transformers import AutoModelForCausalLM
 
@@ -35,9 +34,8 @@ class PTQEvaluator(ABC):
     def get_calibration_tasks(
         cls,
         model_name: str,  # noqa: ARG003
-        a_scale_rule: AdaptiveBlockScalingRule,  # noqa: ARG003
-        w_scale_rule: AdaptiveBlockScalingRule,  # noqa: ARG003
-        save_path: Path,  # noqa: ARG003
+        session: Session,  # noqa: ARG003
+        **kwargs: dict[str, Any],  # noqa: ARG003
     ) -> list[dict[str, Any]]:
         """
         Get the kwargs for tasks that should be used to calibrate the given model for
@@ -49,9 +47,8 @@ class PTQEvaluator(ABC):
     def get_calibrated_kwargs(
         cls,
         model_name: str,  # noqa: ARG003
-        a_scale_rule: AdaptiveBlockScalingRule,  # noqa: ARG003
-        w_scale_rule: AdaptiveBlockScalingRule,  # noqa: ARG003
-        db_session: Session,  # noqa: ARG003
+        session: Session,  # noqa: ARG003
+        **kwargs: dict[str, Any],  # noqa: ARG003
     ) -> dict[str, Any]:
         """
         Get the calibrated kwargs for the given model and scale rules. If this model
@@ -63,6 +60,7 @@ class PTQEvaluator(ABC):
     def quantize_model(self, **kwargs: dict[str, Any]) -> AutoModelForCausalLM:
         """Quantize a model."""
 
+    @modal.method()
     def evaluate(
         self,
         model_name: str,
@@ -107,13 +105,3 @@ class PTQEvaluator(ABC):
         torch.cuda.empty_cache()
 
         return results
-
-    @modal.method()
-    def evaluate_on_modal(
-        self,
-        *args: list[Any],
-        **kwargs: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Evaluate a quantized model on Modal."""
-
-        return self.evaluate(*args, **kwargs)

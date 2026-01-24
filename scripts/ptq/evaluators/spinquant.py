@@ -1,20 +1,27 @@
 from __future__ import annotations
 
 import subprocess
+import sys
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import fouroversix
 import modal
 
 from ...resources import (
     FOUROVERSIX_CACHE_PATH,
-    FOUROVERSIX_INSTALL_PATH,
     Dependency,
     app,
     cache_volume,
     get_image,
     hf_secret,
 )
+from ..utils import get_model_size
 from .evaluator import PTQEvaluator
+
+if TYPE_CHECKING:
+    from fouroversix.utils import AdaptiveBlockScalingRule, DataType
+    from transformers import AutoModelForCausalLM
 
 spinquant_img = get_image(
     dependencies=[
@@ -24,21 +31,9 @@ spinquant_img = get_image(
     ],
 )
 
-with spinquant_img.imports():
-    import sys
-
-    sys.path.append((FOUROVERSIX_INSTALL_PATH / "spinquant").as_posix())
-
-    from eval_utils.main import ptq_model
-    from transformers import AutoConfig, AutoModelForCausalLM
-    from utils.process_args import process_args_ptq
-
-    from .utils import get_model_size
-
-    if TYPE_CHECKING:
-        from fouroversix.utils import AdaptiveBlockScalingRule, DataType
 
 MIN_MODEL_SIZE_FOR_8xB200 = 32
+SPINQUANT_STEPS = 100
 
 SPINQUANT_ARGS = [
     "--model_max_length",
@@ -84,7 +79,12 @@ class SpinQuantOptimizer:
                 "torchrun",
                 "--nnodes=1",
                 "--nproc_per_node=auto",
-                f"{FOUROVERSIX_INSTALL_PATH}/spinquant/optimize_rotation.py",
+                (
+                    Path(fouroversix.__file__).parent.parent.parent
+                    / "third_party"
+                    / "spinquant"
+                    / "optimize_rotation.py"
+                ).as_posix(),
                 "--input_model",
                 model_name,
                 "--output_dir",
@@ -136,13 +136,51 @@ class SpinQuantEvaluator(PTQEvaluator):
         *,
         device: str,
         dtype: DataType,
-        optimized_rotation_path: str,
+        save_path: Path,
         **kwargs: dict[str, Any],
     ) -> AutoModelForCausalLM:
         """Export a quantized model with SpinQuant."""
 
+        import fouroversix
+
+        sys.path.append(
+            (
+                Path(fouroversix.__file__).parent.parent.parent
+                / "third_party"
+                / "spinquant"
+            ).as_posix(),
+        )
+
+        from eval_utils.main import ptq_model
+        from transformers import AutoConfig, AutoModelForCausalLM
+        from utils.process_args import process_args_ptq
+
         a_scale_rule = kwargs.get("a_scale_rule")
         w_scale_rule = kwargs.get("w_scale_rule")
+
+        save_path = (
+            save_path
+            / "spinquant"
+            / f"{model_name}-{a_scale_rule.value}-{w_scale_rule.value}"
+        )
+
+        if not (save_path / "R.bin").exists():
+            model_is_large = get_model_size(model_name) >= MIN_MODEL_SIZE_FOR_8xB200
+
+            if model_is_large:
+                msg = (
+                    "Automatic SpinQuant optimization is not supported for large "
+                    "models. Please optimize the model manually."
+                )
+                raise RuntimeError(msg)
+
+            SpinQuantOptimizer().optimize(
+                model_name,
+                a_scale_rule=a_scale_rule,
+                w_scale_rule=w_scale_rule,
+                spinquant_save_path=save_path.as_posix(),
+                spinquant_steps=SPINQUANT_STEPS,
+            )
 
         sys.argv = [
             sys.argv[0],
@@ -156,7 +194,7 @@ class SpinQuantEvaluator(PTQEvaluator):
             "4",
             "--rotate",
             "--optimized_rotation_path",
-            optimized_rotation_path,
+            (save_path / "R.bin").as_posix(),
             "--a_scale_rule",
             a_scale_rule.value,
             "--w_scale_rule",
@@ -191,52 +229,3 @@ class SpinQuantEvaluator(PTQEvaluator):
         model.to(device)
 
         return model
-
-
-@app.cls(
-    image=spinquant_img,
-    timeout=24 * 60 * 60,
-    volumes={FOUROVERSIX_CACHE_PATH.as_posix(): cache_volume},
-    nonpreemptible=True,
-)
-class SpinQuantEvaluationCoordinator:
-    """Coordinate evaluation of a quantized model with SpinQuant."""
-
-    @modal.method()
-    def evaluate(
-        self,
-        model_name: str,
-        *,
-        spinquant_steps: int = 100,
-        **kwargs: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Train and evaluate a quantized model with SpinQuant."""
-
-        a_scale_rule = kwargs.get("a_scale_rule")
-        w_scale_rule = kwargs.get("w_scale_rule")
-
-        spinquant_save_path = (
-            FOUROVERSIX_CACHE_PATH
-            / "ptq"
-            / "spinquant"
-            / f"{model_name}-{a_scale_rule.value}-{w_scale_rule.value}"
-        )
-
-        if not (spinquant_save_path / "R.bin").exists():
-            model_is_large = get_model_size(model_name) >= MIN_MODEL_SIZE_FOR_8xB200
-
-            SpinQuantOptimizer.with_options(
-                gpu=f"B200:{8 if model_is_large else 1}",
-            )().optimize.remote(
-                model_name,
-                a_scale_rule=a_scale_rule,
-                w_scale_rule=w_scale_rule,
-                spinquant_save_path=spinquant_save_path.as_posix(),
-                spinquant_steps=spinquant_steps,
-            )
-
-        return SpinQuantEvaluator().evaluate.remote(
-            model_name=model_name,
-            optimized_rotation_path=(spinquant_save_path / "R.bin").as_posix(),
-            **kwargs,
-        )

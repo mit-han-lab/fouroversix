@@ -66,9 +66,8 @@ class LocalEvaluationCoordinator(BaseEvaluationCoordinator):
 
             for calibration_task_kwargs in evaluator_cls.get_calibration_tasks(
                 model_name,
-                kwargs.get("a_scale_rule"),
-                kwargs.get("w_scale_rule"),
                 self.get_session(),
+                **kwargs,
             ):
                 task_queue.put(
                     (model_name, ptq_method, {**kwargs, **calibration_task_kwargs}),
@@ -137,9 +136,8 @@ class LocalEvaluationCoordinator(BaseEvaluationCoordinator):
 
             calibrated_kwargs = evaluator_cls.get_calibrated_kwargs(
                 model_name,
-                kwargs.get("a_scale_rule"),
-                kwargs.get("w_scale_rule"),
                 self.get_session(),
+                **kwargs,
             )
 
             task_queue.put(
