@@ -39,26 +39,26 @@ def convert_e2m1_to_fp8_e8m0(x: torch.Tensor) -> torch.Tensor:
     # There might be a better way to do this but I'm feeling lazy right now
     return torch.where(
         (e == 3) & (m == 1),  # noqa: PLR2004
-        torch.tensor(130, dtype=torch.uint8),
+        torch.tensor(130, dtype=torch.uint8, device=x.device),
         torch.where(
             e == 3,  # noqa: PLR2004
-            torch.tensor(129, dtype=torch.uint8),
+            torch.tensor(129, dtype=torch.uint8, device=x.device),
             torch.where(
                 (e == 2) & (m == 1),  # noqa: PLR2004
-                torch.tensor(129, dtype=torch.uint8),
+                torch.tensor(129, dtype=torch.uint8, device=x.device),
                 torch.where(
                     e == 2,  # noqa: PLR2004
-                    torch.tensor(128, dtype=torch.uint8),
+                    torch.tensor(128, dtype=torch.uint8, device=x.device),
                     torch.where(
                         (e == 1) & (m == 1),
-                        torch.tensor(128, dtype=torch.uint8),
+                        torch.tensor(128, dtype=torch.uint8, device=x.device),
                         torch.where(
                             e == 1,
-                            torch.tensor(127, dtype=torch.uint8),
+                            torch.tensor(127, dtype=torch.uint8, device=x.device),
                             torch.where(
                                 (e == 0) & (m == 1),
-                                torch.tensor(126, dtype=torch.uint8),
-                                torch.tensor(0, dtype=torch.uint8),
+                                torch.tensor(126, dtype=torch.uint8, device=x.device),
+                                torch.tensor(0, dtype=torch.uint8, device=x.device),
                             ),
                         ),
                     ),
@@ -209,8 +209,8 @@ class FP4Tensor:
             )
             x_sign = torch.where(
                 ((values >> 3) & 0x1) == 0,
-                torch.tensor(1, dtype=dtype),
-                torch.tensor(-1, dtype=dtype),
+                torch.tensor(1, dtype=dtype, device=self.device),
+                torch.tensor(-1, dtype=dtype, device=self.device),
             )
             result = result * x_sign
         elif self.fp4_format == FP4Format.nvfp4:
@@ -221,4 +221,11 @@ class FP4Tensor:
                     / self.scale_rule.get_maximum_allowed_quantized_value()
                 ).to(dtype)
 
+        if result.shape != self.original_shape:
+            result = result[:self.original_shape[0], :self.original_shape[1]]
         return result
+
+    @property
+    def device(self) -> torch.device:
+        """Get device of the values in this tensor."""
+        return self.e2m1_values.device
