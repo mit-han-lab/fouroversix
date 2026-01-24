@@ -60,7 +60,6 @@ class PTQEvaluator(ABC):
     def quantize_model(self, **kwargs: dict[str, Any]) -> AutoModelForCausalLM:
         """Quantize a model."""
 
-    @modal.method()
     def evaluate(
         self,
         model_name: str,
