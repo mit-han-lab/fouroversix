@@ -20,7 +20,7 @@ with rtn_img.imports():
     from transformers import AutoModelForCausalLM
 
 
-WIKITEXT_TRAIN_TASK = "wikitext"
+WIKITEXT_TRAIN = "wikitext_train"
 
 
 class FP4LinearWithSmoothing(FP4Linear):
@@ -109,7 +109,7 @@ class SmoothQuantEvaluator(RTNEvaluatorImpl):
 
         if smoothquant_alpha is None:
             return [
-                {"smoothquant_alpha": candidate_alpha, "tasks": [WIKITEXT_TRAIN_TASK]}
+                {"smoothquant_alpha": candidate_alpha, "tasks": [WIKITEXT_TRAIN]}
                 for candidate_alpha in [x / 10 for x in range(11)]
             ]
 
@@ -200,7 +200,7 @@ def get_smoothquant_alpha(
         db_session.query(Experiment)
         .filter(
             Experiment.ptq_method == "smoothquant",
-            Experiment.task == WIKITEXT_TRAIN_TASK,
+            Experiment.task == WIKITEXT_TRAIN,
             Experiment.model_name == model_name,
             Experiment.a_scale_rule == a_scale_rule,
             Experiment.w_scale_rule == w_scale_rule,

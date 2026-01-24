@@ -78,4 +78,4 @@ class ModalEvaluationCoordinator(BaseEvaluationCoordinator):
             results,
             strict=True,
         ):
-            self.save_results(model_name, ptq_method, result)
+            self.save_results(model_name, ptq_method, kwargs, result)

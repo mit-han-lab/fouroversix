@@ -1,9 +1,10 @@
 import sys
-from typing import Any
+import warnings
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from ...resources import (
     FOUROVERSIX_CACHE_PATH,
-    FOUROVERSIX_INSTALL_PATH,
     Dependency,
     app,
     cache_volume,
@@ -11,6 +12,10 @@ from ...resources import (
     hf_secret,
 )
 from .evaluator import PTQEvaluator
+
+if TYPE_CHECKING:
+    from fouroversix.utils import AdaptiveBlockScalingRule, DataType
+    from transformers import AutoModelForCausalLM
 
 CALIBRATION_DATASET = "wikitext"
 
@@ -23,25 +28,13 @@ gptq_img = get_image(
     ],
 )
 
-with gptq_img.imports():
-    sys.path.extend(
-        [
-            f"{FOUROVERSIX_INSTALL_PATH}/fpquant",
-            f"{FOUROVERSIX_INSTALL_PATH}/fpquant/fpquant_cli",
-        ],
-    )
-
-    from fouroversix.utils import AdaptiveBlockScalingRule, DataType
-    from fpquant_cli.model_quant import main
-    from transformers import AutoModelForCausalLM
-
 
 @app.cls(
     image=gptq_img,
     gpu="B200",
     secrets=[hf_secret],
     timeout=24 * 60 * 60,
-    volumes={FOUROVERSIX_CACHE_PATH.as_posix(): cache_volume},
+    volumes={FOUROVERSIX_CACHE_PATH: cache_volume},
 )
 class GPTQEvaluator(PTQEvaluator):
     """Evaluate a model after quantizing it with GPTQ."""
@@ -51,16 +44,40 @@ class GPTQEvaluator(PTQEvaluator):
         model_name: str,
         *,
         device: str,
-        dtype: DataType,
-        a_scale_rule: AdaptiveBlockScalingRule,
-        w_scale_rule: AdaptiveBlockScalingRule,
+        dtype: "DataType",
+        a_scale_rule: "AdaptiveBlockScalingRule",
+        w_scale_rule: "AdaptiveBlockScalingRule",
+        save_path: Path,
         **kwargs: dict[str, Any],  # noqa: ARG002
     ) -> "AutoModelForCausalLM":
         """Quantize a model with GPTQ."""
 
+        import fouroversix
+        from fouroversix.utils import DataType
+
+        sys.path.extend(
+            [
+                (
+                    Path(fouroversix.__file__).parent.parent.parent
+                    / "third_party"
+                    / "fp-quant"
+                ).as_posix(),
+            ],
+        )
+
+        from model_quant import main
+        from transformers import AutoModelForCausalLM
+
+        if dtype == DataType.auto:
+            dtype = DataType.bfloat16
+            msg = (
+                "GPTQ only supports bfloat16, dtype is currently set to auto. "
+                "Switching to bfloat16..."
+            )
+            warnings.warn(msg, stacklevel=2)
+
         save_path = (
-            FOUROVERSIX_CACHE_PATH
-            / "ptq"
+            save_path
             / "gptq"
             / (f"{model_name}-{a_scale_rule.value}-{w_scale_rule.value}")
         )

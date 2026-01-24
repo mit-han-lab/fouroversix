@@ -18,17 +18,17 @@ def get_evaluator(ptq_method: PTQMethod) -> type[PTQEvaluator]:
     """Get the evaluator class for the given PTQ method."""
 
     if ptq_method == PTQMethod.awq:
-        return AWQEvaluator, {}
+        return AWQEvaluator
     if ptq_method == PTQMethod.gptq:
-        return GPTQEvaluator, {}
+        return GPTQEvaluator
     if ptq_method == PTQMethod.high_precision:
-        return HighPrecisionEvaluator, {}
+        return HighPrecisionEvaluator
     if ptq_method == PTQMethod.rtn:
-        return RTNEvaluator, {}
+        return RTNEvaluator
     if ptq_method == PTQMethod.smoothquant:
-        return SmoothQuantEvaluator, {}
+        return SmoothQuantEvaluator
     if ptq_method == PTQMethod.spinquant:
-        return SpinQuantEvaluationCoordinator, {}
+        return SpinQuantEvaluationCoordinator
 
     msg = f"Unsupported PTQ method: {ptq_method}"
     raise ValueError(msg)

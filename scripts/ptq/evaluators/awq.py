@@ -13,11 +13,11 @@ from ...resources import (
 )
 from .rtn import RTNEvaluatorImpl
 
-awq_img = get_image(dependencies=[Dependency.fouroversix, Dependency.awq])
-
 if TYPE_CHECKING:
     from fouroversix.utils import AdaptiveBlockScalingRule, DataType
     from transformers import AutoModelForCausalLM
+
+awq_img = get_image(dependencies=[Dependency.fouroversix, Dependency.awq])
 
 
 @app.cls(

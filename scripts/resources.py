@@ -69,13 +69,7 @@ class Submodule(str, Enum):
 
     def get_install_path(self) -> str:
         """Get the path where this submodule will be installed in the Modal image."""
-
-        path = f"{FOUROVERSIX_INSTALL_PATH}/{self.get_local_path()}"
-
-        if self == Submodule.fp_quant:
-            path += "/fpquant_cli"
-
-        return path
+        return f"{FOUROVERSIX_INSTALL_PATH}/{self.get_local_path()}"
 
     def get_local_path(self) -> str:
         """Get the path of the submodule relative to the root directory."""
