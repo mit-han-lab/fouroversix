@@ -226,5 +226,6 @@ class FP4Tensor:
         return result
 
     @property
-    def device(self):
+    def device(self) -> torch.device:
+        """Get device of the values in this tensor."""
         return self.e2m1_values.device
