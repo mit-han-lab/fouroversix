@@ -32,56 +32,19 @@ def convert_e2m1_to_fp8_e4m3(x: torch.Tensor) -> torch.Tensor:
     return ((sign << 7) | (new_exponent << 3) | new_mantissa).view(torch.float8_e4m3fn)
 
 
-def convert_e2m1_to_fp8_e8m0(x: torch.Tensor) -> torch.Tensor:
-    e = (x >> 1) & 0x3
-    m = x & 0x1
-
-    # There might be a better way to do this but I'm feeling lazy right now
-    return torch.where(
-        (e == 3) & (m == 1),  # noqa: PLR2004
-        torch.tensor(130, dtype=torch.uint8, device=x.device),
-        torch.where(
-            e == 3,  # noqa: PLR2004
-            torch.tensor(129, dtype=torch.uint8, device=x.device),
-            torch.where(
-                (e == 2) & (m == 1),  # noqa: PLR2004
-                torch.tensor(129, dtype=torch.uint8, device=x.device),
-                torch.where(
-                    e == 2,  # noqa: PLR2004
-                    torch.tensor(128, dtype=torch.uint8, device=x.device),
-                    torch.where(
-                        (e == 1) & (m == 1),
-                        torch.tensor(128, dtype=torch.uint8, device=x.device),
-                        torch.where(
-                            e == 1,
-                            torch.tensor(127, dtype=torch.uint8, device=x.device),
-                            torch.where(
-                                (e == 0) & (m == 1),
-                                torch.tensor(126, dtype=torch.uint8, device=x.device),
-                                torch.tensor(0, dtype=torch.uint8, device=x.device),
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-        ),
-    ).view(torch.float8_e8m0fnu)
-
-
 def unpack_packed_fp4(
     x: torch.Tensor,
     to_dtype: torch.dtype = torch.float8_e4m3fn,
 ) -> torch.Tensor:
     if to_dtype == torch.float8_e4m3fn:
         convert_function = convert_e2m1_to_fp8_e4m3
-    elif to_dtype == torch.float8_e8m0fnu:
-        convert_function = convert_e2m1_to_fp8_e8m0
     else:
         msg = f"Unsupported dtype: {to_dtype}"
         raise ValueError(msg)
 
     high = (x >> 4) & 0xF
     low = x & 0xF
+
     return torch.stack(
         [convert_function(low), convert_function(high)],
         dim=-1,
@@ -183,11 +146,7 @@ class FP4Tensor:
     def dequantize(self, dtype: torch.dtype = torch.bfloat16) -> torch.Tensor:
         """Return a high-precision tensor with the dequantized values."""
 
-        values = unpack_packed_fp4(
-            self.e2m1_values,
-            to_dtype=self.fp4_format.scale_dtype(),
-        ).to(dtype)
-
+        values = unpack_packed_fp4(self.e2m1_values).to(dtype)
         scales = from_blocked(
             self.scale_factors,
             (
@@ -196,33 +155,21 @@ class FP4Tensor:
             ),
         )
 
-        result = values * scales.to(
-            dtype,
-        ).repeat_interleave(self.fp4_format.block_size(), -1)
+        result = values * scales.to(dtype).repeat_interleave(
+            self.fp4_format.block_size(),
+            -1,
+        )
 
-        if self.fp4_format == FP4Format.mxfp4:
-            high = (self.e2m1_values >> 4) & 0xF
-            low = self.e2m1_values & 0xF
-            values = torch.stack([low, high], dim=-1).reshape(
-                self.e2m1_values.shape[0],
-                self.e2m1_values.shape[1] * 2,
-            )
-            x_sign = torch.where(
-                ((values >> 3) & 0x1) == 0,
-                torch.tensor(1, dtype=dtype, device=self.device),
-                torch.tensor(-1, dtype=dtype, device=self.device),
-            )
-            result = result * x_sign
-        elif self.fp4_format == FP4Format.nvfp4:
-            if self.amax is not None:
-                result = (
-                    result.to(torch.float32)
-                    * self.amax
-                    / self.scale_rule.get_maximum_allowed_quantized_value()
-                ).to(dtype)
+        if self.fp4_format == FP4Format.nvfp4 and self.amax is not None:
+            result = (
+                result.to(torch.float32)
+                * self.amax
+                / self.scale_rule.get_maximum_allowed_quantized_value()
+            ).to(dtype)
 
         if result.shape != self.original_shape:
-            result = result[:self.original_shape[0], :self.original_shape[1]]
+            result = result[: self.original_shape[0], : self.original_shape[1]]
+
         return result
 
     @property
