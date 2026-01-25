@@ -19,6 +19,7 @@ with rtn_img.imports():
     from transformers import AutoModelForCausalLM
 
 
+ALPHA_CANDIDATES = [x / 10 for x in range(11)]
 WIKITEXT_TRAIN = "wikitext_train"
 
 
@@ -105,13 +106,24 @@ class SmoothQuantEvaluator(RTNEvaluatorImpl):
             session,
         )
 
+        calibration_experiments = get_calibration_experiments(
+            model_name,
+            kwargs.get("a_scale_rule"),
+            kwargs.get("w_scale_rule"),
+            session,
+        )
+
         if smoothquant_alpha is None:
             return [
                 {
                     "smoothquant_alpha": candidate_alpha,
                     "tasks": [WIKITEXT_TRAIN],
                 }
-                for candidate_alpha in [x / 10 for x in range(11)]
+                for candidate_alpha in ALPHA_CANDIDATES
+                if not any(
+                    experiment.smoothquant_alpha == candidate_alpha
+                    for experiment in calibration_experiments
+                )
             ]
 
         return []
@@ -173,13 +185,13 @@ class SmoothQuantEvaluator(RTNEvaluatorImpl):
         return model
 
 
-def get_smoothquant_alpha(
+def get_calibration_experiments(
     model_name: str,
     a_scale_rule: AdaptiveBlockScalingRule,
     w_scale_rule: AdaptiveBlockScalingRule,
     db_session: Session,
-) -> float | None:
-    experiments = (
+) -> list[Experiment]:
+    return (
         db_session.query(Experiment)
         .filter(
             Experiment.ptq_method == PTQMethod.smoothquant.value,
@@ -192,7 +204,27 @@ def get_smoothquant_alpha(
         .all()
     )
 
-    if len(experiments) == 0:
+
+def get_smoothquant_alpha(
+    model_name: str,
+    a_scale_rule: AdaptiveBlockScalingRule,
+    w_scale_rule: AdaptiveBlockScalingRule,
+    session: Session,
+) -> float | None:
+    calibration_experiments = get_calibration_experiments(
+        model_name,
+        a_scale_rule,
+        w_scale_rule,
+        session,
+    )
+
+    if not all(
+        any(
+            experiment.smoothquant_alpha == alpha
+            for experiment in calibration_experiments
+        )
+        for alpha in ALPHA_CANDIDATES
+    ):
         return None
 
-    return min(experiments, key=lambda x: x.metric_value).smoothquant_alpha
+    return min(calibration_experiments, key=lambda x: x.metric_value).smoothquant_alpha
