@@ -164,7 +164,10 @@ class FP4Tensor:
             result = (
                 result.to(torch.float32)
                 * self.amax
-                / self.scale_rule.get_maximum_allowed_quantized_value()
+                / (
+                    self.scale_rule.max_allowed_e2m1_value()
+                    * self.scale_rule.max_allowed_e4m3_value()
+                )
             ).to(dtype)
 
         if result.shape != self.original_shape:

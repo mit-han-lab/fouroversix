@@ -12,6 +12,7 @@ E4M3_MAX_VALUE = 448
 E4M3_MAX_FOUROVERSIX = 256
 E4M3_MIN_POSITIVE_NORMAL = 0.015625
 
+# TODO(jack): Reimplement simulations
 ScaleFactorsSimulationMode = Literal["high_precision"] | None
 ValueSimulationMode = (
     Literal[
@@ -26,26 +27,28 @@ ValueSimulationMode = (
 )
 
 
-def fake_quantize_positive_to_e2m1(
+def fake_quantize_to_e2m1(
     x: torch.Tensor,
     *,
-    stochastic_rounding: bool = False,
+    round_style: RoundStyle = RoundStyle.nearest,
 ) -> torch.Tensor:
-    if stochastic_rounding:
-        rbits = torch.rand_like(x) - 0.5
-        step1 = torch.round(2 * x + rbits) / 2
-        step2 = torch.round(x + rbits)
-        step3 = 2 * torch.round(x / 2 + rbits)
+    if round_style == RoundStyle.nearest:
+        step1 = torch.round(2 * x.abs()) / 2
+        step2 = torch.round(x.abs())
+        step3 = 2 * torch.round(x.abs() / 2)
+    elif round_style == RoundStyle.stochastic:
+        rbits = torch.rand_like(x.abs()) - 0.5
+        step1 = torch.round(2 * x.abs() + rbits) / 2
+        step2 = torch.round(x.abs() + rbits)
+        step3 = 2 * torch.round(x.abs() / 2 + rbits)
         step3[step3 > E2M1_MAX_VALUE] = E2M1_MAX_VALUE
-    else:
-        step1 = torch.round(2 * x) / 2
-        step2 = torch.round(x)
-        step3 = 2 * torch.round(x / 2)
 
-    mask1 = x < 2  # noqa: PLR2004
-    mask2 = x < 4  # noqa: PLR2004
+    mask1 = x.abs() < 2  # noqa: PLR2004
+    mask2 = x.abs() < 4  # noqa: PLR2004
 
-    return step1 * mask1 + step2 * (~mask1) * mask2 + step3 * (~mask1) * (~mask2)
+    return x.sign() * (
+        step1 * mask1 + step2 * (~mask1) * mask2 + step3 * (~mask1) * (~mask2)
+    )
 
 
 def quantize_bf16_to_unpacked_fp4(x: torch.Tensor) -> torch.Tensor:
@@ -101,223 +104,126 @@ def pack_unpacked_fp4(x: torch.Tensor) -> torch.Tensor:
     return (high << 4) | low
 
 
-def quantize_bf16_to_scaled_fp4(  # noqa: C901
-    x: torch.Tensor,
-    x_amax: torch.Tensor | None = None,
+def quantize_to_mxfp4(
+    x_scale_blocks: torch.Tensor,
     *,
-    block_size: int,
-    scale_dtype: torch.dtype,
-    return_block_selections: bool = False,
-    scale_factors_simulation_mode: ScaleFactorsSimulationMode = None,
     scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
-    block_scale_2d: bool = False,
-    stochastic_rounding: bool = True,
-    # TODO(jack): Reimplement simulations
-    values_simulation_mode: ValueSimulationMode = None,  # noqa: ARG001
-    values_simulation_threshold: float | None = None,  # noqa: ARG001
-) -> (
-    tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]
-    | tuple[torch.Tensor, torch.Tensor, torch.Tensor | None, torch.Tensor]
-):
-    if block_scale_2d:
-        assert x.ndim == 2  # noqa: PLR2004
-        assert x.shape[1] % block_size == 0
-
-        x_scale_blocks = (
-            x.reshape(-1, block_size, x.shape[1] // block_size, block_size)
-            .permute(0, 2, 1, 3)
-            .reshape(-1, block_size**2)
-            .float()
-        )
-    else:
-        x_scale_blocks = x.reshape(-1, block_size).float()
+) -> tuple[torch.Tensor, torch.Tensor]:
+    assert scale_rule in {
+        AdaptiveBlockScalingRule.always_6,
+        AdaptiveBlockScalingRule.always_4,
+    }
 
     x_scales_hp = (
+        x_scale_blocks.abs().max(axis=-1).values / scale_rule.max_allowed_e2m1_value()
+    )
+
+    x_scales_e8m0_u32 = x_scales_hp.view(torch.int32)
+
+    # Use the 8-bit exponent as the scale factor
+    x_scales_e8m0 = ((x_scales_e8m0_u32 >> 23) & 0xFF).to(torch.uint8)
+
+    # Add one in order to round up
+    x_scales = torch.where(
+        (x_scales_e8m0_u32 & 0x7FFFFF) == 0,
+        x_scales_e8m0,
+        x_scales_e8m0 + 1,
+    )
+
+    # Convert the rounded-up scale factor back to a 32-bit float
+    x_scales_hp = (x_scales.to(torch.int32) << 23).view(torch.float32)
+
+    x_block_scaled = x_scale_blocks / x_scales_hp.unsqueeze(1)
+
+    return x_block_scaled, x_scales
+
+
+def quantize_to_nvfp4(
+    x_scale_blocks: torch.Tensor,
+    x_amax: torch.Tensor,
+    *,
+    scale_rule: AdaptiveBlockScalingRule,
+    scale_expansion_factor: float | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    x_scales_hp = (
         x_scale_blocks.abs().max(axis=-1).values
-        * (
-            E4M3_MAX_VALUE
-            if scale_rule
-            in (AdaptiveBlockScalingRule.always_4, AdaptiveBlockScalingRule.always_6)
-            else E4M3_MAX_FOUROVERSIX
-        )
+        * scale_rule.max_allowed_e4m3_value()
         / x_amax
     )
 
-    x_scales_6 = x_scales_hp.to(scale_dtype)
-    x_scales_4 = (x_scales_hp * (6 / 4)).to(scale_dtype)
+    if scale_expansion_factor is not None:
+        x_scales_hp = x_scales_hp * scale_expansion_factor
 
-    if scale_rule == AdaptiveBlockScalingRule.always_4:
-        x_scales_6 = (x_scales_hp * (4 / 6)).to(scale_dtype)
-        x_scales_4 = x_scales_hp.to(scale_dtype)
-
-    x_block_scaled_6 = torch.where(
-        x_scales_6.unsqueeze(1) != 0,
+    x_scales = x_scales_hp.to(torch.float8_e4m3fn)
+    x_block_scaled = torch.where(
+        x_scales.unsqueeze(1) != 0,
         (
             x_scale_blocks
-            * E2M1_MAX_VALUE
-            * (
-                E4M3_MAX_VALUE
-                if scale_rule
-                in (
-                    AdaptiveBlockScalingRule.always_6,
-                    AdaptiveBlockScalingRule.always_4,
-                )
-                else E4M3_MAX_FOUROVERSIX
-            )
+            * scale_rule.max_allowed_e2m1_value()
+            * scale_rule.max_allowed_e4m3_value()
         )
-        / (x_amax * x_scales_6.unsqueeze(1).to(x_amax.dtype)),
+        / (x_amax * x_scales.to(x_amax.dtype).unsqueeze(1)),
         0,
     )
-    x_block_scaled_4 = torch.where(
-        x_scales_4.unsqueeze(1) != 0,
-        (
-            x_scale_blocks
-            * (
-                E2M1_MAX_FOUR
-                if scale_rule
-                in (
-                    AdaptiveBlockScalingRule.always_6,
-                    AdaptiveBlockScalingRule.always_4,
-                )
-                else E2M1_MAX_VALUE
-            )
-            * (
-                E4M3_MAX_VALUE
-                if scale_rule
-                in (
-                    AdaptiveBlockScalingRule.always_6,
-                    AdaptiveBlockScalingRule.always_4,
-                )
-                else E4M3_MAX_FOUROVERSIX
-            )
-        )
-        / (x_amax * x_scales_4.unsqueeze(1).to(x_amax.dtype)),
-        0,
-    )
+    return x_block_scaled, x_scales
 
-    x_e2m1_6 = x_scale_blocks.sign() * fake_quantize_positive_to_e2m1(
-        x_block_scaled_6.abs(),
-        stochastic_rounding=stochastic_rounding,
+
+def select_fouroversix(
+    x_scale_blocks: torch.Tensor,
+    x_block_scaled_6: torch.Tensor,
+    scales_6: torch.Tensor,
+    x_block_scaled_4: torch.Tensor,
+    scales_4: torch.Tensor,
+    x_amax: torch.Tensor,
+    *,
+    scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
+    round_style: RoundStyle = RoundStyle.nearest,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    x_fake_quantized_6 = fake_quantize_to_e2m1(
+        x_block_scaled_6,
+        round_style=round_style,
     )
-    x_e2m1_4 = x_scale_blocks.sign() * fake_quantize_positive_to_e2m1(
-        x_block_scaled_4.abs(),
-        stochastic_rounding=stochastic_rounding,
+    x_fake_quantized_4 = fake_quantize_to_e2m1(
+        x_block_scaled_4,
+        round_style=round_style,
     )
 
     x_dequantized_6 = (
-        x_e2m1_6
-        * x_scales_6.unsqueeze(1).to(x_amax.dtype)
+        x_fake_quantized_6
+        * scales_6.unsqueeze(1).to(x_amax.dtype)
         * x_amax
         / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX)
     )
     x_dequantized_4 = (
-        x_e2m1_4
-        * x_scales_4.unsqueeze(1).to(x_amax.dtype)
+        x_fake_quantized_4
+        * scales_4.unsqueeze(1).to(x_amax.dtype)
         * x_amax
         / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX)
     )
 
     if scale_rule == AdaptiveBlockScalingRule.abs_max:
-        x_error_4 = (
-            (x_dequantized_4 - x_scale_blocks)
-            .abs()
-            .reshape(-1, block_size)
-            .max(dim=-1)
-            .values
-        )
-        x_error_6 = (
-            (x_dequantized_6 - x_scale_blocks)
-            .abs()
-            .reshape(-1, block_size)
-            .max(dim=-1)
-            .values
-        )
+        x_error_4 = (x_dequantized_4 - x_scale_blocks).abs().max(axis=-1).values
+        x_error_6 = (x_dequantized_6 - x_scale_blocks).abs().max(axis=-1).values
     elif scale_rule == AdaptiveBlockScalingRule.l1_norm:
-        x_error_4 = (
-            (x_dequantized_4 - x_scale_blocks).abs().reshape(-1, block_size).sum(dim=-1)
-        )
-        x_error_6 = (
-            (x_dequantized_6 - x_scale_blocks).abs().reshape(-1, block_size).sum(dim=-1)
-        )
+        x_error_4 = (x_dequantized_4 - x_scale_blocks).abs().sum(axis=-1)
+        x_error_6 = (x_dequantized_6 - x_scale_blocks).abs().sum(axis=-1)
     elif scale_rule == AdaptiveBlockScalingRule.mse:
-        x_error_4 = (
-            ((x_dequantized_4 - x_scale_blocks) ** 2)
-            .reshape(-1, block_size * block_size if block_scale_2d else block_size)
-            .sum(dim=-1)
-        )
-        x_error_6 = (
-            ((x_dequantized_6 - x_scale_blocks) ** 2)
-            .reshape(-1, block_size * block_size if block_scale_2d else block_size)
-            .sum(dim=-1)
-        )
+        x_error_4 = ((x_dequantized_4 - x_scale_blocks) ** 2).sum(axis=-1)
+        x_error_6 = ((x_dequantized_6 - x_scale_blocks) ** 2).sum(axis=-1)
 
-    if scale_rule == AdaptiveBlockScalingRule.always_4:
-        x_quantized = x_e2m1_4
-        scales = x_scales_4
-    elif scale_rule == AdaptiveBlockScalingRule.always_6:
-        x_quantized = x_e2m1_6
-        scales = x_scales_6
-    else:
-        select_4 = (x_error_4 < x_error_6)[:, None]
-        x_quantized = torch.where(
-            select_4,
-            x_e2m1_4.reshape(
-                -1,
-                block_size * block_size if block_scale_2d else block_size,
-            ),
-            x_e2m1_6.reshape(
-                -1,
-                block_size * block_size if block_scale_2d else block_size,
-            ),
-        )
-        scales = torch.where(
-            select_4,
-            x_scales_4.reshape(-1, 1),
-            x_scales_6.reshape(-1, 1),
-        )
-
-    if block_scale_2d:
-        x_quantized = (
-            x_quantized.reshape(
-                -1,
-                x.shape[1] // block_size,
-                block_size,
-                block_size,
-            )
-            .permute(0, 2, 1, 3)
-            .reshape_as(x_quantized)
-        )
-
-        scales = (
-            scales.reshape(1, x.shape[0] // block_size, x.shape[1] // block_size)
-            .broadcast_to(
-                block_size,
-                x.shape[0] // block_size,
-                x.shape[1] // block_size,
-            )
-            .reshape(block_size, x.shape[0] // block_size, x.shape[1] // block_size)
-            .permute(1, 0, 2)
-        )
-
-    x_quantized = pack_unpacked_fp4(
-        quantize_bf16_to_unpacked_fp4(x_quantized.bfloat16().reshape_as(x)),
+    select_4 = (x_error_4 < x_error_6).unsqueeze(1)
+    x_fake_quantized = torch.where(
+        select_4,
+        x_fake_quantized_4.reshape(x_scale_blocks.shape[0], -1),
+        x_fake_quantized_6.reshape(x_scale_blocks.shape[0], -1),
     )
-    reshaped_scales = to_blocked(
-        scales.reshape(
-            x.shape[0],
-            x.shape[1] // block_size,
-        ),
+    scales = torch.where(
+        select_4,
+        scales_4.reshape(-1, 1),
+        scales_6.reshape(-1, 1),
     )
 
-    if scale_factors_simulation_mode != "high_precision":
-        reshaped_scales = reshaped_scales.to(scale_dtype)
-
-    outputs = (x_quantized, reshaped_scales, x_amax)
-
-    if return_block_selections:
-        outputs = (*outputs, select_4)
-
-    return outputs
+    return x_fake_quantized, scales
 
 
 def quantize_to_fp4(
@@ -327,13 +233,9 @@ def quantize_to_fp4(
     *,
     block_scale_2d: bool = False,
     fp4_format: FP4Format = FP4Format.nvfp4,
-    return_block_selections: bool = False,
     round_style: RoundStyle = RoundStyle.nearest,
-    scale_factors_simulation_mode: ScaleFactorsSimulationMode = None,
     scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
     transpose: bool = False,
-    values_simulation_mode: ValueSimulationMode = None,
-    values_simulation_threshold: float | None = None,
 ) -> (
     tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]
     | tuple[torch.Tensor, torch.Tensor, torch.Tensor | None, torch.Tensor]
@@ -351,19 +253,112 @@ def quantize_to_fp4(
             else x.abs().max().float()
         )
 
-    return quantize_bf16_to_scaled_fp4(
-        x,
-        x_amax,
-        block_size=fp4_format.block_size(),
-        scale_dtype=fp4_format.scale_dtype(),
-        stochastic_rounding=round_style == RoundStyle.stochastic,
-        block_scale_2d=block_scale_2d,
-        scale_factors_simulation_mode=scale_factors_simulation_mode,
-        scale_rule=scale_rule,
-        values_simulation_mode=values_simulation_mode,
-        values_simulation_threshold=values_simulation_threshold,
-        return_block_selections=return_block_selections,
+    if block_scale_2d:
+        assert x.ndim == 2  # noqa: PLR2004
+        assert x.shape[1] % fp4_format.block_size() == 0
+
+        x_scale_blocks = (
+            x.reshape(
+                -1,
+                fp4_format.block_size(),
+                x.shape[1] // fp4_format.block_size(),
+                fp4_format.block_size(),
+            )
+            .permute(0, 2, 1, 3)
+            .reshape(-1, fp4_format.block_size() ** 2)
+            .float()
+        )
+    else:
+        x_scale_blocks = x.reshape(-1, fp4_format.block_size()).float()
+
+    x_fake_quantized = None
+
+    if fp4_format == FP4Format.mxfp4:
+        x_block_scaled, scales = quantize_to_mxfp4(
+            x_scale_blocks,
+            scale_rule=scale_rule,
+        )
+    elif fp4_format == FP4Format.nvfp4 and scale_rule in {
+        AdaptiveBlockScalingRule.always_6,
+        AdaptiveBlockScalingRule.always_4,
+    }:
+        x_block_scaled, scales = quantize_to_nvfp4(
+            x_scale_blocks,
+            x_amax,
+            scale_rule=scale_rule,
+        )
+    else:  # Four over six
+        x_block_scaled_6, scales_6 = quantize_to_nvfp4(
+            x_scale_blocks,
+            x_amax,
+            scale_rule=scale_rule,
+        )
+        x_block_scaled_4, scales_4 = quantize_to_nvfp4(
+            x_scale_blocks,
+            x_amax,
+            scale_rule=scale_rule,
+            scale_expansion_factor=1.5,
+        )
+        x_fake_quantized, scales = select_fouroversix(
+            x_scale_blocks,
+            x_block_scaled_6,
+            scales_6,
+            x_block_scaled_4,
+            scales_4,
+            x_amax,
+            scale_rule=scale_rule,
+            round_style=round_style,
+        )
+
+    if x_fake_quantized is None:
+        x_fake_quantized = fake_quantize_to_e2m1(
+            x_block_scaled,
+            round_style=round_style,
+        )
+
+    if block_scale_2d:
+        x_fake_quantized = (
+            x_fake_quantized.reshape(
+                -1,
+                x.shape[1] // fp4_format.block_size(),
+                fp4_format.block_size(),
+                fp4_format.block_size(),
+            )
+            .permute(0, 2, 1, 3)
+            .reshape_as(x_fake_quantized)
+        )
+
+        scales = (
+            scales.reshape(
+                1,
+                x.shape[0] // fp4_format.block_size(),
+                x.shape[1] // fp4_format.block_size(),
+            )
+            .broadcast_to(
+                fp4_format.block_size(),
+                x.shape[0] // fp4_format.block_size(),
+                x.shape[1] // fp4_format.block_size(),
+            )
+            .reshape(
+                fp4_format.block_size(),
+                x.shape[0] // fp4_format.block_size(),
+                x.shape[1] // fp4_format.block_size(),
+            )
+            .permute(1, 0, 2)
+        )
+
+    x_quantized = pack_unpacked_fp4(
+        quantize_bf16_to_unpacked_fp4(x_fake_quantized.bfloat16().reshape_as(x)),
     )
+
+    reshaped_scales = to_blocked(
+        scales.reshape(
+            x.shape[0],
+            x.shape[1] // fp4_format.block_size(),
+        ),
+    )
+
+    return (x_quantized, reshaped_scales, x_amax)
 
 
 def to_blocked(a: torch.Tensor) -> torch.Tensor:

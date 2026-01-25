@@ -1,11 +1,11 @@
-from .resources import app, get_image
+from .resources import Dependency, app, get_image
 
-img = get_image()
+img = get_image(dependencies=[Dependency.transformer_engine, Dependency.fouroversix])
 
 with img.imports():
     import torch
     from fouroversix import AdaptiveBlockScalingRule, QuantizeBackend, quantize_to_fp4
-    from fouroversix.quantize.reference import from_blocked
+    from fouroversix.quantize import from_blocked
 
 
 @app.function(image=img, gpu="B200")
@@ -23,25 +23,25 @@ def create_test_case(
     scale_rule = AdaptiveBlockScalingRule(scale_rule)
 
     x = torch.randn(1024, 1024, dtype=torch.bfloat16, device="cuda")
-    x_e2m1_a, x_sf_a, x_normconst_a = quantize_to_fp4(
+    out_a = quantize_to_fp4(
         x,
         backend=backend_a,
         scale_rule=scale_rule,
     )
-    x_e2m1_b, x_sf_b, x_normconst_b = quantize_to_fp4(
+    out_b = quantize_to_fp4(
         x,
         backend=backend_b,
         scale_rule=scale_rule,
     )
-    x_sf_a = from_blocked(x_sf_a.bfloat16(), (1024, 64))
-    x_sf_b = from_blocked(x_sf_b.bfloat16(), (1024, 64))
+    x_sf_a = from_blocked(out_a.scale_factors.bfloat16(), (1024, 64))
+    x_sf_b = from_blocked(out_b.scale_factors.bfloat16(), (1024, 64))
 
     print(f"x absmax: {x.abs().max()}")
 
-    if not torch.allclose(x_normconst_a, x_normconst_b):
-        print("Backends A and B have different norm constants!")
-        print(f"{backend_a}: {x_normconst_a}")
-        print(f"{backend_b}: {x_normconst_b}")
+    if not torch.allclose(out_a.amax, out_b.amax):
+        print("Backends A and B have different amax values!")
+        print(f"{backend_a}: {out_a.amax}")
+        print(f"{backend_b}: {out_b.amax}")
         return
 
     if not torch.allclose(x_sf_a.bfloat16(), x_sf_b.bfloat16()):
@@ -54,29 +54,31 @@ def create_test_case(
         [i, *_], [j, *_] = torch.where(x_sf_a != x_sf_b)
         print(backend_a)
         print("sf", x_sf_a[i, j])
-        print("e2m1", x_e2m1_a[i, 8 * j : 8 * (j + 1)])
+        print("e2m1", out_a.e2m1_values[i, 8 * j : 8 * (j + 1)])
         print(backend_b)
         print("sf", x_sf_b[i, j])
-        print("e2m1", x_e2m1_b[i, 8 * j : 8 * (j + 1)])
+        print("e2m1", out_b.e2m1_values[i, 8 * j : 8 * (j + 1)])
         print("original")
         print("x", x[i, 16 * j : 16 * (j + 1)])
         return
 
-    if not torch.allclose(x_e2m1_a, x_e2m1_b):
-        mismatch_prop = (x_e2m1_a != x_e2m1_b).sum() / x_e2m1_a.numel()
+    if not torch.allclose(out_a.e2m1_values, out_b.e2m1_values):
+        mismatch_prop = (
+            out_a.e2m1_values != out_b.e2m1_values
+        ).sum() / out_a.e2m1_values.numel()
         print(
             "Backends A and B have different e2m1 values! "
             f"{mismatch_prop:.2%} mismatch",
         )
 
-        [i, *_], [j, *_] = torch.where(x_e2m1_a != x_e2m1_b)
+        [i, *_], [j, *_] = torch.where(out_a.e2m1_values != out_b.e2m1_values)
         print(i, j)
-        print("normconst", x_normconst_a)
+        print("normconst", out_a.amax)
         print("sf", x_sf_a[i, j // 8])
         print(backend_a)
-        print("e2m1", x_e2m1_a[i, 8 * (j // 8) : 8 * (j // 8 + 1)])
+        print("e2m1", out_a.e2m1_values[i, 8 * (j // 8) : 8 * (j // 8 + 1)])
         print(backend_b)
-        print("e2m1", x_e2m1_b[i, 8 * (j // 8) : 8 * (j // 8 + 1)])
+        print("e2m1", out_b.e2m1_values[i, 8 * (j // 8) : 8 * (j // 8 + 1)])
         print("original")
         print("x", x[i, 16 * (j // 8) : 16 * (j // 8 + 1)])
         return

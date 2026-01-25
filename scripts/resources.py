@@ -35,6 +35,7 @@ class Dependency(str, Enum):
     fp_quant = "fp_quant"
     qutlass = "qutlass"
     spinquant = "spinquant"
+    transformer_engine = "transformer_engine"
 
 
 class Submodule(str, Enum):
@@ -347,6 +348,12 @@ def get_image(  # noqa: C901, PLR0912
 
         if dependency == Dependency.spinquant:
             img = add_submodule(img, Submodule.spinquant)
+
+        if dependency == Dependency.transformer_engine:
+            img = img.uv_pip_install(
+                "transformer_engine[pytorch]",
+                extra_options="--no-build-isolation",
+            )
 
     if extra_pip_dependencies is not None:
         img = img.uv_pip_install(*extra_pip_dependencies)

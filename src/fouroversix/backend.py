@@ -83,8 +83,10 @@ class MatmulBackend(str, Enum):
             alpha = (
                 (input.amax * other.amax)
                 / (
-                    input.scale_rule.get_maximum_allowed_quantized_value()
-                    * other.scale_rule.get_maximum_allowed_quantized_value()
+                    input.scale_rule.max_allowed_e2m1_value()
+                    * input.scale_rule.max_allowed_e4m3_value()
+                    * other.scale_rule.max_allowed_e2m1_value()
+                    * other.scale_rule.max_allowed_e4m3_value()
                 )
             ).to(torch.float32)
 

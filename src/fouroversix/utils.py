@@ -34,16 +34,18 @@ class AdaptiveBlockScalingRule(str, Enum):
             AdaptiveBlockScalingRule.mse: 3,
         }[self]
 
-    def get_maximum_allowed_quantized_value(self) -> int:
-        """Return the maximum allowed quantized value for the rule."""
+    def max_allowed_e2m1_value(self) -> int:
+        """Return the maximum allowed E2M1 value for the rule."""
+        return 4 if self == AdaptiveBlockScalingRule.always_4 else 6
 
-        return {
-            AdaptiveBlockScalingRule.always_4: 4 * 448,
-            AdaptiveBlockScalingRule.always_6: 6 * 448,
-            AdaptiveBlockScalingRule.l1_norm: 6 * 256,
-            AdaptiveBlockScalingRule.mse: 6 * 256,
-            AdaptiveBlockScalingRule.abs_max: 6 * 256,
-        }[self]
+    def max_allowed_e4m3_value(self) -> int:
+        """Return the maximum allowed E4M3 value for the rule."""
+        return (
+            448
+            if self
+            in {AdaptiveBlockScalingRule.always_6, AdaptiveBlockScalingRule.always_4}
+            else 256
+        )
 
 
 class DataType(str, Enum):
