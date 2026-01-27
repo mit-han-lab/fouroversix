@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from abc import ABC, abstractmethod
+from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -69,6 +70,7 @@ class PTQEvaluator(ABC):
         max_length: int,
         tasks: list[str],
         trust_remote_code: bool = False,
+        disable_inference_mode: bool = False,
         **kwargs: dict[str, Any],
     ) -> dict[str, Any]:
         """Evaluate a quantized model with lm-eval."""
@@ -76,32 +78,37 @@ class PTQEvaluator(ABC):
         from lm_eval import evaluator, models
         from lm_eval.tasks import TaskManager
 
-        if isinstance(model_name, str):
-            model = self.quantize_model(
-                model_name=model_name,
-                device=device,
-                dtype=dtype,
-                model_kwargs={"trust_remote_code": trust_remote_code},
-                **kwargs,
-            )
-        else:
-            model = model_name
-
-        results = evaluator.simple_evaluate(
-            model=models.huggingface.HFLM(
-                pretrained=model,
-                device=device,
-                max_length=max_length,
-            ),
-            tasks=tasks,
-            device=device,
-            task_manager=TaskManager(
-                include_path=(Path(__file__).parent.parent / "tasks").as_posix(),
-            ),
+        inference_context = (
+            nullcontext() if disable_inference_mode else torch.inference_mode()
         )
 
-        del model
-        torch.cuda.empty_cache()
+        with inference_context:
+            if isinstance(model_name, str):
+                model = self.quantize_model(
+                    model_name=model_name,
+                    device=device,
+                    dtype=dtype,
+                    model_kwargs={"trust_remote_code": trust_remote_code},
+                    **kwargs,
+                )
+            else:
+                model = model_name
+
+            results = evaluator.simple_evaluate(
+                model=models.huggingface.HFLM(
+                    pretrained=model,
+                    device=device,
+                    max_length=max_length,
+                ),
+                tasks=tasks,
+                device=device,
+                task_manager=TaskManager(
+                    include_path=(Path(__file__).parent.parent / "tasks").as_posix(),
+                ),
+            )
+
+            del model
+            torch.cuda.empty_cache()
 
         return results
 

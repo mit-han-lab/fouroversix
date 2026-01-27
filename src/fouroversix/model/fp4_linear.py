@@ -33,10 +33,6 @@ class FP4LinearFunction(torch.autograd.Function):
         provided in low precision.
         """
 
-        if input.ndim not in {2, 3}:
-            msg = "Input must be 2D or 3D"
-            raise ValueError(msg)
-
         if isinstance(weight, torch.Tensor):
             ctx.save_for_backward(input, weight, bias)
             weight = quantize_to_fp4(
@@ -60,37 +56,16 @@ class FP4LinearFunction(torch.autograd.Function):
         if ctx.g_scale_rule is not None:
             assert ctx.a_scale_rule == ctx.g_scale_rule  # noqa: S101
 
-        if input.ndim == 2:  # noqa: PLR2004
-            out = fp4_matmul(
-                input[0],
-                weight,
-                input_quantize_kwargs={
-                    "backend": quantize_backend,
-                    "fp4_format": fp4_format,
-                    "scale_rule": a_scale_rule,
-                },
-                out_dtype=out_dtype,
-            ).unsqueeze(0)
-        elif input.ndim == 3:  # noqa: PLR2004
-            out = torch.empty(
-                *input.shape[:-1],
-                weight.original_shape[0],
-                device=input.device,
-                dtype=out_dtype,
-            )
-
-            # Slow bmm
-            for i in range(input.shape[0]):
-                out[i] = fp4_matmul(
-                    input[i],
-                    weight,
-                    input_quantize_kwargs={
-                        "backend": quantize_backend,
-                        "fp4_format": fp4_format,
-                        "scale_rule": a_scale_rule,
-                    },
-                    out_dtype=out_dtype,
-                )
+        out = fp4_matmul(
+            input.reshape(-1, input.shape[-1]),
+            weight,
+            input_quantize_kwargs={
+                "backend": quantize_backend,
+                "fp4_format": fp4_format,
+                "scale_rule": a_scale_rule,
+            },
+            out_dtype=out_dtype,
+        ).reshape(*input.shape[:-1], weight.original_shape[0])
 
         assert out.dtype == torch.bfloat16  # noqa: S101
 
