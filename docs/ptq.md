@@ -8,6 +8,12 @@ Before doing anything, make sure you've installed fouroversix with our test depe
 pip install -e .[tests] --no-build-isolation
 ```
 
+Also, make sure you've cloned all of our submodules:
+
+```bash
+git submodule update --init
+```
+
 Then, depending on which PTQ method you would like to test, you may need to run some additional commands.
 
 ### AWQ
