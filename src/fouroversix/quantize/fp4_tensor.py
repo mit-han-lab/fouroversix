@@ -81,7 +81,7 @@ class FP4Tensor:
         self.scale_rule = scale_rule
 
         rows_div = 128
-        # The scale factor layout requires 4 layouts along the K dimension for both
+        # The scale factor layout requires 4 blocks along the K dimension for both
         # MXFP4 and NVFP4. See:
         # https://docs.nvidia.com/cutlass/latest/media/docs/cpp/blackwell_functionality.html#scale-factor-layouts
         cols_div = 4 * fp4_format.block_size()

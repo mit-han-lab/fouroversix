@@ -1,30 +1,12 @@
 from __future__ import annotations
 
-from typing import Literal
-
 import torch
 from fouroversix.utils import AdaptiveBlockScalingRule, FP4Format, RoundStyle
 
-MIN_ALLOWED_NORM_CONSTANT = 1e-12
 E2M1_MAX_VALUE = 6
 E2M1_MAX_FOUR = 4
 E4M3_MAX_VALUE = 448
 E4M3_MAX_FOUROVERSIX = 256
-E4M3_MIN_POSITIVE_NORMAL = 0.015625
-
-# TODO(jack): Reimplement simulations
-ScaleFactorsSimulationMode = Literal["high_precision"] | None
-ValueSimulationMode = (
-    Literal[
-        "all_in_high_precision",
-        "nonzeros_in_high_precision",
-        "zeros_in_high_precision",
-        "greater_than_threshold_in_high_precision",
-        "less_than_threshold_in_high_precision",
-        "nvint4",
-    ]
-    | None
-)
 
 
 def fake_quantize_to_e2m1(
