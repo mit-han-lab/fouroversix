@@ -7,10 +7,6 @@ from fouroversix import (
     RoundStyle,
     quantize_to_fp4,
 )
-from fouroversix.quantize.reference import (
-    E4M3_MIN_POSITIVE_NORMAL,
-    MIN_ALLOWED_NORM_CONSTANT,
-)
 from fouroversix.quantize.rht_utils import get_rht_matrix
 
 
@@ -180,12 +176,12 @@ def test_zeros(scale_rule: AdaptiveBlockScalingRule) -> None:
     x_e2m1_expected = torch.zeros(1024, 512, dtype=torch.uint8, device=device)
     x_sf_expected = torch.full(
         (1024 * 1024 // 16,),
-        E4M3_MIN_POSITIVE_NORMAL,
+        0,
         dtype=torch.float8_e4m3fn,
         device=device,
     )
     x_normconst_expected = torch.tensor(
-        MIN_ALLOWED_NORM_CONSTANT,
+        0,
         dtype=torch.bfloat16,
         device=device,
     )

@@ -3,11 +3,7 @@ from __future__ import annotations
 import torch
 import triton
 import triton.language as tl
-from fouroversix.quantize.reference import (
-    E2M1_MAX_VALUE,
-    E4M3_MAX_VALUE,
-    E4M3_MIN_POSITIVE_NORMAL,
-)
+from fouroversix.quantize.reference import E2M1_MAX_VALUE, E4M3_MAX_VALUE
 from fouroversix.utils import AdaptiveBlockScalingRule, FP4Format, RoundStyle
 from triton.tools.tensor_descriptor import TensorDescriptor
 
@@ -15,7 +11,6 @@ E2M1_MAX_VALUE = tl.constexpr(E2M1_MAX_VALUE)
 E2M1_MAX_FOUR = tl.constexpr(4)
 E4M3_MAX_VALUE = tl.constexpr(E4M3_MAX_VALUE)
 E4M3_MAX_FOUROVERSIX = tl.constexpr(256)
-E4M3_MIN_POSITIVE_NORMAL = tl.constexpr(E4M3_MIN_POSITIVE_NORMAL)
 SCALE_MEGABLOCK_SIZE = tl.constexpr(512)
 
 FP4_FORMAT_MXFP4 = tl.constexpr(FP4Format.mxfp4.value)
