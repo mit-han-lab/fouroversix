@@ -32,7 +32,6 @@ class RTNEvaluatorImpl(PTQEvaluator):
         *,
         device: str,
         dtype: DataType,
-        quantize_backend: QuantizeBackend | None = None,
         model_kwargs: dict[str, Any] | None = None,
         **kwargs: dict[str, Any],
     ) -> AutoModelForCausalLM:
@@ -44,12 +43,8 @@ class RTNEvaluatorImpl(PTQEvaluator):
             dtype=dtype.torch(),
             **(model_kwargs or {}),
         )
-        quantize_model(
-            model,
-            a_quantize_kwargs={"backend": quantize_backend},
-            w_quantize_kwargs={"backend": quantize_backend},
-            **kwargs,
-        )
+
+        quantize_model(model, **kwargs)
         return model
 
 

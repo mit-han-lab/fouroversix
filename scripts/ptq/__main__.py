@@ -64,10 +64,6 @@ def cli(group_name: str | None, **kwargs: dict[str, Any]) -> None:
                 msg = "MXFP4 is only supported with RTN"
                 raise ValueError(msg)
 
-            if kwargs.get("quantize_backend") is not None:
-                msg = "Setting the quantization backend is only supported with RTN"
-                raise ValueError(msg)
-
             if kwargs.get("weight_scale_2d"):
                 msg = "2D weight scales are only supported with RTN"
                 raise ValueError(msg)

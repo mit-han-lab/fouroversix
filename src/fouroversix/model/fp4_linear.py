@@ -1,7 +1,7 @@
 from typing import Any
 
 import torch
-from fouroversix.backend import QuantizeBackend
+from fouroversix.backend import MatmulBackend, QuantizeBackend
 from fouroversix.frontend import fp4_matmul, quantize_to_fp4
 from fouroversix.quantize import FP4Tensor, get_rht_matrix
 from fouroversix.utils import AdaptiveBlockScalingRule, FP4Format, RoundStyle
@@ -25,6 +25,7 @@ class FP4LinearFunction(torch.autograd.Function):
         g_scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
         w_scale_2d: bool = False,  # noqa: FBT001, FBT002
         out_dtype: torch.dtype = torch.bfloat16,
+        matmul_backend: MatmulBackend | None = None,
         quantize_backend: QuantizeBackend | None = None,
     ) -> tuple[torch.Tensor,]:
         """
@@ -49,6 +50,7 @@ class FP4LinearFunction(torch.autograd.Function):
         ctx.g_scale_rule = g_scale_rule
         ctx.w_scale_2d = w_scale_2d
         ctx.out_dtype = out_dtype
+        ctx.matmul_backend = matmul_backend
         ctx.quantize_backend = quantize_backend
 
         assert ctx.a_scale_rule == ctx.w_scale_rule  # noqa: S101
@@ -59,6 +61,7 @@ class FP4LinearFunction(torch.autograd.Function):
         out = fp4_matmul(
             input.reshape(-1, input.shape[-1]),
             weight,
+            backend=matmul_backend,
             input_quantize_kwargs={
                 "backend": quantize_backend,
                 "fp4_format": fp4_format,
@@ -89,6 +92,7 @@ class FP4LinearFunction(torch.autograd.Function):
         grad_input = fp4_matmul(
             grad_output[0],
             weight,
+            backend=ctx.matmul_backend,
             input_quantize_kwargs={
                 "backend": ctx.quantize_backend,
                 "scale_rule": ctx.g_scale_rule,
@@ -108,6 +112,7 @@ class FP4LinearFunction(torch.autograd.Function):
         grad_weight = fp4_matmul(
             grad_output[0],
             input[0],
+            backend=ctx.matmul_backend,
             input_quantize_kwargs={
                 "backend": ctx.quantize_backend,
                 "transpose": True,
@@ -141,6 +146,7 @@ class FP4LinearFunction(torch.autograd.Function):
             None,
             None,
             None,
+            None,
         )
 
 
@@ -159,6 +165,7 @@ class FP4Linear(nn.Linear):
         a_scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
         w_scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
         w_scale_2d: bool = False,
+        matmul_backend: MatmulBackend | None = None,
         quantize_backend: QuantizeBackend | None = None,
         **kwargs: dict[str, Any],  # noqa: ARG002
     ) -> None:
@@ -169,6 +176,7 @@ class FP4Linear(nn.Linear):
         self.w_scale_rule = w_scale_rule
         self.w_scale_2d = w_scale_2d
         self.out_dtype = torch.bfloat16
+        self.matmul_backend = matmul_backend
         self.quantize_backend = quantize_backend
 
     def apply_ptq(self) -> None:
@@ -197,6 +205,7 @@ class FP4Linear(nn.Linear):
             None,
             self.w_scale_2d,
             self.out_dtype,
+            self.matmul_backend,
             self.quantize_backend,
         )
 
@@ -236,6 +245,7 @@ class TrainableFP4Linear(FP4Linear):
         a_scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
         w_scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
         g_scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
+        matmul_backend: MatmulBackend | None = None,
         quantize_backend: QuantizeBackend | None = None,
     ) -> None:
         super().__init__(
@@ -248,6 +258,7 @@ class TrainableFP4Linear(FP4Linear):
             a_scale_rule=a_scale_rule,
             w_scale_rule=w_scale_rule,
             w_scale_2d=True,
+            matmul_backend=matmul_backend,
             quantize_backend=quantize_backend,
         )
 
@@ -266,6 +277,7 @@ class TrainableFP4Linear(FP4Linear):
             self.g_scale_rule,
             self.w_scale_2d,
             self.out_dtype,
+            self.matmul_backend,
             self.quantize_backend,
         )
 
