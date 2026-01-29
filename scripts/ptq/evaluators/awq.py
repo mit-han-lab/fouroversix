@@ -3,6 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import torch
+import torch.nn.functional as F
+from fouroversix.model import FP4Linear
+
 from ...resources import (
     FOUROVERSIX_CACHE_PATH,
     Dependency,
@@ -18,6 +22,36 @@ if TYPE_CHECKING:
     from transformers import AutoModelForCausalLM
 
 awq_img = get_image(dependencies=[Dependency.fouroversix, Dependency.awq])
+
+
+class FP4LinearForAWQ(FP4Linear):
+    """
+    Drop-in replacement for `FP4Linear` that quantizes the weights and activations
+    during AWQ calibration.
+    """
+
+    def __init__(self, *args: list[Any], **kwargs: dict[str, Any]) -> None:
+        super().__init__(*args, **kwargs)
+        self.high_precision = False
+
+    def apply_ptq(self) -> None:
+        """
+        Override the parent method to do nothing, since we need the high-precision
+        weight when calibrating with AWQ.
+        """
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass that can optionally be run in high precision. This is used to
+        calculate the high-precision output to compare to during the auto-scale process
+        in AWQ calibration.
+        """
+
+        return (
+            super().forward(input)
+            if self.high_precision
+            else F.linear(input, self.weight, self.bias)
+        )
 
 
 @app.cls(
@@ -63,6 +97,14 @@ class AWQEvaluator(RTNEvaluatorImpl):
                 **(model_kwargs or {}),
             ).eval()
 
+            quantize_model(
+                model,
+                a_scale_rule=a_scale_rule,
+                w_scale_rule=w_scale_rule,
+                linear_cls=FP4LinearForAWQ,
+                **kwargs,
+            )
+
             enc = AutoTokenizer.from_pretrained(
                 model_name,
                 use_fast=False,
@@ -72,18 +114,8 @@ class AWQEvaluator(RTNEvaluatorImpl):
             awq_results = run_awq(
                 model,
                 enc,
-                w_bit=4,
-                a_bit=4,
-                w_q_config={
-                    "zero_point": False,
-                    "q_group_size": -1,
-                    "scale_rule": w_scale_rule,
-                },
-                a_q_config={
-                    "zero_point": False,
-                    "q_group_size": -1,
-                    "scale_rule": a_scale_rule,
-                },
+                w_bit=16,
+                q_config={"q_group_size": -1, "zero_point": False},
                 n_samples=128,
                 seqlen=512,
                 calib_data="wikitext",
@@ -100,7 +132,7 @@ class AWQEvaluator(RTNEvaluatorImpl):
         )
 
         # Apply AWQ
-        awq_results = torch.load(save_path, map_location="cpu")
+        awq_results = torch.load(save_path, map_location="cuda")
         apply_awq(model, awq_results)
 
         # Quantize the model

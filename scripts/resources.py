@@ -236,7 +236,7 @@ def get_image(  # noqa: C901, PLR0912
     for dependency in dependencies:
         if dependency == Dependency.awq:
             img = add_submodule(img, Submodule.llm_awq).run_commands(
-                f"pip install --no-deps {Submodule.llm_awq.get_install_path()}",
+                f"pip install --no-deps -e {Submodule.llm_awq.get_install_path()}",
             )
 
         if dependency == Dependency.fast_hadamard_transform:
