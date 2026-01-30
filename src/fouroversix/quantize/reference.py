@@ -5,8 +5,18 @@ from fouroversix.utils import AdaptiveBlockScalingRule, FP4Format, RoundStyle
 
 E2M1_MAX_VALUE = 6
 E2M1_MAX_FOUR = 4
+SCALED_INT4_MAX_VALUE = 6
+INT4_MAX_VALUE = 7
 E4M3_MAX_VALUE = 448
 E4M3_MAX_FOUROVERSIX = 256
+
+
+def fake_quantize_to_int4(
+    x: torch.Tensor,
+    *,
+    round_style: RoundStyle = RoundStyle.nearest,
+) -> torch.Tensor:
+    return (x * (7 / 6)).round() * (6 / 7)
 
 
 def fake_quantize_to_e2m1(
@@ -86,6 +96,26 @@ def pack_unpacked_fp4(x: torch.Tensor) -> torch.Tensor:
     return (high << 4) | low
 
 
+def quantize_to_nvint4(
+    x_scale_blocks: torch.Tensor,
+    x_amax: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    x_scales_hp = x_scale_blocks.abs().max(axis=-1).values * E4M3_MAX_VALUE / x_amax
+    x_scales = x_scales_hp.to(torch.float8_e4m3fn)
+    x_block_scaled = torch.where(
+        x_scales.unsqueeze(1) != 0,
+        (x_scale_blocks * SCALED_INT4_MAX_VALUE * E4M3_MAX_VALUE)
+        / (x_amax * x_scales.to(x_amax.dtype).unsqueeze(1)),
+        0,
+    )
+    x_block_scaled = torch.clamp(
+        x_block_scaled,
+        min=-SCALED_INT4_MAX_VALUE,
+        max=SCALED_INT4_MAX_VALUE,
+    )
+    return x_block_scaled, x_scales
+
+
 def quantize_to_mxfp4(
     x_scale_blocks: torch.Tensor,
     *,
@@ -96,9 +126,9 @@ def quantize_to_mxfp4(
         AdaptiveBlockScalingRule.always_4,
     }
 
-    x_scales_hp = (
-        x_scale_blocks.abs().max(axis=-1).values / scale_rule.max_allowed_e2m1_value()
-    )
+    x_scales_hp = x_scale_blocks.abs().max(
+        axis=-1,
+    ).values / FP4Format.mxfp4.max_allowed_e2m1_value(scale_rule)
 
     x_scales_e8m0_u32 = x_scales_hp.view(torch.int32)
 
@@ -129,7 +159,7 @@ def quantize_to_nvfp4(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     x_scales_hp = (
         x_scale_blocks.abs().max(axis=-1).values
-        * scale_rule.max_allowed_e4m3_value()
+        * FP4Format.nvfp4.max_allowed_e4m3_value(scale_rule)
         / x_amax
     )
 
@@ -141,8 +171,8 @@ def quantize_to_nvfp4(
         x_scales.unsqueeze(1) != 0,
         (
             x_scale_blocks
-            * scale_rule.max_allowed_e2m1_value()
-            * scale_rule.max_allowed_e4m3_value()
+            * FP4Format.nvfp4.max_allowed_e2m1_value(scale_rule)
+            * FP4Format.nvfp4.max_allowed_e4m3_value(scale_rule)
         )
         / (x_amax * x_scales.to(x_amax.dtype).unsqueeze(1)),
         0,
@@ -208,6 +238,52 @@ def select_fouroversix(
     return x_fake_quantized, scales
 
 
+def select_intfloat(
+    x_scale_blocks: torch.Tensor,
+    x_block_scaled_fp: torch.Tensor,
+    x_block_scaled_int: torch.Tensor,
+    scales: torch.Tensor,
+    x_amax: torch.Tensor,
+    *,
+    scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
+    round_style: RoundStyle = RoundStyle.nearest,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    x_fake_quantized_fp = fake_quantize_to_e2m1(
+        x_block_scaled_fp,
+        round_style=round_style,
+    )
+    x_fake_quantized_int = fake_quantize_to_int4(
+        x_block_scaled_int,
+        round_style=round_style,
+    )
+
+    x_dequantized_fp = (
+        x_fake_quantized_fp
+        * scales.unsqueeze(1).to(x_amax.dtype)
+        * x_amax
+        / (E2M1_MAX_VALUE * E4M3_MAX_VALUE)
+    )
+    x_dequantized_int = (
+        x_fake_quantized_int
+        * scales.unsqueeze(1).to(x_amax.dtype)
+        * x_amax
+        / (SCALED_INT4_MAX_VALUE * E4M3_MAX_VALUE)
+    )
+
+    if scale_rule == AdaptiveBlockScalingRule.mse:
+        x_error_fp = ((x_dequantized_fp - x_scale_blocks) ** 2).sum(axis=-1)
+        x_error_int = ((x_dequantized_int - x_scale_blocks) ** 2).sum(axis=-1)
+
+    select_int = (x_error_int < x_error_fp).unsqueeze(1)
+    x_fake_quantized = torch.where(
+        select_int,
+        x_fake_quantized_int.reshape(x_scale_blocks.shape[0], -1),
+        x_fake_quantized_fp.reshape(x_scale_blocks.shape[0], -1),
+    )
+
+    return x_fake_quantized, scales
+
+
 def quantize_to_fp4(
     x: torch.Tensor,
     x_amax: torch.Tensor | None = None,
@@ -218,10 +294,9 @@ def quantize_to_fp4(
     round_style: RoundStyle = RoundStyle.nearest,
     scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
     transpose: bool = False,
-) -> (
-    tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]
-    | tuple[torch.Tensor, torch.Tensor, torch.Tensor | None, torch.Tensor]
-):
+    pack_values: bool = True,
+    use_blackwell_scale_layout: bool = True,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if transpose:
         x = x.T
 
@@ -259,6 +334,25 @@ def quantize_to_fp4(
         x_block_scaled, scales = quantize_to_mxfp4(
             x_scale_blocks,
             scale_rule=scale_rule,
+        )
+    elif fp4_format == FP4Format.sif4:
+        x_block_scaled_fp, scales = quantize_to_nvfp4(
+            x_scale_blocks,
+            x_amax,
+            scale_rule=AdaptiveBlockScalingRule.always_6,
+        )
+        x_block_scaled_int, _ = quantize_to_nvint4(
+            x_scale_blocks,
+            x_amax,
+        )
+        x_fake_quantized, scales = select_intfloat(
+            x_scale_blocks,
+            x_block_scaled_fp,
+            x_block_scaled_int,
+            scales,
+            x_amax,
+            scale_rule=scale_rule,
+            round_style=round_style,
         )
     elif fp4_format == FP4Format.nvfp4 and scale_rule in {
         AdaptiveBlockScalingRule.always_6,
@@ -329,18 +423,27 @@ def quantize_to_fp4(
             .permute(1, 0, 2)
         )
 
-    x_quantized = pack_unpacked_fp4(
-        quantize_bf16_to_unpacked_fp4(x_fake_quantized.bfloat16().reshape_as(x)),
-    )
+    if pack_values:
+        x_quantized = pack_unpacked_fp4(
+            quantize_bf16_to_unpacked_fp4(x_fake_quantized.bfloat16().reshape_as(x)),
+        )
+    else:
+        x_quantized = x_fake_quantized.bfloat16().reshape_as(x)
 
-    reshaped_scales = to_blocked(
-        scales.reshape(
+    if use_blackwell_scale_layout:
+        reshaped_scales = to_blocked(
+            scales.reshape(
+                x.shape[0],
+                x.shape[1] // fp4_format.block_size(),
+            ),
+        )
+    else:
+        reshaped_scales = scales.reshape(
             x.shape[0],
             x.shape[1] // fp4_format.block_size(),
-        ),
-    )
+        )
 
-    return (x_quantized, reshaped_scales, x_amax)
+    return x_quantized, reshaped_scales, x_amax
 
 
 def to_blocked(a: torch.Tensor) -> torch.Tensor:

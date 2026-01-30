@@ -83,10 +83,10 @@ class MatmulBackend(str, Enum):
             alpha = (
                 (input.amax * other.amax)
                 / (
-                    input.scale_rule.max_allowed_e2m1_value()
-                    * input.scale_rule.max_allowed_e4m3_value()
-                    * other.scale_rule.max_allowed_e2m1_value()
-                    * other.scale_rule.max_allowed_e4m3_value()
+                    input.fp4_format.max_allowed_e2m1_value(input.scale_rule)
+                    * input.fp4_format.max_allowed_e4m3_value(input.scale_rule)
+                    * other.fp4_format.max_allowed_e2m1_value(other.scale_rule)
+                    * other.fp4_format.max_allowed_e4m3_value(other.scale_rule)
                 )
             ).to(torch.float32)
 
@@ -380,6 +380,8 @@ class QuantizeBackend(str, Enum):
                 scale_rule=scale_rule,
                 block_scale_2d=block_scale_2d,
                 transpose=transpose,
+                pack_values=fp4_format != FP4Format.sif4,
+                use_blackwell_scale_layout=fp4_format != FP4Format.sif4,
                 **kwargs,
             )
 
@@ -394,6 +396,8 @@ class QuantizeBackend(str, Enum):
             fp4_format,
             original_shape,
             scale_rule,
+            e2m1_values_are_packed=fp4_format != FP4Format.sif4,
+            scale_factors_are_blackwell_layout=fp4_format != FP4Format.sif4,
         )
 
 

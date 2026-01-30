@@ -34,19 +34,6 @@ class AdaptiveBlockScalingRule(str, Enum):
             AdaptiveBlockScalingRule.mse: 3,
         }[self]
 
-    def max_allowed_e2m1_value(self) -> int:
-        """Return the maximum allowed E2M1 value for the rule."""
-        return 4 if self == AdaptiveBlockScalingRule.always_4 else 6
-
-    def max_allowed_e4m3_value(self) -> int:
-        """Return the maximum allowed E4M3 value for the rule."""
-        return (
-            448
-            if self
-            in {AdaptiveBlockScalingRule.always_6, AdaptiveBlockScalingRule.always_4}
-            else 256
-        )
-
 
 class DataType(str, Enum):
     """High-precision data types."""
@@ -76,6 +63,7 @@ class FP4Format(str, Enum):
 
     mxfp4 = "mxfp4"
     nvfp4 = "nvfp4"
+    sif4 = "sif4"
 
     def block_size(self) -> int:
         """Return the block size for the FP4 format."""
@@ -83,7 +71,24 @@ class FP4Format(str, Enum):
         return {
             FP4Format.mxfp4: 32,
             FP4Format.nvfp4: 16,
+            FP4Format.sif4: 16,
         }[self]
+
+    def max_allowed_e2m1_value(self, scale_rule: AdaptiveBlockScalingRule) -> int:
+        """Return the maximum allowed E2M1 value for the rule."""
+        return 4 if scale_rule == AdaptiveBlockScalingRule.always_4 else 6
+
+    def max_allowed_e4m3_value(self, scale_rule: AdaptiveBlockScalingRule) -> int:
+        """Return the maximum allowed E4M3 value for the rule."""
+        if self == FP4Format.sif4:
+            return 448
+
+        return (
+            448
+            if scale_rule
+            in {AdaptiveBlockScalingRule.always_6, AdaptiveBlockScalingRule.always_4}
+            else 256
+        )
 
     def scale_dtype(self) -> torch.dtype:
         """Return the scale dtype for the FP4 format."""
@@ -91,6 +96,7 @@ class FP4Format(str, Enum):
         return {
             FP4Format.mxfp4: torch.float8_e8m0fnu,
             FP4Format.nvfp4: torch.float8_e4m3fn,
+            FP4Format.sif4: torch.float8_e4m3fn,
         }[self]
 
 
