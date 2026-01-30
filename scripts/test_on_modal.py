@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .resources import FOUROVERSIX_INSTALL_PATH, app, get_image
+from .resources import FOUROVERSIX_INSTALL_PATH, Dependency, app, get_image
 
-img = get_image(include_tests=True)
+img = get_image(
+    dependencies=[Dependency.transformer_engine, Dependency.fouroversix],
+    include_tests=True,
+)
 
 with img.imports():
     import pytest

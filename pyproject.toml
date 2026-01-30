@@ -98,6 +98,7 @@ select = [
 ]
 "tests/**/test_*.py" = [
     "S101",  # Allow assert statements in tests
+    "T201",  # Allow print statements in tests
 ]
 
 [tool.ruff.lint.isort]

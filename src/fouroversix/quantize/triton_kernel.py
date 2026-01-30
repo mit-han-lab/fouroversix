@@ -117,7 +117,15 @@ def block_scaled_fp4_quantization_kernel(
     elif FP4_FORMAT == FP4_FORMAT_NVFP4:
         x_amax = tl.load(x_amax_ptr)
         x_scale_blocks = x_block.reshape(128, 4, 16)
-        x_scales_hp = tl.max(x_scale_blocks.abs(), axis=-1) * E4M3_MAX_VALUE / x_amax
+
+        if x_amax == 0:
+            x_scales_hp = tl.full((128, 4), 0, dtype=tl.float32)
+        else:
+            encode_scale = tl.div_rn(E2M1_MAX_ALLOWED_VALUE * E4M3_MAX_VALUE, x_amax)
+            x_scales_hp = (
+                tl.div_rn(tl.max(x_scale_blocks.abs(), axis=-1), E2M1_MAX_ALLOWED_VALUE)
+                * encode_scale
+            )
 
         if BLOCK_SCALE_2D:
             x_scales_hp = (
@@ -133,11 +141,15 @@ def block_scaled_fp4_quantization_kernel(
 
         x_scales = x_scales_hp.to(tl.float8e4nv)
 
+        decode_scale = tl.div_rn(
+            1,
+            tl.div_rn(E2M1_MAX_ALLOWED_VALUE * E4M3_MAX_VALUE, x_amax),
+        )
         (x_block_scaled_b1, x_block_scaled_b2) = (
             tl.where(
                 x_scales.expand_dims(2).to(x_amax.dtype) != 0,
-                (x_scale_blocks * E2M1_MAX_ALLOWED_VALUE * E4M3_MAX_VALUE)
-                / (x_amax * x_scales.to(x_amax.dtype).expand_dims(2)),
+                x_scale_blocks
+                * tl.div_rn(1, decode_scale * x_scales.to(x_amax.dtype).expand_dims(2)),
                 0,
             )
             .reshape(BLOCK_SIZE_M, BLOCK_SIZE_N // 2, 2)
@@ -200,7 +212,15 @@ def nvfp4_fouroversix_quantization_kernel(
 ) -> None:
     x_amax = tl.load(x_amax_ptr)
     x_scale_blocks = x_block.reshape(128, 4, 16)
-    x_scales_hp = tl.max(x_scale_blocks.abs(), axis=-1) * E4M3_MAX_FOUROVERSIX / x_amax
+
+    if x_amax == 0:
+        x_scales_hp = tl.full((128, 4), 0, dtype=tl.float32)
+    else:
+        encode_scale = tl.div_rn(E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX, x_amax)
+        x_scales_hp = (
+            tl.div_rn(tl.max(x_scale_blocks.abs(), axis=-1), E2M1_MAX_VALUE)
+            * encode_scale
+        )
 
     if BLOCK_SCALE_2D:
         x_scales_hp = (
@@ -215,13 +235,18 @@ def nvfp4_fouroversix_quantization_kernel(
         )
 
     x_scales_6 = x_scales_hp.to(tl.float8e4nv)
-    x_scales_4 = (x_scales_hp * (6 / 4)).to(tl.float8e4nv)
+    x_scales_4 = (x_scales_hp * 1.5).to(tl.float8e4nv)
+
+    decode_scale = tl.div_rn(
+        1,
+        tl.div_rn(E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX, x_amax),
+    )
 
     (x_block_scaled_6_b1, x_block_scaled_6_b2) = (
         tl.where(
             x_scales_6.expand_dims(2).to(x_amax.dtype) != 0,
-            (x_scale_blocks * E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX)
-            / (x_amax * x_scales_6.to(x_amax.dtype).expand_dims(2)),
+            x_scale_blocks
+            * tl.div_rn(1, decode_scale * x_scales_6.to(x_amax.dtype).expand_dims(2)),
             0,
         )
         .reshape(BLOCK_SIZE_M, BLOCK_SIZE_N // 2, 2)
@@ -231,8 +256,8 @@ def nvfp4_fouroversix_quantization_kernel(
     (x_block_scaled_4_b1, x_block_scaled_4_b2) = (
         tl.where(
             x_scales_4.expand_dims(2).to(x_amax.dtype) != 0,
-            (x_scale_blocks * E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX)
-            / (x_amax * x_scales_4.to(x_amax.dtype).expand_dims(2)),
+            x_scale_blocks
+            * tl.div_rn(1, decode_scale * x_scales_4.to(x_amax.dtype).expand_dims(2)),
             0,
         )
         .reshape(BLOCK_SIZE_M, BLOCK_SIZE_N // 2, 2)
@@ -377,12 +402,10 @@ def nvfp4_fouroversix_quantization_kernel(
     )
     x_hp_6 = tl.join(x_fp16_6_lo, x_fp16_6_hi).reshape(128, 4, 16)
 
-    # HACK: Add a fake data dependency barrier to prevent Triton from reordering
-    # instructions in a way that causes slight numerical differences to the PyTorch
-    # implementation.
-    x_dequantized_6 = x_hp_6 * x_scales_6.to(x_amax.dtype).expand_dims(2) * x_amax / (
-        E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX
-    ) + 0 * tl.program_id(0)
+    x_dequantized_6 = tl.div_rn(
+        x_hp_6 * x_scales_6.to(x_amax.dtype).expand_dims(2) * x_amax,
+        E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX,
+    )
 
     x_fp16_4_lo = (
         (x_fp16x2_4 & 0xFFFF)
@@ -398,12 +421,10 @@ def nvfp4_fouroversix_quantization_kernel(
     )
     x_hp_4 = tl.join(x_fp16_4_lo, x_fp16_4_hi).reshape(128, 4, 16)
 
-    # HACK: Add a fake data dependency barrier to prevent Triton from reordering
-    # instructions in a way that causes slight numerical differences to the PyTorch
-    # implementation.
-    x_dequantized_4 = x_hp_4 * x_scales_4.to(x_amax.dtype).expand_dims(2) * x_amax / (
-        E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX
-    ) + 0 * tl.program_id(0)
+    x_dequantized_4 = tl.div_rn(
+        x_hp_4 * x_scales_4.to(x_amax.dtype).expand_dims(2) * x_amax,
+        E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX,
+    )
 
     if SCALE_RULE == SCALE_RULE_ALWAYS_6:
         six_error = tl.full((128, 4), 0 * tl.program_id(0), dtype=tl.int32)
@@ -446,7 +467,7 @@ def nvfp4_fouroversix_quantization_kernel(
         )
 
     x_e2m1 = tl.where(
-        (four_error < six_error)[:, :, None],
+        (four_error < six_error).expand_dims(2),
         x_e2m1_4.reshape(128, 4, 8),
         x_e2m1_6.reshape(128, 4, 8),
     ).reshape(128, 32)

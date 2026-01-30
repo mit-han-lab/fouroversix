@@ -127,26 +127,51 @@ def quantize_to_nvfp4(
     scale_rule: AdaptiveBlockScalingRule,
     scale_expansion_factor: float | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    x_scales_hp = (
-        x_scale_blocks.abs().max(axis=-1).values
-        * scale_rule.max_allowed_e4m3_value()
-        / x_amax
-    )
+    if x_amax == 0:
+        x_scales_hp = torch.zeros(
+            *x_scale_blocks.shape[:-1],
+            dtype=x_amax.dtype,
+            device=x_amax.device,
+        )
+    else:
+        encode_scale = (
+            torch.tensor(
+                scale_rule.max_allowed_e2m1_value()
+                * scale_rule.max_allowed_e4m3_value(),
+                dtype=x_amax.dtype,
+                device=x_amax.device,
+            )
+            / x_amax
+        )
+        x_scales_hp = (
+            x_scale_blocks.abs().max(axis=-1).values
+            / torch.tensor(
+                scale_rule.max_allowed_e2m1_value(),
+                dtype=x_amax.dtype,
+                device=x_amax.device,
+            )
+            * encode_scale
+        )
 
     if scale_expansion_factor is not None:
         x_scales_hp = x_scales_hp * scale_expansion_factor
 
     x_scales = x_scales_hp.to(torch.float8_e4m3fn)
+
+    decode_scale = 1 / (
+        torch.tensor(
+            scale_rule.max_allowed_e2m1_value() * scale_rule.max_allowed_e4m3_value(),
+            dtype=x_amax.dtype,
+            device=x_amax.device,
+        )
+        / x_amax
+    )
     x_block_scaled = torch.where(
         x_scales.unsqueeze(1) != 0,
-        (
-            x_scale_blocks
-            * scale_rule.max_allowed_e2m1_value()
-            * scale_rule.max_allowed_e4m3_value()
-        )
-        / (x_amax * x_scales.to(x_amax.dtype).unsqueeze(1)),
+        x_scale_blocks * (1 / (decode_scale * x_scales.to(x_amax.dtype).unsqueeze(1))),
         0,
     )
+
     return x_block_scaled, x_scales
 
 
@@ -171,16 +196,24 @@ def select_fouroversix(
     )
 
     x_dequantized_6 = (
-        x_fake_quantized_6
+        x_fake_quantized_6.to(x_amax.dtype)
         * scales_6.unsqueeze(1).to(x_amax.dtype)
         * x_amax
-        / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX)
+        / torch.tensor(
+            E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX,
+            dtype=x_amax.dtype,
+            device=x_amax.device,
+        )
     )
     x_dequantized_4 = (
-        x_fake_quantized_4
+        x_fake_quantized_4.to(x_amax.dtype)
         * scales_4.unsqueeze(1).to(x_amax.dtype)
         * x_amax
-        / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX)
+        / torch.tensor(
+            E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX,
+            dtype=x_amax.dtype,
+            device=x_amax.device,
+        )
     )
 
     if scale_rule == AdaptiveBlockScalingRule.abs_max:
