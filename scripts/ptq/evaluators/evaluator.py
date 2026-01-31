@@ -75,7 +75,8 @@ class PTQEvaluator(ABC):
     ) -> dict[str, Any]:
         """Evaluate a quantized model with lm-eval."""
 
-        from lm_eval import evaluator, models
+        from lm_eval import evaluator
+        from lm_eval.models.huggingface import HFLM
         from lm_eval.tasks import TaskManager
 
         inference_context = (
@@ -95,7 +96,7 @@ class PTQEvaluator(ABC):
                 model = model_name
 
             results = evaluator.simple_evaluate(
-                model=models.huggingface.HFLM(
+                model=HFLM(
                     pretrained=model,
                     device=device,
                     max_length=max_length,
