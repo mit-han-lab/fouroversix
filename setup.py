@@ -16,7 +16,7 @@ from wheel.bdist_wheel import bdist_wheel as _bdist_wheel
 
 BASE_WHEEL_URL = "https://github.com/mit-han-lab/fouroversix/releases/download"
 PACKAGE_NAME = "fouroversix"
-PACKAGE_VERSION = "0.2.0.dev2"
+PACKAGE_VERSION = "0.3.0"
 
 CUTLASS_DEBUG = os.getenv("CUTLASS_DEBUG", "0") == "1"
 FORCE_BUILD = os.getenv("FORCE_BUILD", "0") == "1"
