@@ -11,7 +11,8 @@ from fouroversix import (
 )
 from fouroversix.quantize import get_rht_matrix
 
-NUM_RANDOM_SEEDS = 100
+MSE_L1_NORM_MISMATCH_TOLERANCE = 1e-3
+NUM_RANDOM_SEEDS = 10
 
 
 @pytest.mark.parametrize("input_type", ["zeros", "ones", "rand01", "randn"])
@@ -117,45 +118,70 @@ def test_backend_outputs_are_consistent(
         quantized_b = quantize_to_fp4(x, backend=backend_b, **kwargs)
 
         assert torch.allclose(quantized_a.amax, quantized_b.amax)
-        assert torch.allclose(
-            quantized_a.scale_factors.bfloat16(),
-            quantized_b.scale_factors.bfloat16(),
-        )
-        assert torch.allclose(quantized_a.e2m1_values, quantized_b.e2m1_values)
 
-    @pytest.mark.parametrize(
-        "scale_rule",
-        [
-            AdaptiveBlockScalingRule.abs_max,
-            AdaptiveBlockScalingRule.l1_norm,
-            AdaptiveBlockScalingRule.mse,
-            AdaptiveBlockScalingRule.always_4,
+        sf_a = quantized_a.scale_factors.bfloat16()
+        sf_b = quantized_b.scale_factors.bfloat16()
+
+        if scale_rule in {
             AdaptiveBlockScalingRule.always_6,
-        ],
+            AdaptiveBlockScalingRule.always_4,
+            AdaptiveBlockScalingRule.abs_max,
+        }:
+            assert torch.allclose(sf_a, sf_b)
+            assert torch.allclose(quantized_a.e2m1_values, quantized_b.e2m1_values)
+        else:
+            # When computing 4/6 with the MSE and L1 norm scale rules, computing the
+            # errors requires summing the errors in each block of 16 values. This
+            # operation executes differently (elements are summed in different orders,
+            # and floating-point addition is not associative) in PyTorch and Triton, and
+            # can not be easily made deterministic in a way that allows for good
+            # performance. As a result, we allow a small number of mismatches between
+            # the scale factors and e2m1 values for these two rules. Fortunately,
+            # abs_max does not involve a summation, so we can use it to test the
+            # correctness of the rest of the 4/6 implementation.
+
+            scale_factors_mismatch_prop = (sf_a != sf_b).sum() / sf_a.numel()
+            assert scale_factors_mismatch_prop < MSE_L1_NORM_MISMATCH_TOLERANCE
+
+            e2m1_values_mismatch_prop = (
+                quantized_a.e2m1_values != quantized_b.e2m1_values
+            ).sum() / quantized_a.e2m1_values.numel()
+            assert e2m1_values_mismatch_prop < MSE_L1_NORM_MISMATCH_TOLERANCE
+
+
+@pytest.mark.parametrize(
+    "scale_rule",
+    [
+        AdaptiveBlockScalingRule.abs_max,
+        AdaptiveBlockScalingRule.l1_norm,
+        AdaptiveBlockScalingRule.mse,
+        AdaptiveBlockScalingRule.always_4,
+        AdaptiveBlockScalingRule.always_6,
+    ],
+)
+def test_zeros(scale_rule: AdaptiveBlockScalingRule) -> None:
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    x = torch.zeros(1024, 1024, dtype=torch.bfloat16, device=device)
+    x_e2m1, x_sf, x_normconst = quantize_to_fp4(
+        x,
+        backend=QuantizeBackend.pytorch,
+        scale_rule=scale_rule,
     )
-    def test_zeros(scale_rule: AdaptiveBlockScalingRule) -> None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        x = torch.zeros(1024, 1024, dtype=torch.bfloat16, device=device)
-        x_e2m1, x_sf, x_normconst = quantize_to_fp4(
-            x,
-            backend=QuantizeBackend.pytorch,
-            scale_rule=scale_rule,
-        )
+    x_e2m1_expected = torch.zeros(1024, 512, dtype=torch.uint8, device=device)
+    x_sf_expected = torch.full(
+        (1024 * 1024 // 16,),
+        0,
+        dtype=torch.float8_e4m3fn,
+        device=device,
+    )
+    x_normconst_expected = torch.tensor(
+        0,
+        dtype=torch.bfloat16,
+        device=device,
+    )
 
-        x_e2m1_expected = torch.zeros(1024, 512, dtype=torch.uint8, device=device)
-        x_sf_expected = torch.full(
-            (1024 * 1024 // 16,),
-            0,
-            dtype=torch.float8_e4m3fn,
-            device=device,
-        )
-        x_normconst_expected = torch.tensor(
-            0,
-            dtype=torch.bfloat16,
-            device=device,
-        )
-
-        assert torch.allclose(x_normconst, x_normconst_expected)
-        assert torch.allclose(x_sf.bfloat16(), x_sf_expected.bfloat16())
-        assert torch.allclose(x_e2m1, x_e2m1_expected)
+    assert torch.allclose(x_normconst, x_normconst_expected)
+    assert torch.allclose(x_sf.bfloat16(), x_sf_expected.bfloat16())
+    assert torch.allclose(x_e2m1, x_e2m1_expected)

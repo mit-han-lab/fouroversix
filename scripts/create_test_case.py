@@ -22,7 +22,7 @@ def create_test_case(
     backend_b = QuantizeBackend(backend_b)
     scale_rule = AdaptiveBlockScalingRule(scale_rule)
 
-    for random_seed in range(1):
+    for random_seed in range(10):
         torch.manual_seed(random_seed)
 
         x = torch.randn(M, N, dtype=torch.bfloat16, device="cuda")
