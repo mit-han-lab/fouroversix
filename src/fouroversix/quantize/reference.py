@@ -332,16 +332,12 @@ def quantize_to_fp4(
         )
 
     if block_scale_2d:
-        x_fake_quantized = (
-            x_fake_quantized.reshape(
-                -1,
-                x.shape[1] // fp4_format.block_size(),
-                fp4_format.block_size(),
-                fp4_format.block_size(),
-            )
-            .permute(0, 2, 1, 3)
-            .reshape_as(x_fake_quantized)
-        )
+        x_fake_quantized = x_fake_quantized.reshape(
+            -1,
+            x.shape[1] // fp4_format.block_size(),
+            fp4_format.block_size(),
+            fp4_format.block_size(),
+        ).permute(0, 2, 1, 3)
 
         scales = (
             scales.reshape(
@@ -350,11 +346,6 @@ def quantize_to_fp4(
                 x.shape[1] // fp4_format.block_size(),
             )
             .broadcast_to(
-                fp4_format.block_size(),
-                x.shape[0] // fp4_format.block_size(),
-                x.shape[1] // fp4_format.block_size(),
-            )
-            .reshape(
                 fp4_format.block_size(),
                 x.shape[0] // fp4_format.block_size(),
                 x.shape[1] // fp4_format.block_size(),
@@ -373,7 +364,7 @@ def quantize_to_fp4(
         ),
     )
 
-    return (x_quantized, reshaped_scales, x_amax)
+    return x_quantized, reshaped_scales, x_amax
 
 
 def to_blocked(a: torch.Tensor) -> torch.Tensor:

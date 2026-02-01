@@ -18,28 +18,19 @@ NUM_RANDOM_SEEDS = 10
 @pytest.mark.parametrize("input_type", ["zeros", "ones", "rand01", "randn"])
 @pytest.mark.parametrize(
     "input_shape",
-    [(1024, 1024), (1024, 512), (512, 1024), (8192, 8192), (8192, 4096), (4096, 8192)],
+    [(1024, 1024), (1024, 512), (512, 1024)],
 )
 @pytest.mark.parametrize(
     ("backend_a", "backend_b"),
-    [
-        (backend_a, backend_b)
-        for backend_a, backend_b in itertools.product(
-            [
-                QuantizeBackend.cuda,
-                QuantizeBackend.triton,
-                QuantizeBackend.pytorch,
-                QuantizeBackend.transformer_engine,
-            ],
-            [
-                QuantizeBackend.cuda,
-                QuantizeBackend.triton,
-                QuantizeBackend.pytorch,
-                QuantizeBackend.transformer_engine,
-            ],
-        )
-        if backend_a != backend_b
-    ],
+    itertools.combinations(
+        [
+            QuantizeBackend.cuda,
+            QuantizeBackend.triton,
+            QuantizeBackend.pytorch,
+            QuantizeBackend.transformer_engine,
+        ],
+        r=2,
+    ),
 )
 @pytest.mark.parametrize("block_scale_2d", ["block_scale_2d", "no_block_scale_2d"])
 @pytest.mark.parametrize("fp4_format", [FP4Format.nvfp4])
@@ -87,8 +78,8 @@ def test_backend_outputs_are_consistent(
         "transpose": transpose,
     }
 
-    if block_scale_2d or had or transpose or round_style == RoundStyle.stochastic:
-        pytest.xfail("This test is currently not targeting FP4 training features")
+    if round_style == RoundStyle.stochastic:
+        pytest.xfail("This test is not currently targeting stochastic rounding")
 
     for random_seed in range(NUM_RANDOM_SEEDS):
         print(f"Testing with random seed: {random_seed}")

@@ -426,44 +426,53 @@ def nvfp4_fouroversix_quantization_kernel(
         E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX,
     )
 
-    if SCALE_RULE == SCALE_RULE_ALWAYS_6:
-        six_error = tl.full((128, 4), 0 * tl.program_id(0), dtype=tl.int32)
-        four_error = tl.sum(
-            (x_dequantized_4 - x_scale_blocks) * (x_dequantized_4 - x_scale_blocks),
-            axis=-1,
-        )
-    elif SCALE_RULE == SCALE_RULE_ALWAYS_4:
-        six_error = tl.sum(
-            (x_dequantized_6 - x_scale_blocks) * (x_dequantized_6 - x_scale_blocks),
-            axis=-1,
-        )
-        four_error = tl.full((128, 4), 0 * tl.program_id(0), dtype=tl.int32)
-    elif SCALE_RULE == SCALE_RULE_ABS_MAX:
+    diff_6 = x_dequantized_6 - x_scale_blocks
+    diff_4 = x_dequantized_4 - x_scale_blocks
+
+    if BLOCK_SCALE_2D:
+        diff_6 = diff_6.reshape(8, 16, 4, 16).permute(0, 2, 1, 3).reshape(8, 4, 256)
+        diff_4 = diff_4.reshape(8, 16, 4, 16).permute(0, 2, 1, 3).reshape(8, 4, 256)
+
+    if SCALE_RULE == SCALE_RULE_ABS_MAX:
         six_error = tl.max(
-            tl.abs(x_dequantized_6 - x_scale_blocks),
+            tl.abs(diff_6),
             axis=-1,
         )
         four_error = tl.max(
-            tl.abs(x_dequantized_4 - x_scale_blocks),
+            tl.abs(diff_4),
             axis=-1,
         )
     elif SCALE_RULE == SCALE_RULE_L1_NORM:
         six_error = tl.sum(
-            tl.abs(x_dequantized_6 - x_scale_blocks),
+            tl.abs(diff_6),
             axis=-1,
         )
         four_error = tl.sum(
-            tl.abs(x_dequantized_4 - x_scale_blocks),
+            tl.abs(diff_4),
             axis=-1,
         )
     elif SCALE_RULE == SCALE_RULE_MSE:
         six_error = tl.sum(
-            (x_dequantized_6 - x_scale_blocks) * (x_dequantized_6 - x_scale_blocks),
+            diff_6 * diff_6,
             axis=-1,
         )
         four_error = tl.sum(
-            (x_dequantized_4 - x_scale_blocks) * (x_dequantized_4 - x_scale_blocks),
+            diff_4 * diff_4,
             axis=-1,
+        )
+
+    if BLOCK_SCALE_2D:
+        six_error = (
+            six_error.expand_dims(0)
+            .broadcast_to(16, 8, 4)
+            .permute(1, 0, 2)
+            .reshape(128, 4)
+        )
+        four_error = (
+            four_error.expand_dims(0)
+            .broadcast_to(16, 8, 4)
+            .permute(1, 0, 2)
+            .reshape(128, 4)
         )
 
     x_e2m1 = tl.where(
@@ -473,11 +482,7 @@ def nvfp4_fouroversix_quantization_kernel(
     ).reshape(128, 32)
 
     x_scales = (
-        tl.where(
-            four_error < six_error,
-            x_scales_4,
-            x_scales_6,
-        )
+        tl.where(four_error < six_error, x_scales_4, x_scales_6)
         .reshape(4, 32, 4)
         .permute(1, 0, 2)
         .ravel()
