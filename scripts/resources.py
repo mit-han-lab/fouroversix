@@ -191,13 +191,13 @@ def install_qutlass() -> None:
 def get_image(  # noqa: C901, PLR0912
     dependencies: list[Dependency] | None = None,
     *,
-    cuda_version: str = "12.9",
+    cuda_version: str = "13.0",
     deploy: bool = False,
     extra_env: dict[str, str] | None = None,
     extra_pip_dependencies: list[str] | None = None,
     include_tests: bool = False,
-    python_version: str = "3.12",
-    pytorch_version: str = "2.9.1",
+    python_version: str = "3.13",
+    pytorch_version: str = "2.10.0",
     run_before_copy: Callable[[modal.Image], modal.Image] | None = None,
 ) -> modal.Image:
     if dependencies is None:
@@ -218,13 +218,7 @@ def get_image(  # noqa: C901, PLR0912
         )
         .entrypoint([])
         .apt_install("clang", "git")
-        .uv_pip_install(
-            *filter(
-                lambda x: not x.startswith("torch"),
-                pyproject_data["build-system"]["requires"],
-            ),
-            "numpy",
-        )
+        .uv_pip_install(*pyproject_data["build-system"]["requires"], "numpy")
         .uv_pip_install(
             f"torch=={pytorch_version}",
             extra_index_url=(
@@ -241,7 +235,8 @@ def get_image(  # noqa: C901, PLR0912
 
         if dependency == Dependency.fast_hadamard_transform:
             img = add_submodule(img, Submodule.fast_hadamard_transform).run_commands(
-                f"pip install {Submodule.fast_hadamard_transform.get_install_path()}",
+                f"pip install {Submodule.fast_hadamard_transform.get_install_path()} "
+                "--no-build-isolation",
             )
 
         if dependency == Dependency.flame:
@@ -284,12 +279,7 @@ def get_image(  # noqa: C901, PLR0912
                     copy=True,
                 )
                 .uv_pip_install(
-                    *filter(
-                        lambda x: not x.startswith("torch"),
-                        pyproject_data["build-system"]["requires"],
-                    ),
-                    *pyproject_data["project"]["optional-dependencies"]["tests"],
-                    "numpy",
+                    *pyproject_data["project"]["optional-dependencies"]["extras"],
                 )
                 .add_local_file(
                     "setup.py",

@@ -5,7 +5,7 @@
 Before doing anything, make sure you've installed fouroversix with our test dependencies:
 
 ```bash
-pip install -e .[tests] --no-build-isolation
+pip install -e .[extras] --no-build-isolation
 ```
 
 Also, make sure you've cloned all of our submodules:
