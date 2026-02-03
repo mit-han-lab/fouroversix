@@ -87,7 +87,7 @@ def get_cuda_gencodes() -> list[str]:
             if cuda_version >= Version("12.9"):
                 cc_flags += ["-gencode", "arch=compute_120f,code=sm_120"]
             else:
-                cc_flags += ["-gencode", "arch=compute_120a,code=sm_120"]
+                cc_flags += ["-gencode", "arch=compute_120a,code=sm_120a"]
 
     return cc_flags
 
