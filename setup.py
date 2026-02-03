@@ -16,7 +16,7 @@ from torch.utils.cpp_extension import CUDA_HOME, BuildExtension, CUDAExtension
 
 BASE_WHEEL_URL = "https://github.com/mit-han-lab/fouroversix/releases/download"
 PACKAGE_NAME = "fouroversix"
-PACKAGE_VERSION = "0.3.2.dev0"
+PACKAGE_VERSION = "0.3.2"
 
 CUTLASS_DEBUG = os.getenv("CUTLASS_DEBUG", "0") == "1"
 FORCE_BUILD = os.getenv("FORCE_BUILD", "0") == "1"
