@@ -11,15 +11,52 @@ If you have any questions, please get in touch or submit an issue.
 
 ## Setup
 
-To speed up build times, set `CUDA_ARCHS=100` to only compile kernels for B-series GPUs (i.e. B200, GB200, GB300), or `CUDA_ARCHS=120` for RTX 50 and 60 Series GPUs (i.e. RTX 5090, RTX 6000).
+**Requirements:**
+
+- Python version 3.10 or newer
+- CUDA toolkit 12.8 or newer
+- PyTorch version 2.8 or newer
+
+**Install dependencies:**
 
 ```bash
-git clone --recursive https://github.com/mit-han-lab/fouroversix.git
-cd fouroversix
+pip install ninja packaging psutil "setuptools>=77.0.3"
+```
+
+**Install fouroversix:**
+
+```bash
+pip install fouroversix --no-build-isolation
+```
+
+Alternatively, you can compile from source:
+
+```bash
+pip install --no-build-isolation -e .
+```
+
+To speed up build times, set `CUDA_ARCHS=100` to only compile kernels for B-series GPUs (i.e. B200, GB200, GB300), or `CUDA_ARCHS=120` for RTX 50 and 60 Series GPUs (i.e. RTX 5090, RTX 6000).
+
+Also, if you don't have a Blackwell GPU, you may use our reference implementation, which is slow but helpful for testing, by setting `SKIP_CUDA_BUILD=1` before running `pip install`.
+
+### PTQ Experiments
+
+To run PTQ experiments, make sure to install our test dependencies using either:
+
+```bash
+pip install "fouroversix[tests]" --no-build-isolation
+
+# Or, if installing from source:
 pip install --no-build-isolation -e ".[tests]"
 ```
 
-If you don't have a Blackwell GPU, you may use our reference implementation, which is slow but helpful for testing, by setting `SKIP_CUDA_BUILD=1` before running `pip install`.
+Also, make sure all submodules are pulled and up to date:
+
+```bash
+git submodule update --init
+```
+
+Then, install dependencies for each PTQ method as needed, following the instructions [here](/docs/ptq.md).
 
 ## API
 
@@ -90,24 +127,15 @@ The first time you launch experiments on Modal, it may take several minutes to b
 
 This repository contains three implementations of NVFP4 quantization, each of which has various limitations:
 
-- [CUDA](/src/fouroversix/csrc): Only supports forward passes, making it usable for post-training quantization as shown above. Training kernels will be released soon. Requires a Blackwell GPU.
-- [Triton](/src/fouroversix/quantize/triton_kernel.py): Slower, but supports all operations needed for efficient NVFP4 training, including stochastic rounding, the random Hadamard transform, transposed inputs, and 2D block scaling. Also requires a Blackwell GPU.
+- [CUDA](/src/fouroversix/csrc): Currently disabled, will be fixed soon.
+- [Triton](/src/fouroversix/quantize/triton_kernel.py): Supports all operations needed for efficient NVFP4 training, including stochastic rounding, the random Hadamard transform, transposed inputs, and 2D block scaling. Requires a Blackwell GPU.
 - [PyTorch](/src/fouroversix/quantize/reference.py): A reference implementation written in PyTorch that can run on any GPU. May have some educational value. Should not be used in real-world use cases.
 
-These three implementations have very subtle numerical differences, which we are working on fixing.
+When used with 4/6, these implementations have subtle numerical differences which can cause results to differ slightly, but not in a way that should cause uniformly worse performance for any of them.
+For more details, see [here](https://github.com/mit-han-lab/fouroversix/blob/6bb13a8fc3b690154d11a1d6477bb6c2d09799e8/tests/test_correctness.py#L124-L132).
+
 Our `quantize_to_fp4` function will automatically select one of these backends based on your GPU and the quantization parameters you select.
-If you would like to force selection of a specific backend, you may specify it by setting `backend=QuantizeBackend.cuda` in `quantize_to_fp4`, or `a_quantize_kwargs={"backend": QuantizeBackend.cuda}, w_quantize_kwargs={"backend": QuantizeBackend.cuda}` in `apply_ptq`.
-
-### TODOs
-
-In the coming days and weeks, we will be updating our implementation and publishing more code.
-Here are our highest-priority items at the moment:
-
-- [ ] Match numerics of PyTorch and Triton backends to the CUDA backend
-- [ ] Add support for other options (MXFP4, stochastic rounding, RHT, 2D block scaling, transposed inputs) in the CUDA implementation
-- [x] Release PTQ implementations for AWQ, GPTQ, and SmoothQuant
-- [ ] Unit tests
-- [x] Training implementation + full NVFP4 linear layer with 4/6
+If you would like to force selection of a specific backend, you may specify it by setting `backend=QuantizeBackend.cuda` in `quantize_to_fp4`, or `quantize_backend=QuantizeBackend.cuda` in `quantize_model`.
 
 ## Contributing
 
