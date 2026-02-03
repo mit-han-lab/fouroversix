@@ -71,7 +71,7 @@ def get_cuda_gencodes() -> list[str]:
             if cuda_version >= Version("12.9"):
                 cc_flags += ["-gencode", "arch=compute_100f,code=sm_100"]
             else:
-                cc_flags += ["-gencode", "arch=compute_100,code=sm_100"]
+                cc_flags += ["-gencode", "arch=compute_100a,code=sm_100a"]
 
         # Thor rename: 12.9 uses sm_101; 13.0+ uses sm_110
         if "110" in archs:
