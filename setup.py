@@ -11,12 +11,12 @@ from typing import Any
 import torch
 from packaging.version import Version, parse
 from setuptools import setup
+from setuptools.command.bdist_wheel import bdist_wheel
 from torch.utils.cpp_extension import CUDA_HOME, BuildExtension, CUDAExtension
-from wheel.bdist_wheel import bdist_wheel as _bdist_wheel
 
 BASE_WHEEL_URL = "https://github.com/mit-han-lab/fouroversix/releases/download"
 PACKAGE_NAME = "fouroversix"
-PACKAGE_VERSION = "0.3.1"
+PACKAGE_VERSION = "0.3.2.dev0"
 
 CUTLASS_DEBUG = os.getenv("CUTLASS_DEBUG", "0") == "1"
 FORCE_BUILD = os.getenv("FORCE_BUILD", "0") == "1"
@@ -29,14 +29,16 @@ def get_cuda_archs() -> list[str]:
     return os.getenv("CUDA_ARCHS", "100;110;120").split(";")
 
 
-def get_cuda_bare_metal_version() -> Version:
+def get_cuda_bare_metal_version() -> Version | None:
     if CUDA_HOME is None:
-        msg = (
-            "CUDA_HOME is not set, indicating that CUDA may not be installed. If "
-            "you're trying to install fouroversix without CUDA support, set "
-            "SKIP_CUDA_BUILD=1 before running pip install."
+        warnings.warn(
+            "nvcc was not found. Are you sure your environment has nvcc available? If "
+            "you're installing within a container from "
+            "https://hub.docker.com/r/pytorch/pytorch, only images with 'devel' in "
+            "their name will provide nvcc.",
+            stacklevel=1,
         )
-        raise RuntimeError(msg)
+        return None
 
     raw_output = subprocess.check_output(
         [CUDA_HOME + "/bin/nvcc", "-V"],
@@ -63,7 +65,7 @@ def get_cuda_gencodes() -> list[str]:
     cc_flags = []
 
     # Blackwell requires >= 12.8
-    if cuda_version >= Version("12.8"):
+    if cuda_version is not None and cuda_version >= Version("12.8"):
         if "100" in archs:
             # CUDA 12.9 introduced "family-specific" for Blackwell (100f)
             if cuda_version >= Version("12.9"):
@@ -123,7 +125,7 @@ def get_wheel_url() -> tuple[str, str]:
     return f"{BASE_WHEEL_URL}/v{PACKAGE_VERSION}/{wheel_filename}", wheel_filename
 
 
-class CachedWheelsCommand(_bdist_wheel):
+class CachedWheelsCommand(bdist_wheel):
     """
     Custom bdist wheel command that checks for pre-built wheels on GitHub Releases.
 
