@@ -20,10 +20,10 @@ class FP4LinearFunction(torch.autograd.Function):
         weight: torch.Tensor | FP4Tensor,
         bias: torch.Tensor = None,
         fp4_format: FP4Format = FP4Format.nvfp4,
-        a_scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
-        w_scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
-        g_scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
-        w_scale_2d: bool = False,  # noqa: FBT001, FBT002
+        activation_scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
+        weight_scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
+        gradient_scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
+        weight_scale_2d: bool = False,  # noqa: FBT001, FBT002
         out_dtype: torch.dtype = torch.bfloat16,
         matmul_backend: MatmulBackend | None = None,
         quantize_backend: QuantizeBackend | None = None,
@@ -39,24 +39,24 @@ class FP4LinearFunction(torch.autograd.Function):
             weight = quantize_to_fp4(
                 weight,
                 backend=quantize_backend,
-                block_scale_2d=w_scale_2d,
+                block_scale_2d=weight_scale_2d,
                 fp4_format=fp4_format,
-                scale_rule=w_scale_rule,
+                scale_rule=weight_scale_rule,
             )
 
         ctx.fp4_format = fp4_format
-        ctx.a_scale_rule = a_scale_rule
-        ctx.w_scale_rule = w_scale_rule
-        ctx.g_scale_rule = g_scale_rule
-        ctx.w_scale_2d = w_scale_2d
+        ctx.activation_scale_rule = activation_scale_rule
+        ctx.weight_scale_rule = weight_scale_rule
+        ctx.gradient_scale_rule = gradient_scale_rule
+        ctx.weight_scale_2d = weight_scale_2d
         ctx.out_dtype = out_dtype
         ctx.matmul_backend = matmul_backend
         ctx.quantize_backend = quantize_backend
 
-        assert ctx.a_scale_rule == ctx.w_scale_rule  # noqa: S101
+        assert ctx.activation_scale_rule == ctx.weight_scale_rule  # noqa: S101
 
-        if ctx.g_scale_rule is not None:
-            assert ctx.a_scale_rule == ctx.g_scale_rule  # noqa: S101
+        if ctx.gradient_scale_rule is not None:
+            assert ctx.activation_scale_rule == ctx.gradient_scale_rule  # noqa: S101
 
         out = fp4_matmul(
             input.reshape(-1, input.shape[-1]),
@@ -65,7 +65,7 @@ class FP4LinearFunction(torch.autograd.Function):
             input_quantize_kwargs={
                 "backend": quantize_backend,
                 "fp4_format": fp4_format,
-                "scale_rule": a_scale_rule,
+                "scale_rule": activation_scale_rule,
             },
             out_dtype=out_dtype,
         ).reshape(*input.shape[:-1], weight.original_shape[0])
@@ -95,16 +95,16 @@ class FP4LinearFunction(torch.autograd.Function):
             backend=ctx.matmul_backend,
             input_quantize_kwargs={
                 "backend": ctx.quantize_backend,
-                "scale_rule": ctx.g_scale_rule,
+                "scale_rule": ctx.gradient_scale_rule,
                 "fp4_format": ctx.fp4_format,
                 "round_style": RoundStyle.stochastic,
             },
             other_quantize_kwargs={
                 "backend": ctx.quantize_backend,
-                "scale_rule": ctx.w_scale_rule,
+                "scale_rule": ctx.weight_scale_rule,
                 "fp4_format": ctx.fp4_format,
                 "transpose": True,
-                "block_scale_2d": ctx.w_scale_2d,
+                "block_scale_2d": ctx.weight_scale_2d,
             },
             out_dtype=torch.bfloat16,
         ).unsqueeze(0)
@@ -117,14 +117,14 @@ class FP4LinearFunction(torch.autograd.Function):
                 "backend": ctx.quantize_backend,
                 "transpose": True,
                 "round_style": RoundStyle.stochastic,
-                "scale_rule": ctx.g_scale_rule,
+                "scale_rule": ctx.gradient_scale_rule,
                 "fp4_format": ctx.fp4_format,
                 "had": had,
             },
             other_quantize_kwargs={
                 "backend": ctx.quantize_backend,
                 "transpose": True,
-                "scale_rule": ctx.a_scale_rule,
+                "scale_rule": ctx.activation_scale_rule,
                 "fp4_format": ctx.fp4_format,
                 "had": had,
             },
@@ -162,9 +162,9 @@ class FP4Linear(nn.Linear):
         dtype: torch.dtype | None = None,
         *,
         fp4_format: FP4Format = FP4Format.nvfp4,
-        a_scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
-        w_scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
-        w_scale_2d: bool = False,
+        activation_scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
+        weight_scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
+        weight_scale_2d: bool = False,
         matmul_backend: MatmulBackend | None = None,
         quantize_backend: QuantizeBackend | None = None,
         **kwargs: dict[str, Any],  # noqa: ARG002
@@ -172,9 +172,9 @@ class FP4Linear(nn.Linear):
         super().__init__(in_features, out_features, bias, device, dtype)
 
         self.fp4_format = fp4_format
-        self.a_scale_rule = a_scale_rule
-        self.w_scale_rule = w_scale_rule
-        self.w_scale_2d = w_scale_2d
+        self.activation_scale_rule = activation_scale_rule
+        self.weight_scale_rule = weight_scale_rule
+        self.weight_scale_2d = weight_scale_2d
         self.out_dtype = torch.bfloat16
         self.matmul_backend = matmul_backend
         self.quantize_backend = quantize_backend
@@ -200,10 +200,10 @@ class FP4Linear(nn.Linear):
             self.weight,
             self.bias,
             self.fp4_format,
-            self.a_scale_rule,
-            self.w_scale_rule,
+            self.activation_scale_rule,
+            self.weight_scale_rule,
             None,
-            self.w_scale_2d,
+            self.weight_scale_2d,
             self.out_dtype,
             self.matmul_backend,
             self.quantize_backend,
@@ -217,8 +217,8 @@ class FP4Linear(nn.Linear):
         if isinstance(weight, torch.Tensor) or isinstance(self.weight, torch.Tensor):
             return quantize_to_fp4(
                 weight if isinstance(weight, torch.Tensor) else self.weight,
-                scale_rule=self.w_scale_rule,
-                block_scale_2d=self.w_scale_2d,
+                scale_rule=self.weight_scale_rule,
+                block_scale_2d=self.weight_scale_2d,
                 fp4_format=self.fp4_format,
                 backend=self.quantize_backend,
             )
@@ -242,9 +242,9 @@ class TrainableFP4Linear(FP4Linear):
         dtype: torch.dtype | None = None,
         *,
         fp4_format: FP4Format = FP4Format.nvfp4,
-        a_scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
-        w_scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
-        g_scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
+        activation_scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
+        weight_scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
+        gradient_scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
         matmul_backend: MatmulBackend | None = None,
         quantize_backend: QuantizeBackend | None = None,
     ) -> None:
@@ -255,14 +255,14 @@ class TrainableFP4Linear(FP4Linear):
             device,
             dtype,
             fp4_format=fp4_format,
-            a_scale_rule=a_scale_rule,
-            w_scale_rule=w_scale_rule,
-            w_scale_2d=True,
+            activation_scale_rule=activation_scale_rule,
+            weight_scale_rule=weight_scale_rule,
+            weight_scale_2d=True,
             matmul_backend=matmul_backend,
             quantize_backend=quantize_backend,
         )
 
-        self.g_scale_rule = g_scale_rule
+        self.gradient_scale_rule = gradient_scale_rule
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         """Forward pass for the FP4 linear layer."""
@@ -272,10 +272,10 @@ class TrainableFP4Linear(FP4Linear):
             self.weight,
             self.bias,
             self.fp4_format,
-            self.a_scale_rule,
-            self.w_scale_rule,
-            self.g_scale_rule,
-            self.w_scale_2d,
+            self.activation_scale_rule,
+            self.weight_scale_rule,
+            self.gradient_scale_rule,
+            self.weight_scale_2d,
             self.out_dtype,
             self.matmul_backend,
             self.quantize_backend,

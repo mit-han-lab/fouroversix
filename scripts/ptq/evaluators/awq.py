@@ -70,8 +70,8 @@ class AWQEvaluator(RTNEvaluatorImpl):
         *,
         device: str,
         dtype: DataType,
-        a_scale_rule: AdaptiveBlockScalingRule,
-        w_scale_rule: AdaptiveBlockScalingRule,
+        activation_scale_rule: AdaptiveBlockScalingRule,
+        weight_scale_rule: AdaptiveBlockScalingRule,
         save_path: Path,
         model_kwargs: dict[str, Any] | None = None,
         **kwargs: dict[str, Any],
@@ -86,7 +86,7 @@ class AWQEvaluator(RTNEvaluatorImpl):
         save_path = (
             save_path
             / "awq"
-            / f"{model_name}-{a_scale_rule.value}-{w_scale_rule.value}"
+            / f"{model_name}-{activation_scale_rule.value}-{weight_scale_rule.value}"
         )
 
         if not save_path.exists():
@@ -99,8 +99,8 @@ class AWQEvaluator(RTNEvaluatorImpl):
 
             quantize_model(
                 model,
-                a_scale_rule=a_scale_rule,
-                w_scale_rule=w_scale_rule,
+                activation_scale_rule=activation_scale_rule,
+                weight_scale_rule=weight_scale_rule,
                 linear_cls=FP4LinearForAWQ,
                 **kwargs,
             )
@@ -138,8 +138,8 @@ class AWQEvaluator(RTNEvaluatorImpl):
         # Quantize the model
         quantize_model(
             model,
-            a_scale_rule=a_scale_rule,
-            w_scale_rule=w_scale_rule,
+            activation_scale_rule=activation_scale_rule,
+            weight_scale_rule=weight_scale_rule,
             **kwargs,
         )
 

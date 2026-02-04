@@ -82,8 +82,8 @@ class BaseEvaluationCoordinator(ABC):
                 metric_name=metric_name,
                 metric_value=metric_value,
                 ptq_method=ptq_method.value,
-                a_scale_rule=kwargs.get("a_scale_rule"),
-                w_scale_rule=kwargs.get("w_scale_rule"),
+                activation_scale_rule=kwargs.get("activation_scale_rule"),
+                weight_scale_rule=kwargs.get("weight_scale_rule"),
                 smoothquant_alpha=kwargs.get("smoothquant_alpha"),
                 results=full_results,
             )
