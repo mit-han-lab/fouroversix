@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any
 import modal
 import torch
 
-from ...resources import FOUROVERSIX_CACHE_PATH
 from ..utils import EvaluationFramework
 
 if TYPE_CHECKING:
@@ -61,6 +60,7 @@ class PTQEvaluator(ABC):
         tasks: list[str],
         trust_remote_code: bool = False,
         disable_inference_mode: bool = False,
+        save_path: Path,
         **kwargs: dict[str, Any],
     ) -> dict[str, Any]:
         """Evaluate a quantized model with lm-eval."""
@@ -137,7 +137,8 @@ class PTQEvaluator(ABC):
                     tasks=tasks,
                     model=Model(local_hf(model_name, model, config), config, None),
                     limit=limit,
-                    log_dir=(FOUROVERSIX_CACHE_PATH / "inspect_ai_logs").as_posix(),
+                    log_dir=(save_path / "inspect_ai_logs").as_posix(),
+                    display="none",
                 )
 
                 results = []
