@@ -21,7 +21,7 @@ from .utils import EvaluationFramework, PTQMethod
 @click.option("--dtype", type=DataType, default=DataType.auto)
 @click.option(
     "--eval-framework",
-    "-e",
+    "-f",
     type=EvaluationFramework,
     default=EvaluationFramework.lm_eval,
 )
