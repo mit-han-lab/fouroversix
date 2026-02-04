@@ -100,7 +100,7 @@ def fp4_matmul(
         other = quantize_to_fp4(other, **(other_quantize_kwargs or {}))
 
     if backend is None:
-        backend = MatmulBackend.auto_select()
+        backend = MatmulBackend.auto_select(input, other, out_dtype=out_dtype)
     elif not backend.is_available():
         msg = f"Backend {backend} is not available"
         raise ValueError(msg)

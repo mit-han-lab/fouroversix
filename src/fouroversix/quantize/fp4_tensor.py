@@ -62,6 +62,9 @@ class FP4Tensor:
     original_shape: tuple[int, int]
     scale_rule: AdaptiveBlockScalingRule
 
+    e2m1_values_are_packed: bool
+    scale_factors_are_blackwell_layout: bool
+
     padded_shape: tuple[int, int]
 
     def __init__(
@@ -72,6 +75,9 @@ class FP4Tensor:
         fp4_format: FP4Format,
         original_shape: tuple[int, int],
         scale_rule: AdaptiveBlockScalingRule,
+        *,
+        e2m1_values_are_packed: bool = True,
+        scale_factors_are_blackwell_layout: bool = True,
     ) -> None:
         self.e2m1_values = e2m1_values
         self.scale_factors = scale_factors
@@ -79,6 +85,8 @@ class FP4Tensor:
         self.fp4_format = fp4_format
         self.original_shape = original_shape
         self.scale_rule = scale_rule
+        self.e2m1_values_are_packed = e2m1_values_are_packed
+        self.scale_factors_are_blackwell_layout = scale_factors_are_blackwell_layout
 
         rows_div = 128
         # The scale factor layout requires 4 blocks along the K dimension for both
@@ -91,8 +99,16 @@ class FP4Tensor:
             original_shape[1] + (cols_div - original_shape[1] % cols_div) % cols_div,
         )
 
-        expected_packed_elements = self.padded_shape[0] * self.padded_shape[1] // 2
-        expected_scale_factors = expected_packed_elements * 2 // fp4_format.block_size()
+        expected_packed_elements = (
+            self.padded_shape[0]
+            * self.padded_shape[1]
+            // (2 if e2m1_values_are_packed else 1)
+        )
+        expected_scale_factors = (
+            expected_packed_elements
+            * (2 if e2m1_values_are_packed else 1)
+            // fp4_format.block_size()
+        )
 
         if self.e2m1_values.numel() != expected_packed_elements:
             self.e2m1_values = F.pad(
@@ -127,7 +143,8 @@ class FP4Tensor:
                 value=0 if fp4_format == FP4Format.nvfp4 else 1,
             )
 
-            self.scale_factors = to_blocked(self.scale_factors)
+            if self.scale_factors_are_blackwell_layout:
+                self.scale_factors = to_blocked(self.scale_factors)
 
         if self.e2m1_values.numel() != expected_packed_elements:
             msg = (
@@ -146,27 +163,37 @@ class FP4Tensor:
     def dequantize(self, dtype: torch.dtype = torch.bfloat16) -> torch.Tensor:
         """Return a high-precision tensor with the dequantized values."""
 
-        values = unpack_packed_fp4(self.e2m1_values).to(dtype)
-        scales = from_blocked(
-            self.scale_factors,
-            (
-                self.padded_shape[0],
-                self.padded_shape[1] // self.fp4_format.block_size(),
-            ),
-        )
+        if self.e2m1_values_are_packed:
+            values = unpack_packed_fp4(self.e2m1_values).to(dtype)
+        else:
+            values = self.e2m1_values.to(dtype)
+
+        if self.scale_factors_are_blackwell_layout:
+            scales = from_blocked(
+                self.scale_factors,
+                (
+                    self.padded_shape[0],
+                    self.padded_shape[1] // self.fp4_format.block_size(),
+                ),
+            )
+        else:
+            scales = self.scale_factors
 
         result = values * scales.to(dtype).repeat_interleave(
             self.fp4_format.block_size(),
             -1,
         )
 
-        if self.fp4_format == FP4Format.nvfp4 and self.amax is not None:
+        if (
+            self.fp4_format in {FP4Format.sif4, FP4Format.nvfp4}
+            and self.amax is not None
+        ):
             result = (
                 result.to(torch.float32)
                 * self.amax
                 / (
-                    self.scale_rule.max_allowed_e2m1_value()
-                    * self.scale_rule.max_allowed_e4m3_value()
+                    self.fp4_format.max_allowed_e2m1_value(self.scale_rule)
+                    * self.fp4_format.max_allowed_e4m3_value(self.scale_rule)
                 )
             ).to(dtype)
 
