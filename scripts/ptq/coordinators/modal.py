@@ -111,9 +111,10 @@ class ModalEvaluationCoordinator(BaseEvaluationCoordinator):
 
         self.run_calibration_tasks(model_names, ptq_methods, tasks, **kwargs)
 
+        models_and_ptq_methods = list(itertools.product(model_names, ptq_methods))
         function_calls = []
 
-        for model_name, ptq_method in itertools.product(model_names, ptq_methods):
+        for model_name, ptq_method in models_and_ptq_methods:
             tasks_to_evaluate = self.get_tasks_to_evaluate(
                 model_name,
                 ptq_method,
@@ -141,11 +142,11 @@ class ModalEvaluationCoordinator(BaseEvaluationCoordinator):
                 ),
             )
 
-        results = modal.FunctionCall.gather(*function_calls)
+        all_results = modal.FunctionCall.gather(*function_calls)
 
-        for (model_name, ptq_method), result in zip(
-            itertools.product(model_names, ptq_methods),
-            results,
+        for (model_name, ptq_method), results in zip(
+            models_and_ptq_methods,
+            all_results,
             strict=True,
         ):
-            self.save_results(model_name, ptq_method, kwargs, result)
+            self.save_results(model_name, ptq_method, kwargs, results)

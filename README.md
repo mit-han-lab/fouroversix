@@ -44,10 +44,10 @@ Also, if you don't have a Blackwell GPU, you may use our reference implementatio
 To run PTQ experiments, make sure to install our test dependencies using either:
 
 ```bash
-pip install "fouroversix[extras]" --no-build-isolation
+pip install "fouroversix[evals]" --no-build-isolation
 
 # Or, if installing from source:
-pip install --no-build-isolation -e ".[extras]"
+pip install --no-build-isolation -e ".[evals]"
 ```
 
 Also, make sure all submodules are pulled and up to date:

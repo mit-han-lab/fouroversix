@@ -68,27 +68,13 @@ class BaseEvaluationCoordinator(ABC):
         model_name: str,
         ptq_method: PTQMethod,
         kwargs: dict[str, Any],
-        full_results: dict[str, Any],
+        results: list[tuple[str, str, float, dict[str, Any]]],
     ) -> None:
         """Save the results of a PTQ experiment to the SQLite database."""
 
         session = self.get_session()
 
-        for task in full_results["results"]:
-            result = full_results["results"][task]
-
-            if "acc_norm,none" in result:
-                metric_name = "acc_norm,none"
-            elif "acc,none" in result:
-                metric_name = "acc,none"
-            elif "word_perplexity,none" in result:
-                metric_name = "word_perplexity,none"
-            else:
-                metric_name = None
-
-            if metric_name is not None:
-                metric_value = result[metric_name]
-
+        for task, metric_name, metric_value, full_results in results:
             experiment = Experiment(
                 group_name=self.group_name,
                 model_name=model_name,
@@ -99,12 +85,12 @@ class BaseEvaluationCoordinator(ABC):
                 a_scale_rule=kwargs.get("a_scale_rule"),
                 w_scale_rule=kwargs.get("w_scale_rule"),
                 smoothquant_alpha=kwargs.get("smoothquant_alpha"),
-                results=result,
+                results=full_results,
             )
             session.add(experiment)
 
             print(model_name, ptq_method, task)
-            print(result)
+            print(full_results)
 
         session.commit()
 

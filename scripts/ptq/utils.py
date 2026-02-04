@@ -3,6 +3,13 @@ from __future__ import annotations
 from enum import Enum
 
 
+class EvaluationFramework(str, Enum):
+    """Frameworks to use when evaluating models."""
+
+    inspect_ai = "inspect_ai"
+    lm_eval = "lm_eval"
+
+
 class PTQMethod(str, Enum):
     """Methods of post-training quantization."""
 
