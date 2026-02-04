@@ -62,11 +62,11 @@ class FP4LinearWithSmoothing(FP4Linear):
                 self.weight * s[None, :],
                 out_dtype=self.out_dtype,
                 input_quantize_kwargs={
-                    "scale_rule": self.a_scale_rule,
+                    "scale_rule": self.activation_scale_rule,
                     "fp4_format": self.fp4_format,
                 },
                 other_quantize_kwargs={
-                    "scale_rule": self.w_scale_rule,
+                    "scale_rule": self.weight_scale_rule,
                     "fp4_format": self.fp4_format,
                 },
             )
@@ -101,15 +101,15 @@ class SmoothQuantEvaluator(RTNEvaluatorImpl):
 
         smoothquant_alpha = get_smoothquant_alpha(
             model_name,
-            kwargs.get("a_scale_rule"),
-            kwargs.get("w_scale_rule"),
+            kwargs.get("activation_scale_rule"),
+            kwargs.get("weight_scale_rule"),
             session,
         )
 
         calibration_experiments = get_calibration_experiments(
             model_name,
-            kwargs.get("a_scale_rule"),
-            kwargs.get("w_scale_rule"),
+            kwargs.get("activation_scale_rule"),
+            kwargs.get("weight_scale_rule"),
             session,
         )
 
@@ -142,8 +142,8 @@ class SmoothQuantEvaluator(RTNEvaluatorImpl):
 
         smoothquant_alpha = get_smoothquant_alpha(
             model_name,
-            kwargs.get("a_scale_rule"),
-            kwargs.get("w_scale_rule"),
+            kwargs.get("activation_scale_rule"),
+            kwargs.get("weight_scale_rule"),
             session,
         )
 
@@ -187,8 +187,8 @@ class SmoothQuantEvaluator(RTNEvaluatorImpl):
 
 def get_calibration_experiments(
     model_name: str,
-    a_scale_rule: AdaptiveBlockScalingRule,
-    w_scale_rule: AdaptiveBlockScalingRule,
+    activation_scale_rule: AdaptiveBlockScalingRule,
+    weight_scale_rule: AdaptiveBlockScalingRule,
     db_session: Session,
 ) -> list[Experiment]:
     return (
@@ -197,8 +197,8 @@ def get_calibration_experiments(
             Experiment.ptq_method == PTQMethod.smoothquant.value,
             Experiment.task == WIKITEXT_TRAIN,
             Experiment.model_name == model_name,
-            Experiment.a_scale_rule == a_scale_rule.value,
-            Experiment.w_scale_rule == w_scale_rule.value,
+            Experiment.activation_scale_rule == activation_scale_rule.value,
+            Experiment.weight_scale_rule == weight_scale_rule.value,
             Experiment.smoothquant_alpha.isnot(None),
         )
         .all()
@@ -207,14 +207,14 @@ def get_calibration_experiments(
 
 def get_smoothquant_alpha(
     model_name: str,
-    a_scale_rule: AdaptiveBlockScalingRule,
-    w_scale_rule: AdaptiveBlockScalingRule,
+    activation_scale_rule: AdaptiveBlockScalingRule,
+    weight_scale_rule: AdaptiveBlockScalingRule,
     session: Session,
 ) -> float | None:
     calibration_experiments = get_calibration_experiments(
         model_name,
-        a_scale_rule,
-        w_scale_rule,
+        activation_scale_rule,
+        weight_scale_rule,
         session,
     )
 

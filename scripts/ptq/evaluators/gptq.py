@@ -47,8 +47,8 @@ class GPTQEvaluator(PTQEvaluator):
         *,
         device: str,
         dtype: DataType,
-        a_scale_rule: AdaptiveBlockScalingRule,
-        w_scale_rule: AdaptiveBlockScalingRule,
+        activation_scale_rule: AdaptiveBlockScalingRule,
+        weight_scale_rule: AdaptiveBlockScalingRule,
         save_path: Path,
         **kwargs: dict[str, Any],  # noqa: ARG002
     ) -> "AutoModelForCausalLM":
@@ -78,7 +78,7 @@ class GPTQEvaluator(PTQEvaluator):
         save_path = (
             save_path
             / "gptq"
-            / (f"{model_name}-{a_scale_rule.value}-{w_scale_rule.value}")
+            / (f"{model_name}-{activation_scale_rule.value}-{weight_scale_rule.value}")
         )
 
         if not save_path.exists():
@@ -100,9 +100,9 @@ class GPTQEvaluator(PTQEvaluator):
                 "--save_path",
                 save_path.as_posix(),
                 "--a_scale_selection_rule",
-                a_scale_rule.value,
+                activation_scale_rule.value,
                 "--w_scale_selection_rule",
-                w_scale_rule.value,
+                weight_scale_rule.value,
             ]
 
             main()

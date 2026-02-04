@@ -12,6 +12,7 @@ from .utils import PTQMethod
 
 @click.command()
 @click.option(
+    "--activation-scale-rule",
     "--a-scale-rule",
     type=AdaptiveBlockScalingRule,
     default=AdaptiveBlockScalingRule.mse,
@@ -31,11 +32,12 @@ from .utils import PTQMethod
 @click.option("--task", "-t", type=str, multiple=True, default=["wikitext"])
 @click.option("--trust-remote-code", is_flag=True)
 @click.option(
+    "--weight-scale-rule",
     "--w-scale-rule",
     type=AdaptiveBlockScalingRule,
     default=AdaptiveBlockScalingRule.mse,
 )
-@click.option("--weight-scale-2d", is_flag=True)
+@click.option("--weight-scale-2d", "--w-scale-2d", is_flag=True)
 def cli(group_name: str | None, **kwargs: dict[str, Any]) -> None:
     detach = kwargs.pop("detach", False)
     model_names = kwargs.pop("model_name")

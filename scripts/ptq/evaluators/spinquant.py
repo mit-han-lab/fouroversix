@@ -66,8 +66,8 @@ class SpinQuantOptimizer:
         self,
         model_name: str,
         *,
-        a_scale_rule: AdaptiveBlockScalingRule,
-        w_scale_rule: AdaptiveBlockScalingRule,
+        activation_scale_rule: AdaptiveBlockScalingRule,
+        weight_scale_rule: AdaptiveBlockScalingRule,
         spinquant_save_path: str,
         spinquant_steps: int,
     ) -> None:
@@ -108,10 +108,10 @@ class SpinQuantOptimizer:
                 "False",
                 "--max_steps",
                 str(spinquant_steps),
-                "--a_scale_rule",
-                a_scale_rule.value,
-                "--w_scale_rule",
-                w_scale_rule.value,
+                "--activation_scale_rule",
+                activation_scale_rule.value,
+                "--weight_scale_rule",
+                weight_scale_rule.value,
                 *SPINQUANT_ARGS,
             ],
             check=True,
@@ -163,13 +163,13 @@ class SpinQuantEvaluator(PTQEvaluator):
         from transformers import AutoConfig, AutoModelForCausalLM
         from utils.process_args import process_args_ptq
 
-        a_scale_rule = kwargs.get("a_scale_rule")
-        w_scale_rule = kwargs.get("w_scale_rule")
+        activation_scale_rule = kwargs.get("activation_scale_rule")
+        weight_scale_rule = kwargs.get("weight_scale_rule")
 
         save_path = (
             save_path
             / "spinquant"
-            / f"{model_name}-{a_scale_rule.value}-{w_scale_rule.value}"
+            / f"{model_name}-{activation_scale_rule.value}-{weight_scale_rule.value}"
         )
 
         if not (save_path / "R.bin").exists():
@@ -184,8 +184,8 @@ class SpinQuantEvaluator(PTQEvaluator):
 
             SpinQuantOptimizer().optimize(
                 model_name,
-                a_scale_rule=a_scale_rule,
-                w_scale_rule=w_scale_rule,
+                activation_scale_rule=activation_scale_rule,
+                weight_scale_rule=weight_scale_rule,
                 spinquant_save_path=save_path.as_posix(),
                 spinquant_steps=SPINQUANT_STEPS,
             )
@@ -203,10 +203,10 @@ class SpinQuantEvaluator(PTQEvaluator):
             "--rotate",
             "--optimized_rotation_path",
             (save_path / "R.bin").as_posix(),
-            "--a_scale_rule",
-            a_scale_rule.value,
-            "--w_scale_rule",
-            w_scale_rule.value,
+            "--activation_scale_rule",
+            activation_scale_rule.value,
+            "--weight_scale_rule",
+            weight_scale_rule.value,
             *SPINQUANT_ARGS,
         ]
 
