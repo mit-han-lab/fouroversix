@@ -251,17 +251,16 @@ namespace fouroversix
         constexpr int kBlockNSF = Kernel_traits::kBlockNSF;
         constexpr int kNWarps = Kernel_traits::kNWarps;
         constexpr int kNumGroupsInRow = Kernel_traits::kNumGroupsInRow;
-        constexpr float E2M1_MAX_VALUE = Kernel_traits::E2M1_MAX_VALUE;
         constexpr float E4M3_MAX_VALUE = Kernel_traits::E4M3_MAX_VALUE;
-        constexpr float E4M3_MAX_FOUROVERSIX = Kernel_traits::E4M3_MAX_FOUROVERSIX;
-        constexpr float E4M3_MIN_POSITIVE_NORMAL = Kernel_traits::E4M3_MIN_POSITIVE_NORMAL;
 
         constexpr AdaptiveBlockScalingRuleType kRule = static_cast<AdaptiveBlockScalingRuleType>(kSelectionRule);
         constexpr bool Is_4o6 = kRule == AdaptiveBlockScalingRuleType::L1_NORM_4o6 || 
                                 kRule == AdaptiveBlockScalingRuleType::MSE_4o6 || 
                                 kRule == AdaptiveBlockScalingRuleType::ABS_MAX_4o6;
-        constexpr int TS_SCALE_4 = Is_4o6 ? 384 : 448; // 448 * 6 / 4
-        constexpr int TS_SCALE_6 = Is_4o6 ? 256 : 448;
+        constexpr int E4M3_SCALE_4 = Is_4o6 ? Kernel_traits::E4M3_MAX_FOUROVERSIX : E4M3_MAX_VALUE;
+        constexpr int E4M3_SCALE_6 = Is_4o6 ? Kernel_traits::E4M3_MAX_FOUROVERSIX : E4M3_MAX_VALUE;
+        constexpr int E2M1_SCALE_4 = Is_4o6 ? 6 : 4;
+        constexpr int E2M1_SCALE_6 = 6;
 
         constexpr int kSmemBlockInRow = int(kNumGroupsInRow / 4);
         constexpr int kSmemBlockInCol = int(kBlockM / 128);
@@ -280,7 +279,12 @@ namespace fouroversix
         // Runtime variables
         const int tidx = threadIdx.x;
         const int num_groups = kNumGroupsInRow * kBlockM;
-        const float amax = max(*reinterpret_cast<float *>(params.amax_ptr), 1e-12f);
+        // JXGuo: assure amax is not zero before calling this kernel
+        const float amax = *reinterpret_cast<float *>(params.amax_ptr);
+
+        if (amax == 0.0f) {
+            return;
+        }
 
         // -------------------------------------------------------------------------
         // Tensor Definitions
@@ -394,9 +398,11 @@ namespace fouroversix
             float sf;
             if constexpr (Is_4o6)
             {
+                float encode_scale_4 = (E2M1_SCALE_4 * E4M3_SCALE_4) / amax;
+                float encode_scale_6 = (E2M1_SCALE_6 * E4M3_SCALE_6) / amax;
                 float sf_[2] = {
-                    clamp((g_max * TS_SCALE_4) / amax, 0, E4M3_MAX_VALUE),
-                    clamp((g_max * TS_SCALE_6) / amax, 0, E4M3_MAX_VALUE)};
+                    clamp((g_max / E2M1_SCALE_4) * encode_scale_4 * 1.5, 0, E4M3_MAX_VALUE),
+                    clamp((g_max / E2M1_SCALE_6) * encode_scale_6, 0, E4M3_MAX_VALUE)};
 
                 sf_[0] = static_cast<float>(static_cast<ScaleFactor>(sf_[0]));
                 sf_[1] = static_cast<float>(static_cast<ScaleFactor>(sf_[1]));
@@ -408,11 +414,13 @@ namespace fouroversix
                 float sf_val = 0.0f;
                 if constexpr (kRule == AdaptiveBlockScalingRuleType::ALL_6)
                 {
-                    sf_val = clamp((g_max * TS_SCALE_6) / amax, 0, E4M3_MAX_VALUE);
+                    float encode_scale_6 = (E2M1_SCALE_6 * E4M3_SCALE_6) / amax;
+                    sf_val = clamp((g_max / E2M1_SCALE_6) * encode_scale_6, 0, E4M3_MAX_VALUE);
                 }
                 else if constexpr (kRule == AdaptiveBlockScalingRuleType::ALL_4)
                 {
-                    sf_val = clamp((g_max * TS_SCALE_4) / amax, 0, E4M3_MAX_VALUE);
+                    float encode_scale_4 = (E2M1_SCALE_4 * E4M3_SCALE_4) / amax;
+                    sf_val = clamp((g_max / E2M1_SCALE_4) * encode_scale_4, 0, E4M3_MAX_VALUE);
                 }
                 else
                 {

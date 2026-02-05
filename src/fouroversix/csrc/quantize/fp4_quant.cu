@@ -175,7 +175,7 @@ namespace fouroversix
             x_rht = torch::zeros({M_rounded, N_rounded}, x.options());
         } else
         {
-            x_rht = torch::empty({ 0, 0 }, x.options());
+            x_rht = torch::zeros({ 0, 0 }, x.options());
         }
 
         /**********************

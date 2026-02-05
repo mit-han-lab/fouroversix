@@ -46,6 +46,7 @@ template <int kBlockM_, int kBlockN_, int kNWarps_, bool Is_nvfp4, bool Is_trans
 struct FP4_quant_kernel_traits : public Base
 {
     static constexpr float E2M1_MAX_VALUE = Base::E2M1_MAX_VALUE;
+    static constexpr float E2M1_MAX_FOUR = 4;
     static constexpr float E4M3_MIN_VALUE = Base::E4M3_MIN_VALUE;
     static constexpr float E4M3_MAX_VALUE = Base::E4M3_MAX_VALUE;
     static constexpr float E4M3_MAX_FOUROVERSIX = Base::E4M3_MAX_FOUROVERSIX;
