@@ -188,16 +188,20 @@ def quantize_to_fp4(
     is_nvfp4: bool,  # noqa: FBT001
     is_rtn: bool,  # noqa: FBT001
     is_rht: bool,  # noqa: FBT001
+    is_2d: bool,  # noqa: FBT001
     is_transpose: bool,  # noqa: FBT001
     selection_rule: int,
-) -> (torch.Tensor, torch.Tensor, torch.Tensor):
+    rbits: int,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     return torch.ops.fouroversix.quantize_to_fp4.default(
         x,
         is_nvfp4,
         is_rtn,
         is_rht,
+        is_2d,
         is_transpose,
         selection_rule,
+        rbits,
     )
 
 
@@ -209,7 +213,8 @@ def _(
     is_rht: bool,  # noqa: ARG001, FBT001
     is_transpose: bool,  # noqa: ARG001, FBT001
     selection_rule: int,  # noqa: ARG001
-) -> (torch.Tensor, torch.Tensor, torch.Tensor):
+    rbits: int,  # noqa: ARG001
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     return (
         torch.empty(x.shape[0], x.shape[1] // 2, dtype=torch.uint8, device=x.device),
         torch.empty(

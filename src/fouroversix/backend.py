@@ -203,9 +203,15 @@ class QuantizeBackend(str, Enum):
         """Check if the backend can be used given the CUDA device and installation."""
 
         if self == QuantizeBackend.cuda:
-            # TODO(jack, junxian): Re-enable CUDA backend once precision issues are
-            # resolved
-            return False
+            if not torch.cuda.is_available() or torch.cuda.get_device_capability()[
+                0
+            ] not in [SM_100, SM_110, SM_120]:
+                return False
+
+            try:
+                import fouroversix._C  # noqa: F401
+            except ModuleNotFoundError:
+                return False
 
         if self == QuantizeBackend.triton:  # noqa: SIM102
             if not torch.cuda.is_available() or torch.cuda.get_device_capability()[
@@ -248,13 +254,8 @@ class QuantizeBackend(str, Enum):
             raise ValueError(msg)
 
         if self == QuantizeBackend.cuda:
-            return (
-                had is None
-                and fp4_format == FP4Format.nvfp4
-                and round_style == RoundStyle.nearest
-                and not block_scale_2d
-                and not transpose
-            )
+            return (fp4_format == FP4Format.nvfp4 
+                    and not transpose)
 
         if self == QuantizeBackend.pytorch:
             return True
@@ -293,6 +294,7 @@ class QuantizeBackend(str, Enum):
         fp4_format: FP4Format = FP4Format.nvfp4,
         round_style: RoundStyle = RoundStyle.nearest,
         transpose: bool = False,
+        rbits: int = 0x8080,
         **kwargs: dict[str, Any],
     ) -> FP4Tensor:
         """Quantize a tensor to FP4. See frontend.py for more details."""
@@ -303,8 +305,19 @@ class QuantizeBackend(str, Enum):
             original_shape = (original_shape[1], original_shape[0])
 
         if self == QuantizeBackend.cuda:
-            msg = "The CUDA backend is currently disabled and will be updated soon"
-            raise NotImplementedError(msg)
+            from .ops import quantize_to_fp4
+
+            e2m1_values, scale_factors, amax = quantize_to_fp4(
+                x,
+                fp4_format == FP4Format.nvfp4,
+                round_style == RoundStyle.nearest,
+                had is not None,
+                block_scale_2d,
+                transpose,
+                scale_rule.cuda_id(),
+                rbits,
+                **kwargs,
+            )
 
         elif self == QuantizeBackend.transformer_engine:
             from transformer_engine.pytorch.tensor.nvfp4_tensor import NVFP4Quantizer
@@ -344,6 +357,7 @@ class QuantizeBackend(str, Enum):
                 scale_rule=scale_rule,
                 block_scale_2d=block_scale_2d,
                 transpose=transpose,
+                rbits=rbits,
                 **kwargs,
             )
 
@@ -407,6 +421,7 @@ def quantize_to_fp4(
     fp4_format: FP4Format = FP4Format.nvfp4,
     round_style: RoundStyle = RoundStyle.nearest,
     transpose: bool = False,
+    rbits: int = 0x8080,
 ) -> FP4Tensor:
     """
     Quantize a tensor to FP4.
@@ -425,7 +440,7 @@ def quantize_to_fp4(
         round_style (RoundStyle): The rounding style to use, either `RoundStyle.nearest`
             for round-to-nearest, or `RoundStyle.stochastic` for stochastic rounding.
         transpose (bool): Whether to transpose the input tensor before quantization.
-
+        rbits (int): The rounding bits to use.
     Returns:
         A tuple containing the E2M1 values, the scale factors, and the per-tensor
             normalization constant (if used).
@@ -439,6 +454,7 @@ def quantize_to_fp4(
         "fp4_format": fp4_format,
         "round_style": round_style,
         "transpose": transpose,
+        "rbits": rbits,
     }
 
     if backend is None:

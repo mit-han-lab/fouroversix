@@ -74,6 +74,7 @@ def block_scaled_fp4_quantization_kernel(
     ROUND_STYLE: tl.constexpr,
     BLOCK_SCALE_2D: tl.constexpr,
     SCALE_RULE: tl.constexpr,
+    RBITS: tl.constexpr,
 ) -> None:
     E2M1_MAX_ALLOWED_VALUE: tl.constexpr = (
         E2M1_MAX_VALUE if SCALE_RULE == SCALE_RULE_ALWAYS_6 else E2M1_MAX_FOUR
@@ -175,12 +176,18 @@ def block_scaled_fp4_quantization_kernel(
             pack=4,
         )
     elif ROUND_STYLE == ROUND_STYLE_STOCHASTIC:
-        rbits = tl.rand(
-            0,
-            tl.arange(0, BLOCK_SIZE_M)[:, None] * BLOCK_SIZE_N // 2
-            + tl.arange(0, BLOCK_SIZE_N // 2)[None, :],
-        ).cast(tl.uint32, bitcast=True)
-
+        if RBITS == -1:
+            rbits = tl.rand(
+                0,
+                tl.arange(0, BLOCK_SIZE_M)[:, None] * BLOCK_SIZE_N // 2
+                + tl.arange(0, BLOCK_SIZE_N // 2)[None, :],
+            ).cast(tl.uint32, bitcast=True)
+        else:
+            rbits = tl.full(
+                (BLOCK_SIZE_M, BLOCK_SIZE_N // 2),
+                RBITS,
+                dtype=tl.uint32,
+            )
         x_e2m1 = tl.inline_asm_elementwise(
             asm="""
             {
@@ -209,6 +216,7 @@ def nvfp4_fouroversix_quantization_kernel(
     ROUND_STYLE: tl.constexpr,
     BLOCK_SCALE_2D: tl.constexpr,
     SCALE_RULE: tl.constexpr,
+    RBITS: tl.constexpr,
 ) -> None:
     x_amax = tl.load(x_amax_ptr)
     x_scale_blocks = x_block.reshape(128, 4, 16)
@@ -323,11 +331,18 @@ def nvfp4_fouroversix_quantization_kernel(
             pack=8,
         )
     elif ROUND_STYLE == ROUND_STYLE_STOCHASTIC:
-        rbits = tl.rand(
-            0,
-            tl.arange(0, BLOCK_SIZE_M)[:, None] * BLOCK_SIZE_N // 2
-            + tl.arange(0, BLOCK_SIZE_N // 2)[None, :],
-        ).cast(tl.uint32, bitcast=True)
+        if RBITS == -1:
+            rbits = tl.rand(
+                0,
+                tl.arange(0, BLOCK_SIZE_M)[:, None] * BLOCK_SIZE_N // 2
+                + tl.arange(0, BLOCK_SIZE_N // 2)[None, :],
+            ).cast(tl.uint32, bitcast=True)
+        else:
+            rbits = tl.full(
+                (BLOCK_SIZE_M, BLOCK_SIZE_N // 2),
+                RBITS,
+                dtype=tl.uint32,
+            )
         (x_e2m1_6, x_e2m1_4, x_fp16x2_6, x_fp16x2_4) = tl.inline_asm_elementwise(
             asm="""
                 {
@@ -505,6 +520,7 @@ def fp4_quantization_kernel(
     ROUND_STYLE: tl.constexpr,
     BLOCK_SCALE_2D: tl.constexpr,
     SCALE_RULE: tl.constexpr,
+    RBITS: tl.constexpr,
 ) -> None:
     pid_m = tl.program_id(0)
     pid_n = tl.program_id(1)
@@ -530,6 +546,7 @@ def fp4_quantization_kernel(
             ROUND_STYLE,
             BLOCK_SCALE_2D,
             SCALE_RULE,
+            RBITS,
         )
     else:
         x_e2m1, x_scales = nvfp4_fouroversix_quantization_kernel(
@@ -540,6 +557,7 @@ def fp4_quantization_kernel(
             ROUND_STYLE,
             BLOCK_SCALE_2D,
             SCALE_RULE,
+            RBITS,
         )
 
     e2m1_n_block_offset = pid_n * BLOCK_SIZE_N // 2
@@ -559,6 +577,7 @@ def quantize_to_fp4(
     scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
     block_scale_2d: bool = False,
     transpose: bool = False,
+    rbits: int = 0,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
     if transpose:
         N, M = x.shape
@@ -664,6 +683,7 @@ def quantize_to_fp4(
         ROUND_STYLE=round_style.value,
         BLOCK_SCALE_2D=block_scale_2d,
         SCALE_RULE=scale_rule.value,
+        RBITS=rbits,
     )
 
     if fp4_format == FP4Format.mxfp4:
