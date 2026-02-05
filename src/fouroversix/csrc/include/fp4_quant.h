@@ -21,13 +21,16 @@ namespace fouroversix
     {
         using index_t = int64_t;
         void *__restrict__ x_ptr;
+        void *__restrict__ x_rht_ptr;
         void *__restrict__ x_e2m1_ptr;
         void *__restrict__ x_sf_ptr;
         void *__restrict__ x_sft_ptr;
-        void *__restrict__ ts_ptr;
+        void *__restrict__ amax_ptr;
 
         int x_row_stride;
         int x_col_stride;
+        int x_rht_row_stride;
+        int x_rht_col_stride;
         int x_e2m1_row_stride;
         int x_e2m1_col_stride;
         int x_sf_row_stride;
@@ -42,8 +45,10 @@ namespace fouroversix
         bool is_rtn;
         bool is_rht;
         bool is_4o6;
+        bool is_2d;
         bool is_transpose;
         int selection_rule; // 0: all_6, 1: all_4, 2: 4o6_l1_norm, 3: 4o6_mse
+        int rbits;
     };
 
     template <typename T, bool Is_nvfp4, bool Is_rht, bool Is_transpose>

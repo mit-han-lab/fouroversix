@@ -16,7 +16,7 @@ namespace fouroversix
 {
 
 // Determine if the architecture supports FLASH and define a macro to handle parameter modifiers
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 1000
 #define ARCH_SUPPORTS_FLASH
 #define KERNEL_PARAM_MODIFIER __grid_constant__
 #else
@@ -24,17 +24,17 @@ namespace fouroversix
 #endif
 
 // Define a macro for unsupported architecture handling to centralize the error message
-#define FLASH_UNSUPPORTED_ARCH printf("FATAL: FlashAttention requires building with sm version sm80-sm90, but was built for < 8.0!");
+#define FLASH_UNSUPPORTED_ARCH printf("FATAL: FourOverSix requires building with sm version sm100, but was built for < 10.0!");
 
 // Use a macro to clean up kernel definitions
 #define DEFINE_FP4_QUANT_KERNEL(kernelName, ...)   \
     template <typename Kernel_traits, __VA_ARGS__> \
     __global__ void kernelName(KERNEL_PARAM_MODIFIER const FP4_quant_params params)
 
-    DEFINE_FP4_QUANT_KERNEL(fp4_quant_prologue_kernel, bool Is_nvfp4, bool Is_rht, bool Is_transpose, bool Is_rtn, int kSelectionRule)
+    DEFINE_FP4_QUANT_KERNEL(fp4_quant_prologue_kernel, bool Is_nvfp4, bool Is_rht, bool Is_2d, bool Is_transpose, bool Is_rtn, int kSelectionRule)
     {
 #if defined(ARCH_SUPPORTS_FLASH)
-        fouroversix::compute_fp4_quant_prologue<Kernel_traits, Is_nvfp4, Is_rht, Is_transpose, Is_rtn, kSelectionRule>(params);
+        fouroversix::compute_fp4_quant_prologue<Kernel_traits, Is_nvfp4, Is_rht, Is_2d, Is_transpose, Is_rtn, kSelectionRule>(params);
 #else
         FLASH_UNSUPPORTED_ARCH
 #endif
@@ -60,19 +60,21 @@ namespace fouroversix
         const int num_n_block = (params.N + Kernel_traits::kBlockN - 1) / Kernel_traits::kBlockN;
         dim3 grid(num_m_block, num_n_block);
         BOOL_SWITCH(params.is_rtn, Is_rtn, [&]
-                    {
-                        // BOOL_SWITCH(params.is_4o6, Is_4o6, [&] {
-                        SELECTION_RULE_SWITCH(params.selection_rule, kSelectionRule, [&]
-                                              {
-                auto kernel_prologue = &fp4_quant_prologue_kernel<Kernel_traits, Is_nvfp4, Is_rht, Is_transpose, Is_rtn, kSelectionRule>;
-                if (smem_size >= 48 * 1024) {
-                    C10_CUDA_CHECK(cudaFuncSetAttribute(
-                        kernel_prologue, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
-                }
-                kernel_prologue<<<grid, Kernel_traits::kNThreads, smem_size, stream>>>(params);
-                C10_CUDA_KERNEL_LAUNCH_CHECK(); });
-                        // });
-                    });
+        {
+            BOOL_SWITCH(params.is_2d, Is_2d, [&] 
+            {
+                SELECTION_RULE_SWITCH(params.selection_rule, kSelectionRule, [&]
+                {
+                    auto kernel_prologue = &fp4_quant_prologue_kernel<Kernel_traits, Is_nvfp4, Is_rht, Is_2d, Is_transpose, Is_rtn, kSelectionRule>;
+                    if (smem_size >= 48 * 1024) {
+                        C10_CUDA_CHECK(cudaFuncSetAttribute(
+                            kernel_prologue, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
+                    }
+                    kernel_prologue<<<grid, Kernel_traits::kNThreads, smem_size, stream>>>(params);
+                    C10_CUDA_KERNEL_LAUNCH_CHECK();
+                });
+            });
+        });
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -86,19 +88,18 @@ namespace fouroversix
         const int num_n_block = (params.N + Kernel_traits::kBlockN - 1) / Kernel_traits::kBlockN;
         dim3 grid(num_m_block, num_n_block);
         BOOL_SWITCH(params.is_rtn, Is_rtn, [&]
-                    {
-                        // BOOL_SWITCH(params.is_4o6, Is_4o6, [&] {
-                        SELECTION_RULE_SWITCH(params.selection_rule, kSelectionRule, [&]
-                                              {
+        {
+            SELECTION_RULE_SWITCH(params.selection_rule, kSelectionRule, [&]
+            {
                 auto kernel = &fp4_quant_kernel<Kernel_traits, Is_nvfp4, Is_rht, Is_transpose, Is_rtn, kSelectionRule>;
                 if (smem_size >= 48 * 1024) {
                     C10_CUDA_CHECK(cudaFuncSetAttribute(
                         kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
                 }
                 kernel<<<grid, Kernel_traits::kNThreads, smem_size, stream>>>(params);
-                C10_CUDA_KERNEL_LAUNCH_CHECK(); });
-                        // });
-                    });
+                C10_CUDA_KERNEL_LAUNCH_CHECK();
+            });
+        });
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////

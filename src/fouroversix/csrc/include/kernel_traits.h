@@ -21,12 +21,13 @@ struct Base_kernel_traits
     static constexpr float E2M1_MAX_VALUE = 6;
     static constexpr float E4M3_MIN_VALUE = -448;
     static constexpr float E4M3_MAX_VALUE = 448;
+    static constexpr float E4M3_MAX_FOUROVERSIX = 256;
     static constexpr float E4M3_MIN_POSITIVE_NORMAL = 0.015625;
 
     using Element = elem_type;
-    using ElementScaleFactor = std::conditional_t<Is_nvfp4, cutlass::float_e4m3_t, uint8_t>;
-    using ElementXe2m1Packed = std::conditional_t<Is_nvfp4, uint64_t, uint128_t>;
-    using ElementNormConstant = float;
+    using ScaleFactor = std::conditional_t<Is_nvfp4, cutlass::float_e4m3_t, uint8_t>;
+    // using ElementXe2m1Packed = std::conditional_t<Is_nvfp4, uint64_t, uint128_t>;
+    using NormConst = float;
     static constexpr bool Has_cp_async = true;
 
     using index_t = int64_t;
@@ -47,12 +48,12 @@ struct FP4_quant_kernel_traits : public Base
     static constexpr float E2M1_MAX_VALUE = Base::E2M1_MAX_VALUE;
     static constexpr float E4M3_MIN_VALUE = Base::E4M3_MIN_VALUE;
     static constexpr float E4M3_MAX_VALUE = Base::E4M3_MAX_VALUE;
+    static constexpr float E4M3_MAX_FOUROVERSIX = Base::E4M3_MAX_FOUROVERSIX;
     static constexpr float E4M3_MIN_POSITIVE_NORMAL = Base::E4M3_MIN_POSITIVE_NORMAL;
 
     using Element = typename Base::Element;
-    using ElementScaleFactor = typename Base::ElementScaleFactor;
-    using ElementXe2m1Packed = typename Base::ElementXe2m1Packed;
-    using ElementNormConstant = typename Base::ElementNormConstant;
+    using ScaleFactor = typename Base::ScaleFactor;
+    using NormConst = typename Base::NormConst;
     using index_t = typename Base::index_t;
     static constexpr bool Has_cp_async = Base::Has_cp_async;
     using SmemCopyAtom = typename Base::SmemCopyAtom;
@@ -82,6 +83,8 @@ struct FP4_quant_kernel_traits : public Base
     // static constexpr int kSwizzleB = Is_nvfp4 ? 2 : 1; // 2 or 1 bits
 
     static constexpr int kNumGroupsInRow = kBlockN / kGroupN;
+    static_assert(kBlockM % kGroupN == 0, "kBlockM must be a multiple of kGroupN if is 2d");
+    static constexpr int kNumGroupsInCol = kBlockM; // for 2d scale factor
     // static constexpr int kSwizzleM = 3;
     // static constexpr int kSwizzleS = 3;
     // static constexpr int kSwizzleB = 2;
@@ -111,7 +114,7 @@ struct FP4_quant_kernel_traits : public Base
     static constexpr int kSmemXSize = size(SmemLayout{}) * sizeof(Element);
     static constexpr int kSmemXe2m1Size = kSmemXSize / 4;
     static constexpr int kSmemSFTSize = size(SmemLayoutSFT{}) * sizeof(float);
-    static constexpr int kSmemSFSize = size(SmemLayoutSF{}) * sizeof(ElementScaleFactor);
+    static constexpr int kSmemSFSize = size(SmemLayoutSF{}) * sizeof(ScaleFactor);
     static constexpr int kSmemSize = kSmemXSize + kSmemXe2m1Size + kSmemSFTSize + kSmemSFSize;
 
     static constexpr int kGmemElemsPerLoad = sizeof(cute::uint128_t) / sizeof(Element);
