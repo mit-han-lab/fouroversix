@@ -12,14 +12,22 @@ from ...resources import (
 from .evaluator import PTQEvaluator
 
 if TYPE_CHECKING:
-    from fouroversix.utils import DataType
+    from pathlib import Path
+
     from transformers import AutoModelForCausalLM
 
 
 rtn_img = get_image()
 
 with rtn_img.imports():
-    from fouroversix import quantize_model
+    from fouroversix import (
+        DataType,
+        FourOverSixLinearConfig,
+        MatmulBackend,
+        QuantizeBackend,
+        ScaleRule,
+        quantize_model,
+    )
     from transformers import AutoModelForCausalLM
 
 
@@ -32,19 +40,49 @@ class RTNEvaluatorImpl(PTQEvaluator):
         *,
         device: str,
         dtype: DataType,
+        save_path: Path,
+        activation_scale_rule: ScaleRule,
+        weight_scale_rule: ScaleRule,
+        matmul_backend: MatmulBackend,
+        quantize_backend: QuantizeBackend,
+        weight_scale_2d: bool,
         model_kwargs: dict[str, Any] | None = None,
-        **kwargs: dict[str, Any],
+        **kwargs: dict[str, Any],  # noqa: ARG002
     ) -> AutoModelForCausalLM:
         """Quantize a model using round-to-nearest quantization."""
 
-        model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            device_map=device,
-            dtype=dtype.torch(),
-            **(model_kwargs or {}),
+        model_save_path = (
+            save_path
+            / "rtn"
+            / f"{model_name}-{activation_scale_rule.value}-{weight_scale_rule.value}"
         )
 
-        quantize_model(model, **kwargs)
+        if not model_save_path.exists():
+            model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                device_map=device,
+                **(model_kwargs or {}),
+            )
+
+            linear_config = FourOverSixLinearConfig(
+                dtype=dtype,
+                matmul_backend=matmul_backend,
+                quantize_backend=quantize_backend,
+                output_dtype=DataType(
+                    str(model.config.torch_dtype).replace("torch.", ""),
+                ),
+                weight_scale_2d=weight_scale_2d,
+            )
+
+            linear_config.activation_scale_rule = activation_scale_rule
+            linear_config.weight_scale_rule = weight_scale_rule
+
+            quantize_model(model, linear_config=linear_config)
+            # model.save_pretrained(model_save_path)
+        else:
+            model = AutoModelForCausalLM.from_pretrained(model_save_path)
+            model.name_or_path = model_name
+
         return model
 
 

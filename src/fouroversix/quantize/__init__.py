@@ -1,5 +1,6 @@
-from .fp4_tensor import FP4Tensor, from_blocked
-from .reference import to_blocked
-from .rht_utils import get_rht_matrix
+from .config import QuantizationConfig
+from .frontend import quantize_to_fp4
+from .quantized_tensor import QuantizedTensor
+from .utils import get_rht_matrix
 
-__all__ = ["FP4Tensor", "from_blocked", "get_rht_matrix", "to_blocked"]
+__all__ = ["QuantizationConfig", "QuantizedTensor", "get_rht_matrix", "quantize_to_fp4"]

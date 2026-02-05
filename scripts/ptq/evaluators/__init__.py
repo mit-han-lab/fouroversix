@@ -3,12 +3,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ..utils import PTQMethod
-from .awq import AWQEvaluator
-from .gptq import GPTQEvaluator
+
+# from .awq import AWQEvaluator
+# from .gptq import GPTQEvaluator
 from .high_precision import HighPrecisionEvaluator
 from .rtn import RTNEvaluator
-from .smoothquant import SmoothQuantEvaluator
-from .spinquant import SpinQuantEvaluator
+
+# from .smoothquant import SmoothQuantEvaluator
+# from .spinquant import SpinQuantEvaluator
 
 if TYPE_CHECKING:
     from .evaluator import PTQEvaluator

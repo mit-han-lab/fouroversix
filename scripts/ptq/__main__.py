@@ -2,8 +2,7 @@ from typing import Any
 
 import click
 import modal
-from fouroversix import MatmulBackend, QuantizeBackend
-from fouroversix.utils import AdaptiveBlockScalingRule, DataType, FP4Format
+from fouroversix.utils import DataType, MatmulBackend, QuantizeBackend, ScaleRule
 
 from ..resources import app
 from .coordinators import LocalEvaluationCoordinator, ModalEvaluationCoordinator
@@ -14,19 +13,18 @@ from .utils import EvaluationFramework, PTQMethod
 @click.option(
     "--activation-scale-rule",
     "--a-scale-rule",
-    type=AdaptiveBlockScalingRule,
-    default=AdaptiveBlockScalingRule.mse,
+    type=ScaleRule,
+    default=ScaleRule.mse,
 )
 @click.option("--detach", is_flag=True)
 @click.option("--device", type=str, default="cuda")
-@click.option("--dtype", type=DataType, default=DataType.auto)
+@click.option("--dtype", type=DataType, default=DataType.nvfp4)
 @click.option(
     "--eval-framework",
     "-f",
     type=EvaluationFramework,
     default=EvaluationFramework.lm_eval,
 )
-@click.option("--fp4-format", type=FP4Format, default=FP4Format.nvfp4)
 @click.option("--group-name", type=str, default=None)
 @click.option("--limit", type=int, default=None)
 @click.option("--matmul-backend", type=MatmulBackend, default=None)
@@ -41,8 +39,8 @@ from .utils import EvaluationFramework, PTQMethod
 @click.option(
     "--weight-scale-rule",
     "--w-scale-rule",
-    type=AdaptiveBlockScalingRule,
-    default=AdaptiveBlockScalingRule.mse,
+    type=ScaleRule,
+    default=ScaleRule.mse,
 )
 @click.option("--weight-scale-2d", "--w-scale-2d", is_flag=True)
 def cli(group_name: str | None, **kwargs: dict[str, Any]) -> None:
@@ -69,7 +67,7 @@ def cli(group_name: str | None, **kwargs: dict[str, Any]) -> None:
     # Validate options
     for ptq_method in ptq_methods:
         if ptq_method != PTQMethod.rtn:
-            if kwargs.get("fp4_format") == FP4Format.mxfp4:
+            if kwargs.get("dtype") == DataType.mxfp4:
                 msg = "MXFP4 is only supported with RTN"
                 raise ValueError(msg)
 

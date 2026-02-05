@@ -171,7 +171,7 @@ class SmoothQuantEvaluator(RTNEvaluatorImpl):
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
             device_map=device,
-            dtype=dtype.torch(),
+            dtype=dtype.torch_dtype(),
             **(model_kwargs or {}),
         )
 

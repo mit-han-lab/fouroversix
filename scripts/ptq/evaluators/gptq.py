@@ -110,5 +110,5 @@ class GPTQEvaluator(PTQEvaluator):
         return AutoModelForCausalLM.from_pretrained(
             save_path,
             device_map=device,
-            dtype=dtype.torch(),
+            dtype=dtype.torch_dtype(),
         )

@@ -87,16 +87,16 @@ select = [
     "T201",  # Allow print statements in CLI tools
     "TID252",  # Allow relative imports from parent modules
 ]
-"src/fouroversix/ops.py" = [
+"src/fouroversix/matmul/cutlass/ops.py" = [
     "I001",  # Allow unsorted imports, because torch needs to be imported before fouroversix._C
 ]
-"src/fouroversix/quantize/triton_kernel.py" = [
+"src/fouroversix/quantize/pytorch/reference.py" = [
+    "S101",  # Allow assert statements in reference implementation
+]
+"src/fouroversix/quantize/triton/kernel.py" = [
     "ANN001",  # Allow missing annotations in Triton kernels
     "N803",  # Allow uppercase arguments to Triton kernels
     "N806",  # Allow uppercase variables in Triton kernels
-]
-"src/fouroversix/quantize/reference.py" = [
-    "S101",  # Allow assert statements in reference implementation
 ]
 "tests/**/test_*.py" = [
     "S101",  # Allow assert statements in tests

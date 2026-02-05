@@ -222,7 +222,7 @@ class SpinQuantEvaluator(PTQEvaluator):
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
             config=config,
-            torch_dtype=dtype.torch(),
+            torch_dtype=dtype.torch_dtype(),
         )
 
         if process_word_embeddings:
