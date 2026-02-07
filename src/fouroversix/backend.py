@@ -254,7 +254,7 @@ class QuantizeBackend(str, Enum):
             raise ValueError(msg)
 
         if self == QuantizeBackend.cuda:
-            return fp4_format == FP4Format.nvfp4 and not transpose
+            return fp4_format == FP4Format.nvfp4 and not transpose and had is None
 
         if self == QuantizeBackend.pytorch:
             return True

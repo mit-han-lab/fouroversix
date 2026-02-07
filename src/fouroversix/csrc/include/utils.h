@@ -645,13 +645,8 @@ namespace fouroversix
                 res_6[i] = fp4_array_quant.convert(x, amax, sf_[1], rbits, &err[1]);
             }
 
-            // Use tolerance to handle numerical precision issues when errors are very close
-            // When errors are within tolerance, prefer 6 (higher precision) over 4
-            constexpr float kErrorTolerance = 1e-6f;
-            float err_diff = err[0] - err[1];
             // pick_first = true means choose 4, false means choose 6
-            // Only choose 4 if err[0] is significantly smaller than err[1]
-            bool const pick_first = err_diff < -kErrorTolerance;
+            bool const pick_first = err[0] < err[1];
 #pragma unroll
             for (int i = 0; i < num_loops; ++i)
             {

@@ -105,8 +105,8 @@ def test_backend_outputs_are_consistent(  # noqa: C901, PLR0915
         ):
             pytest.skip("Backend is not supported")
 
-        quantized_a = quantize_to_fp4(x, backend=backend_a, **kwargs)
-        quantized_b = quantize_to_fp4(x, backend=backend_b, **kwargs)
+        quantized_a = quantize_to_fp4(x.clone(), backend=backend_a, **kwargs)
+        quantized_b = quantize_to_fp4(x.clone(), backend=backend_b, **kwargs)
 
         if not torch.allclose(quantized_a.amax, quantized_b.amax):
             print("Backends A and B have different amax values!")
