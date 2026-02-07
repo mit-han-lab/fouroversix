@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from fouroversix.utils import DataType, ScaleRule
 
@@ -51,7 +52,7 @@ def unpack_packed_fp4(
     ).reshape(x.shape[0], x.shape[1] * 2)
 
 
-class QuantizedTensor:
+class QuantizedTensor(nn.Module):
     """A quantized tensor."""
 
     values: torch.Tensor
@@ -74,9 +75,8 @@ class QuantizedTensor:
         scale_rule: ScaleRule,
         padded_shape: tuple[int, int] | None = None,
     ) -> None:
-        self.values = values
-        self.scale_factors = scale_factors
-        self.amax = amax
+        super().__init__()
+
         self.dtype = dtype
         self.original_shape = original_shape
         self.scale_rule = scale_rule
@@ -100,15 +100,15 @@ class QuantizedTensor:
             expected_packed_elements = self.padded_shape[0] * self.padded_shape[1] // 2
             expected_scale_factors = expected_packed_elements * 2 // dtype.block_size()
 
-            if self.values.numel() != expected_packed_elements:
-                self.values = F.pad(
-                    self.values,
+            if values.numel() != expected_packed_elements:
+                values = F.pad(
+                    values,
                     (
                         0,
                         # Divide by 2 because these are packed values
-                        self.padded_shape[1] // 2 - self.values.shape[1],
+                        self.padded_shape[1] // 2 - values.shape[1],
                         0,
-                        self.padded_shape[0] - self.values.shape[0],
+                        self.padded_shape[0] - values.shape[0],
                     ),
                 )
 
@@ -116,38 +116,42 @@ class QuantizedTensor:
             # correct layout for Blackwell. See:
             # https://docs.nvidia.com/cutlass/latest/media/docs/cpp/blackwell_functionality.html#scale-factor-layouts
             if (
-                self.scale_factors.ndim > 1
-                and self.scale_factors.numel() != expected_scale_factors
+                scale_factors.ndim > 1
+                and scale_factors.numel() != expected_scale_factors
             ):
-                self.scale_factors = F.pad(
-                    self.scale_factors,
+                scale_factors = F.pad(
+                    scale_factors,
                     (
                         0,
                         (
                             self.padded_shape[1] // dtype.block_size()
-                            - self.scale_factors.shape[1]
+                            - scale_factors.shape[1]
                         ),
                         0,
-                        self.padded_shape[0] - self.scale_factors.shape[0],
+                        self.padded_shape[0] - scale_factors.shape[0],
                     ),
                     value=0 if dtype == DataType.nvfp4 else 1,
                 )
 
-                self.scale_factors = to_blocked(self.scale_factors)
+                scale_factors = to_blocked(scale_factors)
 
-            if self.values.numel() != expected_packed_elements:
+            if values.numel() != expected_packed_elements:
                 msg = (
                     f"Expected {expected_packed_elements} e2m1 values, got "
-                    f"{self.values.numel()}"
+                    f"{values.numel()}"
                 )
                 raise ValueError(msg)
 
-            if self.scale_factors.numel() != expected_scale_factors:
+            if scale_factors.numel() != expected_scale_factors:
                 msg = (
                     f"Expected {expected_scale_factors} scale factors, got "
-                    f"{self.scale_factors.numel()}"
+                    f"{scale_factors.numel()}"
                 )
                 raise ValueError(msg)
+
+        self.register_buffer("values", values)
+        self.register_buffer("scale_factors", scale_factors)
+        self.register_buffer("amax", amax)
 
     def dequantize(self, dtype: torch.dtype = torch.bfloat16) -> torch.Tensor:
         """Return a high-precision tensor with the dequantized values."""

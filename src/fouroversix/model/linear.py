@@ -182,7 +182,7 @@ class FourOverSixLinear(nn.Linear):
         high-precision weight.
         """
 
-        if not hasattr(self, "weight_values"):
+        if not hasattr(self, "_quantized_weight"):
             weight_config = QuantizationConfig(
                 backend=self.config.quantize_backend,
                 block_scale_2d=self.config.weight_scale_2d,
@@ -195,31 +195,7 @@ class FourOverSixLinear(nn.Linear):
             if self.config.keep_master_weights:
                 return quantized_weight
 
-            self.weight_values = nn.Parameter(
-                quantized_weight.values,
-                requires_grad=False,
-            )
-            self.weight_scale_factors = nn.Parameter(
-                quantized_weight.scale_factors,
-                requires_grad=False,
-            )
-            self.weight_amax = nn.Parameter(quantized_weight.amax, requires_grad=False)
-
-            self.weight_dtype = quantized_weight.dtype
-            self.weight_original_shape = quantized_weight.original_shape
-            self.weight_scale_rule = quantized_weight.scale_rule
-            self.weight_padded_shape = quantized_weight.padded_shape
-
-        if not hasattr(self, "_quantized_weight"):
-            self._quantized_weight = QuantizedTensor(
-                self.weight_values.data,
-                self.weight_scale_factors.data,
-                self.weight_amax.data,
-                self.weight_dtype,
-                self.weight_original_shape,
-                self.weight_scale_rule,
-                self.weight_padded_shape,
-            )
+            self._quantized_weight = quantized_weight
 
         return self._quantized_weight
 

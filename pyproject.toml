@@ -68,6 +68,7 @@ ignore = [
     "FIX002",  # Allow TODO comments
     "FIX004",  # Allow hacks
     "N812",  # Allow importing torch.nn.functional as F
+    "PLR0402",  # Allow importing torch.nn as nn
     "PLC0415",  # Allow imports that aren't at the top of the file
     "PLR0913",  # Allow functions with more than 5 arguments
     "RET506",  # Allow elif after raise
