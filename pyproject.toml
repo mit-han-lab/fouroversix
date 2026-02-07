@@ -24,12 +24,17 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-extras = [
-    "lm_eval[hf]~=0.4.10",
+docs = [
     "mkdocs~=1.6.1",
     "mkdocs-material~=9.7.1",
     "mkdocstrings[python]~=1.0.2",
+]
+evals = [
+    "inspect-ai~=0.3.170",
+    "inspect-evals~=0.3.106",
+    "lm-eval[hf]~=0.4.10",
     "modal~=1.3.2",
+    "openai~=2.16.0",
     "pytest~=8.1.1",
     "ruff~=0.14.14",
     "SQLAlchemy~=2.0.46",

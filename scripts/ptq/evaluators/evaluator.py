@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from abc import ABC, abstractmethod
 from contextlib import nullcontext
 from pathlib import Path
@@ -9,23 +8,12 @@ from typing import TYPE_CHECKING, Any
 import modal
 import torch
 
+from ...resources import FOUROVERSIX_CACHE_PATH
+from ..utils import EvaluationFramework
+
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
     from transformers import AutoModelForCausalLM
-
-
-class CustomJSONEncoder(json.JSONEncoder):
-    """Custom JSON encoder that handles torch.dtype."""
-
-    def default(self, obj: Any) -> Any:  # noqa: ANN401
-        """Convert value to a JSON serializable type."""
-
-        import torch
-
-        if isinstance(obj, torch.dtype):
-            return str(obj)
-
-        return json.JSONEncoder.default(self, obj)
 
 
 class PTQEvaluator(ABC):
@@ -67,17 +55,15 @@ class PTQEvaluator(ABC):
         *,
         device: str,
         dtype: str,
-        max_length: int,
+        eval_framework: EvaluationFramework,
+        limit: int | None,
+        max_length: int | None,
         tasks: list[str],
         trust_remote_code: bool = False,
         disable_inference_mode: bool = False,
         **kwargs: dict[str, Any],
     ) -> dict[str, Any]:
         """Evaluate a quantized model with lm-eval."""
-
-        from lm_eval import evaluator
-        from lm_eval.models.huggingface import HFLM
-        from lm_eval.tasks import TaskManager
 
         inference_context = (
             nullcontext() if disable_inference_mode else torch.inference_mode()
@@ -95,18 +81,84 @@ class PTQEvaluator(ABC):
             else:
                 model = model_name
 
-            results = evaluator.simple_evaluate(
-                model=HFLM(
-                    pretrained=model,
+            if eval_framework == EvaluationFramework.lm_eval:
+                from lm_eval import evaluator
+                from lm_eval.models.huggingface import HFLM
+                from lm_eval.tasks import TaskManager
+
+                full_results = evaluator.simple_evaluate(
+                    model=HFLM(
+                        pretrained=model,
+                        device=device,
+                        max_length=max_length,
+                    ),
+                    tasks=tasks,
                     device=device,
-                    max_length=max_length,
-                ),
-                tasks=tasks,
-                device=device,
-                task_manager=TaskManager(
-                    include_path=(Path(__file__).parent.parent / "tasks").as_posix(),
-                ),
-            )
+                    limit=limit,
+                    task_manager=TaskManager(
+                        include_path=(
+                            Path(__file__).parent.parent / "tasks"
+                        ).as_posix(),
+                    ),
+                )
+
+                results = []
+
+                for task in full_results["results"]:
+                    result = full_results["results"][task]
+
+                    if "acc_norm,none" in result:
+                        metric_name = "acc_norm,none"
+                    elif "acc,none" in result:
+                        metric_name = "acc,none"
+                    elif "word_perplexity,none" in result:
+                        metric_name = "word_perplexity,none"
+                    else:
+                        metric_name = None
+
+                    results.append(
+                        (
+                            task,
+                            metric_name,
+                            result.get(metric_name),
+                            full_results["results"][task],
+                        ),
+                    )
+
+            elif eval_framework == EvaluationFramework.inspect_ai:
+                import inspect_ai
+                from inspect_ai.model import Model
+                from inspect_ai.model._generate_config import GenerateConfig
+
+                from .utils import local_hf
+
+                config = GenerateConfig()
+                full_results = inspect_ai.eval(
+                    tasks=tasks,
+                    model=Model(local_hf(model_name, model, config), config, None),
+                    limit=limit,
+                    log_dir=(FOUROVERSIX_CACHE_PATH / "inspect_ai_logs").as_posix(),
+                )
+
+                results = []
+
+                for log in full_results:
+                    metrics = {
+                        k: v.value
+                        for score in log.results.scores
+                        for k, v in score.metrics.items()
+                    }
+
+                    metric_name = "accuracy" if "accuracy" in metrics else None
+
+                    results.append(
+                        (
+                            log.eval.task,
+                            metric_name,
+                            metrics.get(metric_name),
+                            metrics,
+                        ),
+                    )
 
             del model
             torch.cuda.empty_cache()

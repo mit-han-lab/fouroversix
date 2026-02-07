@@ -279,7 +279,7 @@ def get_image(  # noqa: C901, PLR0912
                     copy=True,
                 )
                 .uv_pip_install(
-                    *pyproject_data["project"]["optional-dependencies"]["extras"],
+                    *pyproject_data["project"]["optional-dependencies"]["evals"],
                 )
                 .add_local_file(
                     "setup.py",

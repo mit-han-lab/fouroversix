@@ -169,15 +169,17 @@ class LocalEvaluationCoordinator(BaseEvaluationCoordinator):
         """Worker process for running PTQ experiments locally."""
 
         while True:
-            task = task_queue.get()
+            worker_task = task_queue.get()
 
-            if task is None:
+            if worker_task is None:
                 break
 
-            model_name, ptq_method, kwargs = task
-            result = self.evaluate(
+            model_name, ptq_method, kwargs = worker_task
+
+            results = self.evaluate(
                 model_name,
                 ptq_method,
                 **{**kwargs, "device": device},
             )
-            result_queue.put((model_name, ptq_method, kwargs, result))
+
+            result_queue.put((model_name, ptq_method, kwargs, results))

@@ -7,7 +7,7 @@ from fouroversix.utils import AdaptiveBlockScalingRule, DataType, FP4Format
 
 from ..resources import app
 from .coordinators import LocalEvaluationCoordinator, ModalEvaluationCoordinator
-from .utils import PTQMethod
+from .utils import EvaluationFramework, PTQMethod
 
 
 @click.command()
@@ -20,8 +20,15 @@ from .utils import PTQMethod
 @click.option("--detach", is_flag=True)
 @click.option("--device", type=str, default="cuda")
 @click.option("--dtype", type=DataType, default=DataType.auto)
+@click.option(
+    "--eval-framework",
+    "-f",
+    type=EvaluationFramework,
+    default=EvaluationFramework.lm_eval,
+)
 @click.option("--fp4-format", type=FP4Format, default=FP4Format.nvfp4)
 @click.option("--group-name", type=str, default=None)
+@click.option("--limit", type=int, default=None)
 @click.option("--matmul-backend", type=MatmulBackend, default=None)
 @click.option("--max-length", type=int, default=None)
 @click.option("--modal", is_flag=True)
