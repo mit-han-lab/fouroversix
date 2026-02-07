@@ -350,7 +350,6 @@ namespace fouroversix
         __device__ __forceinline__
             OutputType
             convert(InputType const &x,
-                    // Only used when Is_4o6 is true
                     const float amax,
                     const ScaleFactorType sf,
                     const uint32_t rbits,
@@ -358,24 +357,23 @@ namespace fouroversix
                     ErrorType *err /*nullable*/)
         {
             InputType x_scaled;
-            constexpr float E2M1_MAX_VALUE = 6;
-            constexpr float E2M1_MAX_FOUR = 4;
-            constexpr float E4M3_MAX_VALUE = 448;
-            constexpr float E4M3_MAX_FOUROVERSIX = 256;
+            constexpr float E2M1_MAX_VALUE = 6.0f;
+            constexpr float E2M1_MAX_FOUR = 4.0f;
+            constexpr float E4M3_MAX_VALUE = 448.0f;
+            constexpr float E4M3_MAX_FOUROVERSIX = 256.0f;
 
-            constexpr float e2m1_limit = kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::ALL_4 ? E2M1_MAX_FOUR : E2M1_MAX_VALUE;
-            constexpr float e4m3_limit = (kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::ALL_6 || kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::ALL_4)
+            constexpr float e2m1_limit = kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::STATIC_4 ? E2M1_MAX_FOUR : E2M1_MAX_VALUE;
+            constexpr float e4m3_limit = (kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::STATIC_6 || kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::STATIC_4)
                                              ? E4M3_MAX_VALUE
                                              : E4M3_MAX_FOUROVERSIX;
+            const float encode_scale = e4m3_limit * e2m1_limit / amax;
+            const float decode_scale = 1.0 / encode_scale;
+            const float block_scale_inv = 1.0f / (decode_scale * sf);
 
-            constexpr float QUANT_LIMIT = e2m1_limit * e4m3_limit;
-
-            const float quant_scale = max(amax * sf, 1e-12f);
-
-            #pragma unroll
+#pragma unroll
             for (int i = 0; i < 8; ++i)
             {
-                x_scaled[i] = (x[i] * QUANT_LIMIT) / quant_scale;
+                x_scaled[i] = x[i] * block_scale_inv;
             }
 
             unsigned out;
@@ -414,61 +412,61 @@ namespace fouroversix
                     unsigned short out_dequant_4_hi = (out_dequant_4 >> 16) & 0xFFFF;
                     unsigned short out_dequant_4_lo = out_dequant_4 & 0xFFFF;
 
-                    float val0 = __half2float(__ushort_as_half(out_dequant_1_lo));
-                    float val1 = __half2float(__ushort_as_half(out_dequant_1_hi));
-                    float val2 = __half2float(__ushort_as_half(out_dequant_2_lo));
-                    float val3 = __half2float(__ushort_as_half(out_dequant_2_hi));
-                    float val4 = __half2float(__ushort_as_half(out_dequant_3_lo));
-                    float val5 = __half2float(__ushort_as_half(out_dequant_3_hi));
-                    float val6 = __half2float(__ushort_as_half(out_dequant_4_lo));
-                    float val7 = __half2float(__ushort_as_half(out_dequant_4_hi));
+                    float val0 = __half2float(__ushort_as_half(out_dequant_1_lo)) * sf * amax;
+                    float val1 = __half2float(__ushort_as_half(out_dequant_1_hi)) * sf * amax;
+                    float val2 = __half2float(__ushort_as_half(out_dequant_2_lo)) * sf * amax;
+                    float val3 = __half2float(__ushort_as_half(out_dequant_2_hi)) * sf * amax;
+                    float val4 = __half2float(__ushort_as_half(out_dequant_3_lo)) * sf * amax;
+                    float val5 = __half2float(__ushort_as_half(out_dequant_3_hi)) * sf * amax;
+                    float val6 = __half2float(__ushort_as_half(out_dequant_4_lo)) * sf * amax;
+                    float val7 = __half2float(__ushort_as_half(out_dequant_4_hi)) * sf * amax;
 
-                    if constexpr (kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::L1_NORM_4o6)
+                    if constexpr (kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::MAE_4o6)
                     {
-                        *err += std::abs(val0 * quant_scale / QUANT_LIMIT - x[0]);
-                        *err += std::abs(val1 * quant_scale / QUANT_LIMIT - x[1]);
-                        *err += std::abs(val2 * quant_scale / QUANT_LIMIT - x[2]);
-                        *err += std::abs(val3 * quant_scale / QUANT_LIMIT - x[3]);
-                        *err += std::abs(val4 * quant_scale / QUANT_LIMIT - x[4]);
-                        *err += std::abs(val5 * quant_scale / QUANT_LIMIT - x[5]);
-                        *err += std::abs(val6 * quant_scale / QUANT_LIMIT - x[6]);
-                        *err += std::abs(val7 * quant_scale / QUANT_LIMIT - x[7]);
+                        *err += std::abs(val0 - x[0]);
+                        *err += std::abs(val1 - x[1]);
+                        *err += std::abs(val2 - x[2]);
+                        *err += std::abs(val3 - x[3]);
+                        *err += std::abs(val4 - x[4]);
+                        *err += std::abs(val5 - x[5]);
+                        *err += std::abs(val6 - x[6]);
+                        *err += std::abs(val7 - x[7]);
                     }
                     else if constexpr (kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::MSE_4o6)
                     {
-                        *err += (val0 * quant_scale / QUANT_LIMIT - x[0]) * (val0 * quant_scale / QUANT_LIMIT - x[0]);
-                        *err += (val1 * quant_scale / QUANT_LIMIT - x[1]) * (val1 * quant_scale / QUANT_LIMIT - x[1]);
-                        *err += (val2 * quant_scale / QUANT_LIMIT - x[2]) * (val2 * quant_scale / QUANT_LIMIT - x[2]);
-                        *err += (val3 * quant_scale / QUANT_LIMIT - x[3]) * (val3 * quant_scale / QUANT_LIMIT - x[3]);
-                        *err += (val4 * quant_scale / QUANT_LIMIT - x[4]) * (val4 * quant_scale / QUANT_LIMIT - x[4]);
-                        *err += (val5 * quant_scale / QUANT_LIMIT - x[5]) * (val5 * quant_scale / QUANT_LIMIT - x[5]);
-                        *err += (val6 * quant_scale / QUANT_LIMIT - x[6]) * (val6 * quant_scale / QUANT_LIMIT - x[6]);
-                        *err += (val7 * quant_scale / QUANT_LIMIT - x[7]) * (val7 * quant_scale / QUANT_LIMIT - x[7]);
+                        *err += (val0 - x[0]) * (val0 - x[0]);
+                        *err += (val1 - x[1]) * (val1 - x[1]);
+                        *err += (val2 - x[2]) * (val2 - x[2]);
+                        *err += (val3 - x[3]) * (val3 - x[3]);
+                        *err += (val4 - x[4]) * (val4 - x[4]);
+                        *err += (val5 - x[5]) * (val5 - x[5]);
+                        *err += (val6 - x[6]) * (val6 - x[6]);
+                        *err += (val7 - x[7]) * (val7 - x[7]);
                     }
                     else if constexpr (kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::ABS_MAX_4o6)
                     {
-                        float val0_err = std::abs(val0 * quant_scale / QUANT_LIMIT - x[0]);
+                        float val0_err = std::abs(val0 - x[0]);
                         if (val0_err > *err)
                             *err = val0_err;
-                        float val1_err = std::abs(val1 * quant_scale / QUANT_LIMIT - x[1]);
+                        float val1_err = std::abs(val1 - x[1]);
                         if (val1_err > *err)
                             *err = val1_err;
-                        float val2_err = std::abs(val2 * quant_scale / QUANT_LIMIT - x[2]);
+                        float val2_err = std::abs(val2 - x[2]);
                         if (val2_err > *err)
                             *err = val2_err;
-                        float val3_err = std::abs(val3 * quant_scale / QUANT_LIMIT - x[3]);
+                        float val3_err = std::abs(val3 - x[3]);
                         if (val3_err > *err)
                             *err = val3_err;
-                        float val4_err = std::abs(val4 * quant_scale / QUANT_LIMIT - x[4]);
+                        float val4_err = std::abs(val4 - x[4]);
                         if (val4_err > *err)
                             *err = val4_err;
-                        float val5_err = std::abs(val5 * quant_scale / QUANT_LIMIT - x[5]);
+                        float val5_err = std::abs(val5 - x[5]);
                         if (val5_err > *err)
                             *err = val5_err;
-                        float val6_err = std::abs(val6 * quant_scale / QUANT_LIMIT - x[6]);
+                        float val6_err = std::abs(val6 - x[6]);
                         if (val6_err > *err)
                             *err = val6_err;
-                        float val7_err = std::abs(val7 * quant_scale / QUANT_LIMIT - x[7]);
+                        float val7_err = std::abs(val7 - x[7]);
                         if (val7_err > *err)
                             *err = val7_err;
                     }
@@ -498,7 +496,6 @@ namespace fouroversix
             }
             else
             {
-                // TODO: implement
                 if constexpr (Is_4o6)
                 {
                     unsigned out_dequant_1;
@@ -531,61 +528,61 @@ namespace fouroversix
                     unsigned short out_dequant_4_hi = (out_dequant_4 >> 16) & 0xFFFF;
                     unsigned short out_dequant_4_lo = out_dequant_4 & 0xFFFF;
 
-                    float val0 = __half2float(__ushort_as_half(out_dequant_1_lo));
-                    float val1 = __half2float(__ushort_as_half(out_dequant_1_hi));
-                    float val2 = __half2float(__ushort_as_half(out_dequant_2_lo));
-                    float val3 = __half2float(__ushort_as_half(out_dequant_2_hi));
-                    float val4 = __half2float(__ushort_as_half(out_dequant_3_lo));
-                    float val5 = __half2float(__ushort_as_half(out_dequant_3_hi));
-                    float val6 = __half2float(__ushort_as_half(out_dequant_4_lo));
-                    float val7 = __half2float(__ushort_as_half(out_dequant_4_hi));
+                    float val0 = __half2float(__ushort_as_half(out_dequant_1_lo)) * sf * amax;
+                    float val1 = __half2float(__ushort_as_half(out_dequant_1_hi)) * sf * amax;
+                    float val2 = __half2float(__ushort_as_half(out_dequant_2_lo)) * sf * amax;
+                    float val3 = __half2float(__ushort_as_half(out_dequant_2_hi)) * sf * amax;
+                    float val4 = __half2float(__ushort_as_half(out_dequant_3_lo)) * sf * amax;
+                    float val5 = __half2float(__ushort_as_half(out_dequant_3_hi)) * sf * amax;
+                    float val6 = __half2float(__ushort_as_half(out_dequant_4_lo)) * sf * amax;
+                    float val7 = __half2float(__ushort_as_half(out_dequant_4_hi)) * sf * amax;
 
-                    if constexpr (kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::L1_NORM_4o6)
+                    if constexpr (kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::MAE_4o6)
                     {
-                        *err += std::abs(val0 * quant_scale / QUANT_LIMIT - x[0]);
-                        *err += std::abs(val1 * quant_scale / QUANT_LIMIT - x[1]);
-                        *err += std::abs(val2 * quant_scale / QUANT_LIMIT - x[2]);
-                        *err += std::abs(val3 * quant_scale / QUANT_LIMIT - x[3]);
-                        *err += std::abs(val4 * quant_scale / QUANT_LIMIT - x[4]);
-                        *err += std::abs(val5 * quant_scale / QUANT_LIMIT - x[5]);
-                        *err += std::abs(val6 * quant_scale / QUANT_LIMIT - x[6]);
-                        *err += std::abs(val7 * quant_scale / QUANT_LIMIT - x[7]);
+                        *err += std::abs(val0 - x[0]);
+                        *err += std::abs(val1 - x[1]);
+                        *err += std::abs(val2 - x[2]);
+                        *err += std::abs(val3 - x[3]);
+                        *err += std::abs(val4 - x[4]);
+                        *err += std::abs(val5 - x[5]);
+                        *err += std::abs(val6 - x[6]);
+                        *err += std::abs(val7 - x[7]);
                     }
                     else if constexpr (kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::MSE_4o6)
                     {
-                        *err += (val0 * quant_scale / QUANT_LIMIT - x[0]) * (val0 * quant_scale / QUANT_LIMIT - x[0]);
-                        *err += (val1 * quant_scale / QUANT_LIMIT - x[1]) * (val1 * quant_scale / QUANT_LIMIT - x[1]);
-                        *err += (val2 * quant_scale / QUANT_LIMIT - x[2]) * (val2 * quant_scale / QUANT_LIMIT - x[2]);
-                        *err += (val3 * quant_scale / QUANT_LIMIT - x[3]) * (val3 * quant_scale / QUANT_LIMIT - x[3]);
-                        *err += (val4 * quant_scale / QUANT_LIMIT - x[4]) * (val4 * quant_scale / QUANT_LIMIT - x[4]);
-                        *err += (val5 * quant_scale / QUANT_LIMIT - x[5]) * (val5 * quant_scale / QUANT_LIMIT - x[5]);
-                        *err += (val6 * quant_scale / QUANT_LIMIT - x[6]) * (val6 * quant_scale / QUANT_LIMIT - x[6]);
-                        *err += (val7 * quant_scale / QUANT_LIMIT - x[7]) * (val7 * quant_scale / QUANT_LIMIT - x[7]);
+                        *err += (val0 - x[0]) * (val0 - x[0]);
+                        *err += (val1 - x[1]) * (val1 - x[1]);
+                        *err += (val2 - x[2]) * (val2 - x[2]);
+                        *err += (val3 - x[3]) * (val3 - x[3]);
+                        *err += (val4 - x[4]) * (val4 - x[4]);
+                        *err += (val5 - x[5]) * (val5 - x[5]);
+                        *err += (val6 - x[6]) * (val6 - x[6]);
+                        *err += (val7 - x[7]) * (val7 - x[7]);
                     }
                     else if constexpr (kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::ABS_MAX_4o6)
                     {
-                        float val0_err = std::abs(val0 * quant_scale / QUANT_LIMIT - x[0]);
+                        float val0_err = std::abs(val0 - x[0]);
                         if (val0_err > *err)
                             *err = val0_err;
-                        float val1_err = std::abs(val1 * quant_scale / QUANT_LIMIT - x[1]);
+                        float val1_err = std::abs(val1 - x[1]);
                         if (val1_err > *err)
                             *err = val1_err;
-                        float val2_err = std::abs(val2 * quant_scale / QUANT_LIMIT - x[2]);
+                        float val2_err = std::abs(val2 - x[2]);
                         if (val2_err > *err)
                             *err = val2_err;
-                        float val3_err = std::abs(val3 * quant_scale / QUANT_LIMIT - x[3]);
+                        float val3_err = std::abs(val3 - x[3]);
                         if (val3_err > *err)
                             *err = val3_err;
-                        float val4_err = std::abs(val4 * quant_scale / QUANT_LIMIT - x[4]);
+                        float val4_err = std::abs(val4 - x[4]);
                         if (val4_err > *err)
                             *err = val4_err;
-                        float val5_err = std::abs(val5 * quant_scale / QUANT_LIMIT - x[5]);
+                        float val5_err = std::abs(val5 - x[5]);
                         if (val5_err > *err)
                             *err = val5_err;
-                        float val6_err = std::abs(val6 * quant_scale / QUANT_LIMIT - x[6]);
+                        float val6_err = std::abs(val6 - x[6]);
                         if (val6_err > *err)
                             *err = val6_err;
-                        float val7_err = std::abs(val7 * quant_scale / QUANT_LIMIT - x[7]);
+                        float val7_err = std::abs(val7 - x[7]);
                         if (val7_err > *err)
                             *err = val7_err;
                     }
@@ -607,8 +604,8 @@ namespace fouroversix
                         "mov.b32 %0, {tmp0, tmp1};\n"
                         "}"
                         : "=r"(out) : "f"(x_scaled[0]), "f"(x_scaled[1]), "f"(x_scaled[2]), "f"(x_scaled[3]),
-                                    "f"(x_scaled[4]), "f"(x_scaled[5]), "f"(x_scaled[6]), "f"(x_scaled[7]),
-                                    "r"(rbits), "r"(rbits));
+                                      "f"(x_scaled[4]), "f"(x_scaled[5]), "f"(x_scaled[6]), "f"(x_scaled[7]),
+                                      "r"(rbits), "r"(rbits));
                     return reinterpret_cast<OutputType const &>(out);
                 }
             }
@@ -616,7 +613,7 @@ namespace fouroversix
     };
 
     template <bool Is_nvfp4, bool Is_4o6, bool Is_rtn, AdaptiveBlockScalingRuleType kAdaptiveBlockScalingRuleType, typename Engine, typename Layout, typename OutputType>
-    __forceinline__ __device__ float fp4_convertion(Tensor<Engine, Layout> const &tensor, const float amax, float *sf_, OutputType *res, const uint32_t rbits)
+    __forceinline__ __device__ float fp4_conversion(Tensor<Engine, Layout> const &tensor, const float amax, float *sf_, OutputType *res, const uint32_t rbits)
     {
         constexpr int numel = decltype(size(tensor))::value;
         static_assert((numel == 16 && Is_nvfp4) || numel == 32);

@@ -254,8 +254,7 @@ class QuantizeBackend(str, Enum):
             raise ValueError(msg)
 
         if self == QuantizeBackend.cuda:
-            return (fp4_format == FP4Format.nvfp4 
-                    and not transpose)
+            return fp4_format == FP4Format.nvfp4 and not transpose
 
         if self == QuantizeBackend.pytorch:
             return True
@@ -441,6 +440,7 @@ def quantize_to_fp4(
             for round-to-nearest, or `RoundStyle.stochastic` for stochastic rounding.
         transpose (bool): Whether to transpose the input tensor before quantization.
         rbits (int): The rounding bits to use.
+
     Returns:
         A tuple containing the E2M1 values, the scale factors, and the per-tensor
             normalization constant (if used).

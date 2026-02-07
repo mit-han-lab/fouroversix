@@ -191,7 +191,7 @@ def install_qutlass() -> None:
 def get_image(  # noqa: C901, PLR0912
     dependencies: list[Dependency] | None = None,
     *,
-    cuda_version: str = "13.0",
+    cuda_version: str = "12.9",
     deploy: bool = False,
     extra_env: dict[str, str] | None = None,
     extra_pip_dependencies: list[str] | None = None,
@@ -269,7 +269,7 @@ def get_image(  # noqa: C901, PLR0912
             img = (
                 add_submodule(
                     img.env(
-                        {"CUDA_ARCHS": "100", "FORCE_BUILD": "1", "MAX_JOBS": "32"},
+                        {"CUDA_ARCHS": "100", "FORCE_BUILD": "1", "MAX_JOBS": "16"},
                     ),
                     Submodule.cutlass,
                 )
@@ -332,7 +332,7 @@ def get_image(  # noqa: C901, PLR0912
         if dependency == Dependency.qutlass:
             img = (
                 add_submodule(img.apt_install("cmake"), Submodule.qutlass)
-                .env({"MAX_JOBS": "32"})
+                .env({"MAX_JOBS": "16"})
                 .run_function(install_qutlass, gpu="B200", cpu=32, memory=64 * 1024)
             )
 

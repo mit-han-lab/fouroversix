@@ -110,8 +110,8 @@ namespace fouroversix
 
         /*******
          * selection_rule:
-         * 0: all_6
-         * 1: all_4
+         * 0: static_6
+         * 1: static_4
          * 2: 4o6_l1_norm
          * 3: 4o6_mse
          * 4: 4o6_abs_max
@@ -152,8 +152,6 @@ namespace fouroversix
         /**********************
          * 3. Derived sizes   *
          *********************/
-        auto ceil_div = [](int x, int m)
-        { return (x + m - 1) / m; };
         auto round_up = [](int x, int m)
         { return (x + m - 1) / m * m; };
 
@@ -173,9 +171,10 @@ namespace fouroversix
         if (is_rht)
         {
             x_rht = torch::zeros({M_rounded, N_rounded}, x.options());
-        } else
+        }
+        else
         {
-            x_rht = torch::zeros({ 0, 0 }, x.options());
+            x_rht = torch::zeros({0, 0}, x.options());
         }
 
         /**********************

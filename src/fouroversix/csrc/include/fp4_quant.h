@@ -10,9 +10,9 @@ namespace fouroversix
 
     enum AdaptiveBlockScalingRuleType
     {
-        ALL_6 = 0,
-        ALL_4 = 1,
-        L1_NORM_4o6 = 2,
+        STATIC_6 = 0,
+        STATIC_4 = 1,
+        MAE_4o6 = 2,
         MSE_4o6 = 3,
         ABS_MAX_4o6 = 4,
     };
@@ -47,7 +47,7 @@ namespace fouroversix
         bool is_4o6;
         bool is_2d;
         bool is_transpose;
-        int selection_rule; // 0: all_6, 1: all_4, 2: 4o6_l1_norm, 3: 4o6_mse
+        int selection_rule; // 0: static_6, 1: static_4, 2: 4o6_mae, 3: 4o6_mse
         int rbits;
     };
 

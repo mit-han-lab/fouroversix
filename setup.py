@@ -69,7 +69,7 @@ def get_cuda_gencodes() -> list[str]:
         if "100" in archs:
             # CUDA 12.9 introduced "family-specific" for Blackwell (100f)
             if cuda_version >= Version("12.9"):
-                cc_flags += ["-gencode", "arch=compute_100f,code=sm_100"]
+                cc_flags += ["-gencode", "arch=compute_100a,code=sm_100a"]
             else:
                 cc_flags += ["-gencode", "arch=compute_100a,code=sm_100a"]
 
@@ -251,11 +251,8 @@ else:
     nvcc_compile_args = [
         "-std=c++17",
         "--expt-relaxed-constexpr",
-        "--use_fast_math",
         "-Xcompiler",
         "-funroll-loops",
-        "-Xcompiler",
-        "-ffast-math",
         "-Xcompiler",
         "-finline-functions",
         *get_cuda_gencodes(),

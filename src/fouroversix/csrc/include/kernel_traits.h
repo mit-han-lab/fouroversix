@@ -18,11 +18,10 @@ template <bool Is_nvfp4, typename elem_type = cutlass::half_t>
 struct Base_kernel_traits
 {
 
-    static constexpr float E2M1_MAX_VALUE = 6;
-    static constexpr float E4M3_MIN_VALUE = -448;
-    static constexpr float E4M3_MAX_VALUE = 448;
-    static constexpr float E4M3_MAX_FOUROVERSIX = 256;
-    static constexpr float E4M3_MIN_POSITIVE_NORMAL = 0.015625;
+    static constexpr float E2M1_MAX_VALUE = 6.0f;
+    static constexpr float E4M3_MIN_VALUE = -448.0f;
+    static constexpr float E4M3_MAX_VALUE = 448.0f;
+    static constexpr float E4M3_MAX_FOUROVERSIX = 256.0f;
 
     using Element = elem_type;
     using ScaleFactor = std::conditional_t<Is_nvfp4, cutlass::float_e4m3_t, uint8_t>;
@@ -50,7 +49,6 @@ struct FP4_quant_kernel_traits : public Base
     static constexpr float E4M3_MIN_VALUE = Base::E4M3_MIN_VALUE;
     static constexpr float E4M3_MAX_VALUE = Base::E4M3_MAX_VALUE;
     static constexpr float E4M3_MAX_FOUROVERSIX = Base::E4M3_MAX_FOUROVERSIX;
-    static constexpr float E4M3_MIN_POSITIVE_NORMAL = Base::E4M3_MIN_POSITIVE_NORMAL;
 
     using Element = typename Base::Element;
     using ScaleFactor = typename Base::ScaleFactor;

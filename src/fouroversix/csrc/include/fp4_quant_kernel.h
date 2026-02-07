@@ -47,8 +47,8 @@ namespace fouroversix
         constexpr float E2M1_MAX_VALUE = Kernel_traits::E2M1_MAX_VALUE;
 
         constexpr AdaptiveBlockScalingRuleType kRule = static_cast<AdaptiveBlockScalingRuleType>(kSelectionRule);
-        constexpr bool Is_4o6 = kRule == AdaptiveBlockScalingRuleType::L1_NORM_4o6 || 
-                                kRule == AdaptiveBlockScalingRuleType::MSE_4o6 || 
+        constexpr bool Is_4o6 = kRule == AdaptiveBlockScalingRuleType::MAE_4o6 ||
+                                kRule == AdaptiveBlockScalingRuleType::MSE_4o6 ||
                                 kRule == AdaptiveBlockScalingRuleType::ABS_MAX_4o6;
 
         using VecTypeX = cutlass::Array<Element, kGroupN>;
@@ -76,10 +76,10 @@ namespace fouroversix
                                make_coord(m_block, n_block));
 
         Tensor mXRHT = make_tensor(make_gmem_ptr(reinterpret_cast<Element *>(params.x_rht_ptr)),
-                                make_shape(params.M_rounded, params.N_rounded),
-                                make_stride(params.x_rht_row_stride, _1{}));
+                                   make_shape(params.M_rounded, params.N_rounded),
+                                   make_stride(params.x_rht_row_stride, _1{}));
         Tensor gXRHT = local_tile(mXRHT(_, _), Shape<Int<kBlockM>, Int<kBlockN>>{},
-                                make_coord(m_block, n_block));
+                                  make_coord(m_block, n_block));
 
         // Scale Factor Temp SFT (Global Memory)
         Tensor mSFT = make_tensor(make_gmem_ptr(reinterpret_cast<float *>(params.x_sft_ptr)),
@@ -93,8 +93,7 @@ namespace fouroversix
                                 typename Kernel_traits::SmemLayoutX{});
 
         // SFT in Shared Memory (placed after X)
-        Tensor sSFT = make_tensor(make_smem_ptr(reinterpret_cast<float *>(reinterpret_cast<char *>(sX.data().get()) 
-                                  + sizeof(Element) * size(sX))),
+        Tensor sSFT = make_tensor(make_smem_ptr(reinterpret_cast<float *>(reinterpret_cast<char *>(sX.data().get()) + sizeof(Element) * size(sX))),
                                   typename Kernel_traits::SmemLayoutSFT{});
 
         // -------------------------------------------------------------------------
@@ -142,7 +141,8 @@ namespace fouroversix
             {
                 x_vec_float[i] = static_cast<float>(sX(g_row, g_col * kGroupN + i));
             }
-            if constexpr (Is_rht){
+            if constexpr (Is_rht)
+            {
                 hadamard_quant_group<Is_nvfp4>(&x_vec_float[0]);
                 VecTypeX x_vec;
 #pragma unroll
@@ -151,7 +151,7 @@ namespace fouroversix
                     // sX(g_row, g_col * kGroupN + i) = static_cast<Element>(x_vec_float[i]);
                     x_vec[i] = static_cast<Element>(x_vec_float[i]);
                 }
-                
+
                 *reinterpret_cast<VecTypeX *>(&gXRHT(g_row, g_col * kGroupN)) = *reinterpret_cast<VecTypeX *>(&x_vec);
             }
             // VecTypeX x_vec = *reinterpret_cast<VecTypeX *>(&sX(g_row, g_col * kGroupN));
@@ -168,13 +168,16 @@ namespace fouroversix
             sSFT(g_row, g_col) = sf;
         }
 
-        if constexpr (Is_2d) {
+        if constexpr (Is_2d)
+        {
             __syncthreads();
         }
 
-        if constexpr (Is_2d) {
+        if constexpr (Is_2d)
+        {
             MaxOp<float> max_op;
-            for (int g_idx = tidx; g_idx < num_groups; g_idx += blockDim.x) {
+            for (int g_idx = tidx; g_idx < num_groups; g_idx += blockDim.x)
+            {
                 const int g_row = g_idx % kNumGroupsInCol;
                 const int g_col = g_idx / kNumGroupsInCol;
                 float sf = sSFT(g_row, g_col);
@@ -254,13 +257,13 @@ namespace fouroversix
         constexpr float E4M3_MAX_VALUE = Kernel_traits::E4M3_MAX_VALUE;
 
         constexpr AdaptiveBlockScalingRuleType kRule = static_cast<AdaptiveBlockScalingRuleType>(kSelectionRule);
-        constexpr bool Is_4o6 = kRule == AdaptiveBlockScalingRuleType::L1_NORM_4o6 || 
-                                kRule == AdaptiveBlockScalingRuleType::MSE_4o6 || 
+        constexpr bool Is_4o6 = kRule == AdaptiveBlockScalingRuleType::MAE_4o6 ||
+                                kRule == AdaptiveBlockScalingRuleType::MSE_4o6 ||
                                 kRule == AdaptiveBlockScalingRuleType::ABS_MAX_4o6;
-        constexpr int E4M3_SCALE_4 = Is_4o6 ? Kernel_traits::E4M3_MAX_FOUROVERSIX : E4M3_MAX_VALUE;
-        constexpr int E4M3_SCALE_6 = Is_4o6 ? Kernel_traits::E4M3_MAX_FOUROVERSIX : E4M3_MAX_VALUE;
-        constexpr int E2M1_SCALE_4 = Is_4o6 ? 6 : 4;
-        constexpr int E2M1_SCALE_6 = 6;
+        constexpr float E4M3_SCALE_4 = Is_4o6 ? Kernel_traits::E4M3_MAX_FOUROVERSIX : E4M3_MAX_VALUE;
+        constexpr float E4M3_SCALE_6 = Is_4o6 ? Kernel_traits::E4M3_MAX_FOUROVERSIX : E4M3_MAX_VALUE;
+        constexpr float E2M1_SCALE_4 = Is_4o6 ? 6.0f : 4.0f;
+        constexpr float E2M1_SCALE_6 = 6.0f;
 
         constexpr int kSmemBlockInRow = int(kNumGroupsInRow / 4);
         constexpr int kSmemBlockInCol = int(kBlockM / 128);
@@ -282,7 +285,8 @@ namespace fouroversix
         // JXGuo: assure amax is not zero before calling this kernel
         const float amax = *reinterpret_cast<float *>(params.amax_ptr);
 
-        if (amax == 0.0f) {
+        if (amax == 0.0f)
+        {
             return;
         }
 
@@ -293,10 +297,11 @@ namespace fouroversix
         // Input X (Global Memory)
         // void *__restrict__ x_ptr = Is_rht ? params.x_rht_ptr : params.x_ptr;
         Tensor mX = Is_rht ? make_tensor(make_gmem_ptr(reinterpret_cast<Element *>(params.x_rht_ptr)),
-                                make_shape(params.M_rounded, params.N_rounded),
-                                make_stride(params.x_rht_row_stride, _1{})) : make_tensor(make_gmem_ptr(reinterpret_cast<Element *>(params.x_ptr)),
-                                make_shape(params.M, params.N),
-                                make_stride(params.x_row_stride, _1{}));
+                                         make_shape(params.M_rounded, params.N_rounded),
+                                         make_stride(params.x_rht_row_stride, _1{}))
+                           : make_tensor(make_gmem_ptr(reinterpret_cast<Element *>(params.x_ptr)),
+                                         make_shape(params.M, params.N),
+                                         make_stride(params.x_row_stride, _1{}));
         Tensor gX = local_tile(mX(_, _), Shape<Int<kBlockM>, Int<kBlockN>>{},
                                make_coord(m_block, n_block));
 
@@ -324,12 +329,10 @@ namespace fouroversix
                                 typename Kernel_traits::SmemLayoutX{});
 
         // SFT in Shared Memory (placed after X)
-        Tensor sSFT = make_tensor(make_smem_ptr(reinterpret_cast<float *>(reinterpret_cast<char *>(sX.data().get()) 
-                                  + sizeof(Element) * size(sX))),
+        Tensor sSFT = make_tensor(make_smem_ptr(reinterpret_cast<float *>(reinterpret_cast<char *>(sX.data().get()) + sizeof(Element) * size(sX))),
                                   typename Kernel_traits::SmemLayoutSFT{});
 
-        Tensor sXe2m1 = make_tensor(make_smem_ptr(reinterpret_cast<uint8_t *>(reinterpret_cast<char *>(sSFT.data().get()) 
-                                  + sizeof(float) * size(sSFT))),
+        Tensor sXe2m1 = make_tensor(make_smem_ptr(reinterpret_cast<uint8_t *>(reinterpret_cast<char *>(sSFT.data().get()) + sizeof(float) * size(sSFT))),
                                     Shape<Int<kBlockM>, Int<kBlockN / 2>>{},
                                     Stride<Int<kBlockN / 2>, _1>{});
 
@@ -391,36 +394,37 @@ namespace fouroversix
             const float g_max = sSFT(g_row, g_col);
 
             const Tensor sGX = make_tensor(make_smem_ptr(sX.data() + g_idx * kGroupN),
-                                          Shape<Int<1>, Int<kGroupN>>{},
-                                          Stride<Int<kGroupN>, _1>{});
+                                           Shape<Int<1>, Int<kGroupN>>{},
+                                           Stride<Int<kGroupN>, _1>{});
 
             OutputType res[int(kGroupN / 8)];
+            float encode_scale;
             float sf;
+
             if constexpr (Is_4o6)
             {
-                float encode_scale_4 = (E2M1_SCALE_4 * E4M3_SCALE_4) / amax;
-                float encode_scale_6 = (E2M1_SCALE_6 * E4M3_SCALE_6) / amax;
-                float sf_[2] = {
-                    clamp((g_max / E2M1_SCALE_4) * encode_scale_4 * 1.5, 0, E4M3_MAX_VALUE),
-                    clamp((g_max / E2M1_SCALE_6) * encode_scale_6, 0, E4M3_MAX_VALUE)};
+                encode_scale = E2M1_SCALE_6 * E4M3_SCALE_6 / amax;
+
+                float sf_high_precision = g_max / E2M1_SCALE_6 * encode_scale;
+                float sf_[2] = {sf_high_precision * 1.5, sf_high_precision};
 
                 sf_[0] = static_cast<float>(static_cast<ScaleFactor>(sf_[0]));
                 sf_[1] = static_cast<float>(static_cast<ScaleFactor>(sf_[1]));
 
-                sf = fp4_convertion<Is_nvfp4, true, Is_rtn, kRule>(sGX, amax, sf_, res, params.rbits);
+                sf = fp4_conversion<Is_nvfp4, true, Is_rtn, kRule>(sGX, amax, sf_, res, params.rbits);
             }
             else
             {
                 float sf_val = 0.0f;
-                if constexpr (kRule == AdaptiveBlockScalingRuleType::ALL_6)
+                if constexpr (kRule == AdaptiveBlockScalingRuleType::STATIC_6)
                 {
-                    float encode_scale_6 = (E2M1_SCALE_6 * E4M3_SCALE_6) / amax;
-                    sf_val = clamp((g_max / E2M1_SCALE_6) * encode_scale_6, 0, E4M3_MAX_VALUE);
+                    encode_scale = E4M3_SCALE_6 * E2M1_SCALE_6 / amax;
+                    sf_val = clamp(g_max / E2M1_SCALE_6 * encode_scale, 0, E4M3_MAX_VALUE);
                 }
-                else if constexpr (kRule == AdaptiveBlockScalingRuleType::ALL_4)
+                else if constexpr (kRule == AdaptiveBlockScalingRuleType::STATIC_4)
                 {
-                    float encode_scale_4 = (E2M1_SCALE_4 * E4M3_SCALE_4) / amax;
-                    sf_val = clamp((g_max / E2M1_SCALE_4) * encode_scale_4, 0, E4M3_MAX_VALUE);
+                    encode_scale = E2M1_SCALE_4 * E4M3_SCALE_4 / amax;
+                    sf_val = clamp(g_max / E2M1_SCALE_4 * encode_scale, 0, E4M3_MAX_VALUE);
                 }
                 else
                 {
@@ -428,9 +432,8 @@ namespace fouroversix
                     assert(false);
                 }
 
-                // Add by JXGuo: convert the float to ScaleFactor and convert back for better accuracy.
                 sf_val = static_cast<float>(static_cast<ScaleFactor>(sf_val));
-                sf = fp4_convertion<Is_nvfp4, false, Is_rtn, kRule>(sGX, amax, &sf_val, res, params.rbits);
+                sf = fp4_conversion<Is_nvfp4, false, Is_rtn, kRule>(sGX, amax, &sf_val, res, params.rbits);
             }
 
             // Write quantized data
