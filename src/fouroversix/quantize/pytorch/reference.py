@@ -323,7 +323,8 @@ def quantize_to_fp4(
             round_style=round_style,
         )
     else:
-        raise ValueError(f"Invalid FP4 format: {fp4_format}")
+        msg = f"Invalid FP4 format: {fp4_format}"
+        raise ValueError(msg)
 
     if x_fake_quantized is None:
         x_fake_quantized = fake_quantize_to_e2m1(

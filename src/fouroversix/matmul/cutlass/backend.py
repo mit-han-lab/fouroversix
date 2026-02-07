@@ -5,8 +5,15 @@ from fouroversix.utils import SM_100, SM_110, SM_120, DataType
 
 
 class CUTLASSMatmulBackend(MatmulBackendBase):
+    """
+    The CUTLASS matrix multiplication backend. Uses CUTLASS kernels to perform fast
+    FP4 matrix multiplication. Requires a Blackwell GPU.
+    """
+
     @classmethod
     def is_available(cls) -> bool:
+        """Return True if the CUTLASS backend is available on the current machine."""
+
         return torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in [
             SM_100,
             SM_110,
@@ -21,6 +28,11 @@ class CUTLASSMatmulBackend(MatmulBackendBase):
         *,
         out_dtype: torch.dtype,
     ) -> torch.Tensor:
+        """
+        Perform a matrix multiplication (`a @ b.T`) between two quantized tensors using
+        the CUTLASS backend.
+        """
+
         from .ops import (
             gemm_mxfp4mxfp4_accum_fp32_out_bf16_tnt,
             gemm_mxfp4mxfp4_accum_fp32_out_bf16_tnt_sm120,

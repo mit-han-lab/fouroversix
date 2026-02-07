@@ -27,44 +27,47 @@ def quantize_to_fp4(
 
     ### With Four Over Six
 
-    ```
+    ```python
     x = torch.tensor(1024, 1024, dtype=torch.bfloat16, device="cuda")
     x_quantized = quantize_to_fp4(x)
     ```
 
     ### Without Four Over Six
 
-    ```
+    ```python
     x = torch.tensor(1024, 1024, dtype=torch.bfloat16, device="cuda")
-    x_quantized = quantize_to_fp4(x, scale_rule=ScaleRule.static_6)
+    config = QuantizationConfig(scale_rule="static_6")
+    x_quantized = quantize_to_fp4(x, config)
     ```
 
     ### With Stochastic Rounding
 
-    ```
+    ```python
     x = torch.tensor(1024, 1024, dtype=torch.bfloat16, device="cuda")
-    x_quantized = quantize_to_fp4(x, round_style=RoundStyle.stochastic)
+    config = QuantizationConfig(round_style="stochastic")
+    x_quantized = quantize_to_fp4(x, config)
     ```
 
     ### With the Random Hadamard Transform
 
-    ```
+    ```python
     from fouroversix.quantize import get_rht_matrix
 
     x = torch.tensor(1024, 1024, dtype=torch.bfloat16, device="cuda")
-    had = get_rht_matrix()
-    x_quantized = quantize_to_fp4(x, had=had)
+    config = QuantizationConfig(rht=True)
+    x_quantized = quantize_to_fp4(x, config)
     ```
 
     ## Backends
 
     We provide three different implementations of FP4 quantization:
 
-    - **CUDA**: A fast implementation written in CUDA which currently does not support
-        the operations required for training (2D block scaling, stochastic rounding,
-        random Hadamard transform). Requires a Blackwell GPU.
+    - **CUDA**: A fast implementation written in CUDA which currently only supports
+        basic quantization options (no 2D block scaling, no stochastic rounding, no
+        random Hadamard transform). Can be used for inference, but not training.
+        Requires a Blackwell GPU.
     - **Triton**: A slightly slower implementation written in Triton which supports all
-        operations needed for training. Requires a Blackwell GPU.
+        operations needed for training. Also requires a Blackwell GPU.
     - **PyTorch**: A slow implementation written in PyTorch which supports all
         operations and can be run on any GPU.
 
@@ -83,32 +86,12 @@ def quantize_to_fp4(
 
     Args:
         x (torch.Tensor): The input tensor to quantize.
-        backend (QuantizeBackend): The backend to use for quantization, either
-            `QuantizeBackend.cuda`, `QuantizeBackend.triton`, or
-            `QuantizeBackend.pytorch`. If no backend is provided, one will be selected
-            automatically based on the available GPU and the options provided. See above
-            for more details.
-        scale_rule (AdaptiveBlockScalingRule): The scaling rule to use during
-            quantization. See (Adaptive Block Scaling)[/adaptive_block_scaling] for more
-            details.
-        block_scale_2d (bool): If True, scale factors will be computed across 16x16
-            chunks of the input rather than 1x16 chunks. This is useful to apply to the
-            weight matrix during training, so that W and W.T will be equivalent after
-            quantization.
-        had (torch.Tensor): A high-precision Hadamard matrix to apply to the input prior
-            to quantization.
-        fp4_format (FP4Format): The FP4 format to quantize to, either `FP4Format.mxfp4`
-            or `FP4Format.nvfp4`.
-        round_style (RoundStyle): The rounding style to apply during quantization,
-            either `RoundStyle.nearest` for round-to-nearest quantization, or
-            `RoundStyle.stochastic` for stochastic rounding.
-        transpose (bool): If True, the output will be a quantized version of the
-            transposed input. This may be helpful for certain operations during training
-            as `fp4_matmul` requires that both tensors are provided in row-major format.
+        config (QuantizationConfig): The quantization configuration to use. If no
+            configuration is provided, a default configuration will be used (NVFP4,
+            1D block scaling, round-to-nearest, and 4/6 with the MSE selection rule).
 
     Returns:
-        A quantized FP4Tensor, which contains the packed E2M1 values, the FP8 scale
-        factors, and the tensor-wide FP32 scale factor.
+        The quantized tensor.
 
     """
 

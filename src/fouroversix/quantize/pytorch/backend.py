@@ -10,15 +10,44 @@ from .reference import quantize_to_fp4
 
 
 class PyTorchQuantizeBackend(QuantizeBackendBase):
+    """
+    The PyTorch quantization backend. Supports all quantization options, and can be run
+    on non-Blackwell GPUs, but is slow. Should be used primarily as a reference.
+    """
+
     def is_available(self) -> bool:
+        """Return True if the PyTorch backend is available on the current machine."""
         return True
 
-    def is_supported(self, x: torch.Tensor, config: QuantizationConfig) -> bool:
+    def is_supported(
+        self,
+        x: torch.Tensor,  # noqa: ARG002
+        config: QuantizationConfig,  # noqa: ARG002
+    ) -> bool:
+        """
+        Return True if the PyTorch backend supports the given input and quantization
+        configuration.
+        """
+
         return True
 
     def quantize_to_fp4(
-        self, x: torch.Tensor, config: QuantizationConfig,
+        self,
+        x: torch.Tensor,
+        config: QuantizationConfig,
     ) -> QuantizedTensor:
+        """
+        Quantize a tensor to FP4 using the PyTorch backend.
+
+        Args:
+            x (torch.Tensor): The input tensor to quantize.
+            config (QuantizationConfig): The quantization configuration.
+
+        Returns:
+            The quantized tensor.
+
+        """
+
         rows_div = 128
         cols_div = 64 if config.dtype == DataType.nvfp4 else 128
 

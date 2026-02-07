@@ -8,10 +8,25 @@ from .quantized_tensor import QuantizedTensor
 
 
 class TransformerEngineQuantizeBackend(QuantizeBackendBase):
+    """
+    A backend that quantizes inputs using NVIDIA's TransformerEngine. Used to debug
+    our implementations.
+    """
+
     def is_available(self) -> bool:
+        """
+        Return True if the Transformer Engine backend is available on the current
+        machine.
+        """
+
         return torch.cuda.is_available()
 
     def is_supported(self, x: torch.Tensor, config: QuantizationConfig) -> bool:
+        """
+        Return True if the Transformer Engine backend supports the given input and
+        quantization configuration.
+        """
+
         if not super().is_supported(x, config):
             return False
 
@@ -27,8 +42,22 @@ class TransformerEngineQuantizeBackend(QuantizeBackendBase):
         return True
 
     def quantize_to_fp4(
-        self, x: torch.Tensor, config: QuantizationConfig,
+        self,
+        x: torch.Tensor,
+        config: QuantizationConfig,
     ) -> QuantizedTensor:
+        """
+        Quantize a tensor to FP4 using the Transformer Engine backend.
+
+        Args:
+            x (torch.Tensor): The input tensor to quantize.
+            config (QuantizationConfig): The quantization configuration.
+
+        Returns:
+            The quantized tensor.
+
+        """
+
         from transformer_engine.pytorch.tensor.nvfp4_tensor import NVFP4Quantizer
 
         q = NVFP4Quantizer(

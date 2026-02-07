@@ -5,9 +5,14 @@ from fouroversix.quantize import QuantizedTensor
 
 
 class MatmulBackendBase(ABC):
+    """Base class for all matrix multiplication backends."""
+
     @classmethod
     @abstractmethod
-    def is_available(cls) -> bool: ...
+    def is_available(cls) -> bool:
+        """Return True if the backend is available on the current machine."""
+        msg = "Subclasses must implement this method"
+        raise NotImplementedError(msg)
 
     @classmethod
     @abstractmethod
@@ -18,6 +23,8 @@ class MatmulBackendBase(ABC):
         *,
         out_dtype: torch.dtype,
     ) -> bool:
+        """Return True if the backend supports the given inputs and output data type."""
+
         if not cls.is_available():
             return False
 
@@ -43,4 +50,10 @@ class MatmulBackendBase(ABC):
         other: QuantizedTensor,
         *,
         out_dtype: torch.dtype,
-    ) -> torch.Tensor: ...
+    ) -> torch.Tensor:
+        """
+        Perform a matrix multiplication (`a @ b.T`) between two quantized tensors using
+        the backend.
+        """
+        msg = "Subclasses must implement this method"
+        raise NotImplementedError(msg)

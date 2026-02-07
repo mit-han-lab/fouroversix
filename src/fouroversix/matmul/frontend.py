@@ -21,8 +21,7 @@ def fp4_matmul(
     out_dtype: torch.dtype = torch.bfloat16,
 ) -> torch.Tensor:
     """
-    Perform a matrix multiplication (`a @ b.T`) with two FP4-quantized tensors provided
-    in row-major layout.
+    Perform a matrix multiplication (`a @ b.T`) between two quantized tensors.
 
     ## Sample Code
 
@@ -34,7 +33,7 @@ def fp4_matmul(
 
     ### With High-Precision Inputs
 
-    ```
+    ```python
     a = torch.tensor(1024, 1024, dtype=torch.bfloat16, device="cuda")
     b = torch.tensor(1024, 1024, dtype=torch.bfloat16, device="cuda")
     out = fp4_matmul(a, b)
@@ -42,7 +41,7 @@ def fp4_matmul(
 
     ### With Low-Precision Inputs
 
-    ```
+    ```python
     a = torch.tensor(1024, 1024, dtype=torch.bfloat16, device="cuda")
     b = torch.tensor(1024, 1024, dtype=torch.bfloat16, device="cuda")
 
@@ -58,29 +57,26 @@ def fp4_matmul(
 
     - **CUTLASS**: Uses CUTLASS kernels to perform fast FP4 matrix multiplication.
         Requires a Blackwell GPU.
-    - **PyTorch**: A slow implementation which dequantizes FP4 tensors, and then
+    - **PyTorch**: A slow implementation which dequantizes FP4 tensors and then
         performs a high-precision matrix multiplication.
-
-    Note that our CUTLASS kernels accumulate in FP32, so it should be roughly
-    equivalent to simulations done with the PyTorch backend.
 
     ## Parameters
 
     Args:
-        input (torch.Tensor | FP4Tensor): The first tensor to be multiplied.
-        other (torch.Tensor | FP4Tensor): The second tensor to be multiplied.
+        input (torch.Tensor | QuantizedTensor): The first tensor to be multiplied.
+        other (torch.Tensor | QuantizedTensor): The second tensor to be multiplied.
         backend (MatmulBackend): The backend to use for the matrix multiplication,
             either `MatmulBackend.cutlass` or `MatmulBackend.pytorch`. If no backend is
             provided, CUTLASS will be used if the machine has a Blackwell GPU, and
             PyTorch will be used otherwise.
-        input_quantize_kwargs (dict): If `a` is provided in high precision, these
-            parameters will be passed to the `quantize_to_fp4` call done prior to the
-            matrix multiplication.
-        other_quantize_kwargs (dict): If `other` is provided in high precision, these
-            parameters will be passed to the `quantize_to_fp4` call done prior to the
-            matrix multiplication.
-        out_dtype (DataType): The data type of the output tensor, either
-            `DataType.bfloat16` or `DataType.float16`.
+        input_config (QuantizationConfig | None): If `input` is provided in high
+            precision, this configuration will be passed to the `quantize_to_fp4` call
+            done prior to the matrix multiplication.
+        other_config (QuantizationConfig | None): If `other` is provided in high
+            precision, this configuration will be passed to the `quantize_to_fp4` call
+            done prior to the matrix multiplication.
+        out_dtype (torch.dtype): The data type of the output tensor. Defaults to
+            `torch.bfloat16`.
 
     Returns:
         The output tensor.
