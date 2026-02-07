@@ -368,7 +368,7 @@ namespace fouroversix
                                              : E4M3_MAX_FOUROVERSIX;
             const float encode_scale = e4m3_limit * e2m1_limit / amax;
             const float decode_scale = 1.0 / encode_scale;
-            const float block_scale_inv = 1.0f / (decode_scale * sf);
+            const float block_scale_inv = fminf(1.0f / (decode_scale * sf), std::numeric_limits<float>::max());
 
 #pragma unroll
             for (int i = 0; i < 8; ++i)
