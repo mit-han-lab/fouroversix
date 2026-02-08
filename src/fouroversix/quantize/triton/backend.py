@@ -35,7 +35,7 @@ class TritonQuantizeBackend(QuantizeBackendBase):
         if config.round_style == RoundStyle.stochastic:
             return torch.cuda.get_device_capability()[0] == SM_100
 
-        return True
+        return x.device.type == "cuda"
 
     @classmethod
     def quantize_to_fp4(

@@ -38,6 +38,9 @@ class QuantizationConfig:
     def __post_init__(self) -> None:
         """Convert string values to enums."""
 
+        if isinstance(self.backend, str):
+            self.backend = QuantizeBackend(self.backend)
+
         if isinstance(self.dtype, str):
             self.dtype = DataType(self.dtype)
 

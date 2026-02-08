@@ -31,7 +31,8 @@ class CUDAQuantizeBackend(QuantizeBackendBase):
             return False
 
         return (
-            not config.rht
+            x.device.type == "cuda"
+            and not config.rht
             and config.dtype == DataType.nvfp4
             and config.round_style == RoundStyle.nearest
             and not config.block_scale_2d

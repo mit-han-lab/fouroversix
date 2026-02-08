@@ -1,5 +1,5 @@
-from .config import FourOverSixLinearConfig
+from .config import FourOverSixLayerConfig
 from .linear import FourOverSixLinear
 from .quantize import quantize_model
 
-__all__ = ["FourOverSixLinear", "FourOverSixLinearConfig", "quantize_model"]
+__all__ = ["FourOverSixLayerConfig", "FourOverSixLinear", "quantize_model"]

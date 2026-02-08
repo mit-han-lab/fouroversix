@@ -2,20 +2,20 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import torch.nn as nn  # noqa: PLR0402
+import torch.nn as nn
 
 from .linear import FourOverSixLinear
 
 if TYPE_CHECKING:
-    from .config import FourOverSixLinearConfig
+    from .config import FourOverSixLayerConfig
 
 
 def quantize_model(
     model: nn.Module,
+    config: FourOverSixLayerConfig | None = None,
     *,
     exclude_layers: list[str] | None = None,
     linear_cls: type[FourOverSixLinear] | None = None,
-    linear_config: FourOverSixLinearConfig | None = None,
 ) -> None:
     if exclude_layers is None:
         exclude_layers = ["lm_head"]
@@ -33,7 +33,7 @@ def quantize_model(
             module.bias is not None,
             device=module.weight.device,
             dtype=module.weight.dtype,
-            config=linear_config,
+            config=config,
         )
 
         four_over_six_linear.weight = module.weight

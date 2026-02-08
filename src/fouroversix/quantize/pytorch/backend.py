@@ -15,14 +15,16 @@ class PyTorchQuantizeBackend(QuantizeBackendBase):
     on non-Blackwell GPUs, but is slow. Should be used primarily as a reference.
     """
 
-    def is_available(self) -> bool:
+    @classmethod
+    def is_available(cls) -> bool:
         """Return True if the PyTorch backend is available on the current machine."""
         return True
 
+    @classmethod
     def is_supported(
-        self,
-        x: torch.Tensor,  # noqa: ARG002
-        config: QuantizationConfig,  # noqa: ARG002
+        cls,
+        x: torch.Tensor,  # noqa: ARG003
+        config: QuantizationConfig,  # noqa: ARG003
     ) -> bool:
         """
         Return True if the PyTorch backend supports the given input and quantization
@@ -31,8 +33,9 @@ class PyTorchQuantizeBackend(QuantizeBackendBase):
 
         return True
 
+    @classmethod
     def quantize_to_fp4(
-        self,
+        cls,
         x: torch.Tensor,
         config: QuantizationConfig,
     ) -> QuantizedTensor:
@@ -48,37 +51,57 @@ class PyTorchQuantizeBackend(QuantizeBackendBase):
 
         """
 
+        input_shape = (x.shape[1], x.shape[0]) if config.transpose else x.shape
+
         rows_div = 128
         cols_div = 64 if config.dtype == DataType.nvfp4 else 128
 
-        if x.shape[0] % rows_div != 0 or x.shape[1] % cols_div != 0:
+        if input_shape[0] % rows_div != 0 or input_shape[1] % cols_div != 0:
             x = F.pad(
                 x,
                 (
                     0,
                     (
-                        cols_div - (x.shape[1] % cols_div)
-                        if x.shape[1] % cols_div > 0
+                        cols_div - (input_shape[1] % cols_div)
+                        if input_shape[1] % cols_div > 0
                         else 0
                     ),
                     0,
                     (
-                        rows_div - (x.shape[0] % rows_div)
-                        if x.shape[0] % rows_div > 0
+                        rows_div - (input_shape[0] % rows_div)
+                        if input_shape[0] % rows_div > 0
                         else 0
                     ),
                 ),
             )
 
-        values, scale_factors, amax = quantize_to_fp4(
-            x,
-            had=get_rht_matrix() if config.rht else None,
-            fp4_format=config.dtype,
-            round_style=config.round_style,
-            scale_rule=config.scale_rule,
-            block_scale_2d=config.block_scale_2d,
-            transpose=config.transpose,
-        )
+        if x.device.type == "meta":
+            values = torch.zeros(
+                input_shape[0],
+                input_shape[1] // 2,
+                device=x.device,
+                dtype=torch.uint8,
+            )
+            scale_factors = torch.zeros(
+                input_shape[0] * input_shape[1] // config.dtype.block_size(),
+                device=x.device,
+                dtype=(
+                    torch.float8_e4m3fn
+                    if config.dtype == DataType.nvfp4
+                    else torch.uint8
+                ),
+            )
+            amax = torch.zeros(1, device=x.device, dtype=torch.float32)
+        else:
+            values, scale_factors, amax = quantize_to_fp4(
+                x,
+                had=get_rht_matrix() if config.rht else None,
+                fp4_format=config.dtype,
+                round_style=config.round_style,
+                scale_rule=config.scale_rule,
+                block_scale_2d=config.block_scale_2d,
+                transpose=config.transpose,
+            )
 
         return QuantizedTensor(
             values,

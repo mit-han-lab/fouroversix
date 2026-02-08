@@ -4,9 +4,9 @@ from fouroversix.utils import DataType, MatmulBackend, QuantizeBackend, ScaleRul
 
 
 @dataclass
-class FourOverSixLinearConfig:
+class FourOverSixLayerConfig:
     """
-    Configuration for the FourOverSixLinear layer.
+    Configuration for quantizing layers with Four Over Six.
 
     Args:
         activation_scale_rule (ScaleRule | None): The scaling rule to use for activation
@@ -39,11 +39,38 @@ class FourOverSixLinearConfig:
     gradient_scale_rule: ScaleRule | None = None
     keep_master_weights: bool = False
     matmul_backend: MatmulBackend | None = None
-    quantize_backend: QuantizeBackend | None = None
     output_dtype: DataType = DataType.bfloat16
+    quantize_backend: QuantizeBackend | None = None
     scale_rule: ScaleRule = ScaleRule.mse
     weight_scale_2d: bool = False
     weight_scale_rule: ScaleRule | None = None
+
+    def __post_init__(self) -> None:
+        """Convert string values to enums."""
+
+        if isinstance(self.activation_scale_rule, str):
+            self.activation_scale_rule = ScaleRule(self.activation_scale_rule)
+
+        if isinstance(self.dtype, str):
+            self.dtype = DataType(self.dtype)
+
+        if isinstance(self.gradient_scale_rule, str):
+            self.gradient_scale_rule = ScaleRule(self.gradient_scale_rule)
+
+        if isinstance(self.matmul_backend, str):
+            self.matmul_backend = MatmulBackend(self.matmul_backend)
+
+        if isinstance(self.output_dtype, str):
+            self.output_dtype = DataType(self.output_dtype)
+
+        if isinstance(self.quantize_backend, str):
+            self.quantize_backend = QuantizeBackend(self.quantize_backend)
+
+        if isinstance(self.scale_rule, str):
+            self.scale_rule = ScaleRule(self.scale_rule)
+
+        if isinstance(self.weight_scale_rule, str):
+            self.weight_scale_rule = ScaleRule(self.weight_scale_rule)
 
     def get_activation_scale_rule(self) -> ScaleRule:
         """Return the scaling rule to use for activation tensors."""

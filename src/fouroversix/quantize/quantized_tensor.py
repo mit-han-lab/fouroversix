@@ -1,5 +1,6 @@
+from dataclasses import dataclass
+
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from fouroversix.utils import DataType, ScaleRule
 
@@ -52,7 +53,8 @@ def unpack_packed_fp4(
     ).reshape(x.shape[0], x.shape[1] * 2)
 
 
-class QuantizedTensor(nn.Module):
+@dataclass
+class QuantizedTensor:
     """A quantized tensor."""
 
     values: torch.Tensor
@@ -76,6 +78,18 @@ class QuantizedTensor(nn.Module):
         padded_shape: tuple[int, int] | None = None,
     ) -> None:
         super().__init__()
+
+        if isinstance(dtype, str):
+            dtype = DataType(dtype)
+
+        if isinstance(original_shape, torch.Size):
+            original_shape = tuple(original_shape)
+
+        if isinstance(scale_rule, str):
+            scale_rule = ScaleRule(scale_rule)
+
+        if isinstance(padded_shape, torch.Size):
+            padded_shape = tuple(padded_shape)
 
         self.dtype = dtype
         self.original_shape = original_shape
@@ -149,9 +163,9 @@ class QuantizedTensor(nn.Module):
                 )
                 raise ValueError(msg)
 
-        self.register_buffer("values", values)
-        self.register_buffer("scale_factors", scale_factors)
-        self.register_buffer("amax", amax)
+        self.values = values
+        self.scale_factors = scale_factors
+        self.amax = amax
 
     def dequantize(self, dtype: torch.dtype = torch.bfloat16) -> torch.Tensor:
         """Return a high-precision tensor with the dequantized values."""

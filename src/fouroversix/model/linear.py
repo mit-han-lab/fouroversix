@@ -8,9 +8,7 @@ from fouroversix.quantize import (
 from fouroversix.utils import RoundStyle
 from torch import nn
 
-from .config import FourOverSixLinearConfig
-
-HBS = 16
+from .config import FourOverSixLayerConfig
 
 
 class FourOverSixLinearFunction(torch.autograd.Function):
@@ -19,7 +17,7 @@ class FourOverSixLinearFunction(torch.autograd.Function):
     @staticmethod
     def forward(
         ctx: torch.autograd.function.FunctionCtx,
-        config: FourOverSixLinearConfig,
+        config: FourOverSixLayerConfig,
         input: torch.Tensor,
         weight: torch.Tensor | QuantizedTensor,
         bias: torch.Tensor = None,
@@ -150,7 +148,7 @@ class FourOverSixLinear(nn.Linear):
         bias: bool = True,  # noqa: FBT001, FBT002
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
-        config: FourOverSixLinearConfig | None = None,
+        config: FourOverSixLayerConfig | None = None,
     ) -> None:
         """
         Initialize the FourOverSixLinear layer.
@@ -161,16 +159,59 @@ class FourOverSixLinear(nn.Linear):
             bias (bool): Whether to include a bias term.
             device (torch.device): The device to use for the layer.
             dtype (torch.dtype): The data type to use for the layer.
-            config (FourOverSixLinearConfig): The quantization configuration to use for
+            config (FourOverSixLayerConfig): The quantization configuration to use for
                 the layer.
 
         """
 
         super().__init__(in_features, out_features, bias, device, dtype)
-        self.config = config or FourOverSixLinearConfig()
+        self.config = config or FourOverSixLayerConfig()
+
+        if not self.config.keep_master_weights:
+            self.register_buffer(
+                "quantized_weight_values",
+                nn.Parameter(
+                    torch.zeros(
+                        out_features,
+                        in_features // 2,
+                        dtype=torch.uint8,
+                        device=device,
+                    ),
+                    requires_grad=False,
+                ),
+            )
+            self.register_buffer(
+                "quantized_weight_scale_factors",
+                nn.Parameter(
+                    torch.zeros(
+                        out_features * in_features // self.config.dtype.block_size(),
+                        dtype=self.config.dtype.scale_dtype(),
+                        device=device,
+                    ),
+                    requires_grad=False,
+                ),
+            )
+            self.register_buffer(
+                "quantized_weight_amax",
+                nn.Parameter(
+                    torch.zeros(1, dtype=torch.float32, device=device),
+                    requires_grad=False,
+                ),
+            )
+            self.register_buffer(
+                "quantized_weight_metadata",
+                nn.Parameter(
+                    torch.zeros(2 + 2, dtype=torch.int32, device=device),
+                    requires_grad=False,
+                ),
+            )
 
     def apply_ptq(self) -> None:
         """Apply post-training quantization to this layer."""
+
+        if self.weight.device.type == "meta":
+            return
+
         self.quantized_weight  # noqa: B018
 
     @property
@@ -183,19 +224,51 @@ class FourOverSixLinear(nn.Linear):
         """
 
         if not hasattr(self, "_quantized_weight"):
-            weight_config = QuantizationConfig(
-                backend=self.config.quantize_backend,
-                block_scale_2d=self.config.weight_scale_2d,
-                dtype=self.config.dtype,
-                scale_rule=self.config.get_weight_scale_rule(),
-            )
+            if hasattr(self, "weight"):
+                weight_config = QuantizationConfig(
+                    backend=self.config.quantize_backend,
+                    block_scale_2d=self.config.weight_scale_2d,
+                    dtype=self.config.dtype,
+                    scale_rule=self.config.get_weight_scale_rule(),
+                )
 
-            quantized_weight = quantize_to_fp4(self.weight, weight_config)
+                quantized_weight = quantize_to_fp4(self.weight, weight_config)
 
-            if self.config.keep_master_weights:
-                return quantized_weight
+                self.quantized_weight_values.data = quantized_weight.values
+                self.quantized_weight_scale_factors.data = (
+                    quantized_weight.scale_factors
+                )
+                self.quantized_weight_amax.data = quantized_weight.amax
+                self.quantized_weight_metadata.data = torch.tensor(
+                    [
+                        quantized_weight.original_shape[0],
+                        quantized_weight.original_shape[1],
+                        quantized_weight.padded_shape[0],
+                        quantized_weight.padded_shape[1],
+                    ],
+                )
 
-            self._quantized_weight = quantized_weight
+                if self.config.keep_master_weights:
+                    return quantized_weight
+
+                self.quantized_weight_original_shape = quantized_weight.original_shape
+                self.quantized_weight_padded_shape = quantized_weight.padded_shape
+
+                del self.weight
+                self._quantized_weight = quantized_weight
+            else:
+                original_shape = tuple(self.quantized_weight_metadata.data[:2].tolist())
+                padded_shape = tuple(self.quantized_weight_metadata.data[2:].tolist())
+
+                self._quantized_weight = QuantizedTensor(
+                    self.quantized_weight_values.data,
+                    self.quantized_weight_scale_factors.data,
+                    self.quantized_weight_amax.data,
+                    self.config.dtype,
+                    original_shape,
+                    self.config.get_weight_scale_rule(),
+                    padded_shape,
+                )
 
         return self._quantized_weight
 

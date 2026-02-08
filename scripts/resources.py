@@ -377,6 +377,7 @@ def get_image(  # noqa: C901, PLR0912
                 "src",
                 f"{FOUROVERSIX_INSTALL_PATH}/src",
                 copy=deploy or KERNEL_DEV_MODE,
+                ignore=lambda p: p.suffix == ".so",
             ).add_local_file(
                 ".gitmodules",
                 f"{FOUROVERSIX_INSTALL_PATH}/.gitmodules",
