@@ -220,7 +220,15 @@ class QuantizeBackend(str, Enum):
                 return False
 
         if self == QuantizeBackend.transformer_engine:
-            return torch.cuda.is_available()
+            if not torch.cuda.is_available() or torch.cuda.get_device_capability()[
+                0
+            ] not in [SM_100, SM_110, SM_120]:
+                return False
+
+            try:
+                import transformer_engine  # noqa: F401
+            except ModuleNotFoundError:
+                return False
 
         return True
 
