@@ -26,7 +26,7 @@ SKIP_CUDA_BUILD = os.getenv("SKIP_CUDA_BUILD", "0") == "1"
 
 @functools.cache
 def get_cuda_archs() -> list[str]:
-    return os.getenv("CUDA_ARCHS", "100;110;120").split(";")
+    return os.getenv("CUDA_ARCHS", "100;103;110;120").split(";")
 
 
 def get_cuda_bare_metal_version() -> Version | None:
@@ -67,11 +67,10 @@ def get_cuda_gencodes() -> list[str]:
     # Blackwell requires >= 12.8
     if cuda_version is not None and cuda_version >= Version("12.8"):
         if "100" in archs:
-            # CUDA 12.9 introduced "family-specific" for Blackwell (100f)
-            if cuda_version >= Version("12.9"):
-                cc_flags += ["-gencode", "arch=compute_100a,code=sm_100a"]
-            else:
-                cc_flags += ["-gencode", "arch=compute_100a,code=sm_100a"]
+            cc_flags += ["-gencode", "arch=compute_100a,code=sm_100a"]
+
+        if "103" in archs:
+            cc_flags += ["-gencode", "arch=compute_103a,code=sm_103a"]
 
         # Thor rename: 12.9 uses sm_101; 13.0+ uses sm_110
         if "110" in archs:

@@ -503,6 +503,7 @@ namespace fouroversix
                     unsigned out_dequant_3;
                     unsigned out_dequant_4;
 
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ == 1000 || __CUDA_ARCH__ == 1030)
                     asm volatile(
                         "{\n"
                         ".reg .b16 tmp0, tmp1;\n"
@@ -518,6 +519,7 @@ namespace fouroversix
                         "mov.b32 %0, {tmp0, tmp1};\n"
                         "}"
                         : "=r"(out), "=r"(out_dequant_1), "=r"(out_dequant_2), "=r"(out_dequant_3), "=r"(out_dequant_4) : "f"(x_scaled[0]), "f"(x_scaled[1]), "f"(x_scaled[2]), "f"(x_scaled[3]), "f"(x_scaled[4]), "f"(x_scaled[5]), "f"(x_scaled[6]), "f"(x_scaled[7]), "r"(rbits), "r"(rbits));
+#endif
 
                     unsigned short out_dequant_1_hi = (out_dequant_1 >> 16) & 0xFFFF;
                     unsigned short out_dequant_1_lo = out_dequant_1 & 0xFFFF;
@@ -596,6 +598,7 @@ namespace fouroversix
                 }
                 else
                 {
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ == 1000 || __CUDA_ARCH__ == 1030)
                     asm volatile(
                         "{\n"
                         ".reg .b16 tmp0, tmp1;\n"
@@ -606,6 +609,7 @@ namespace fouroversix
                         : "=r"(out) : "f"(x_scaled[0]), "f"(x_scaled[1]), "f"(x_scaled[2]), "f"(x_scaled[3]),
                                       "f"(x_scaled[4]), "f"(x_scaled[5]), "f"(x_scaled[6]), "f"(x_scaled[7]),
                                       "r"(rbits), "r"(rbits));
+#endif
                     return reinterpret_cast<OutputType const &>(out);
                 }
             }
