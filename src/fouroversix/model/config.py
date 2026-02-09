@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+from fouroversix.quantize import QuantizationConfig
 from fouroversix.utils import DataType, MatmulBackend, QuantizeBackend, ScaleRule
 
 
@@ -83,3 +84,30 @@ class FourOverSixLayerConfig:
     def get_weight_scale_rule(self) -> ScaleRule:
         """Return the scaling rule to use for weight tensors."""
         return self.weight_scale_rule or self.scale_rule
+
+    def get_activation_config(self, **kwargs) -> QuantizationConfig:
+        """Return the quantization configuration for the activation tensors."""
+        return QuantizationConfig(
+            backend=self.quantize_backend,
+            dtype=self.dtype,
+            scale_rule=self.get_activation_scale_rule(),
+            **kwargs,
+        )
+
+    def get_gradient_config(self, **kwargs) -> QuantizationConfig:
+        """Return the quantization configuration for the gradient tensors."""
+        return QuantizationConfig(
+            backend=self.quantize_backend,
+            dtype=self.dtype,
+            scale_rule=self.get_gradient_scale_rule(),
+            **kwargs,
+        )
+
+    def get_weight_config(self, **kwargs) -> QuantizationConfig:
+        """Return the quantization configuration for the weight tensors."""
+        return QuantizationConfig(
+            backend=self.quantize_backend,
+            dtype=self.dtype,
+            scale_rule=self.get_weight_scale_rule(),
+            **kwargs,
+        )

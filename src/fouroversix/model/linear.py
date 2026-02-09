@@ -6,7 +6,7 @@ from fouroversix.quantize import (
     quantize_to_fp4,
 )
 from fouroversix.utils import RoundStyle
-from torch import nn
+import torch.nn as nn
 
 from .config import FourOverSixLayerConfig
 
@@ -28,17 +28,9 @@ class FourOverSixLinearFunction(torch.autograd.Function):
         provided in low precision.
         """
 
-        fprop_activation_config = QuantizationConfig(
-            backend=config.quantize_backend,
-            dtype=config.dtype,
-            scale_rule=config.get_activation_scale_rule(),
-        )
-
-        fprop_weight_config = QuantizationConfig(
-            backend=config.quantize_backend,
+        fprop_activation_config = config.get_activation_config()
+        fprop_weight_config = config.get_weight_config(
             block_scale_2d=config.weight_scale_2d,
-            dtype=config.dtype,
-            scale_rule=config.get_weight_scale_rule(),
         )
 
         if isinstance(weight, torch.Tensor):
@@ -55,12 +47,10 @@ class FourOverSixLinearFunction(torch.autograd.Function):
             out_dtype=config.output_dtype,
         ).reshape(*input.shape[:-1], weight.original_shape[0])
 
-        assert out.dtype == torch.bfloat16  # noqa: S101
-
         if bias is not None:
             out = out + bias
 
-        return (out,)
+        return out
 
     @staticmethod
     def backward(
@@ -73,18 +63,12 @@ class FourOverSixLinearFunction(torch.autograd.Function):
 
         assert grad_output.shape[0] == 1  # noqa: S101
 
-        dgrad_grad_config = QuantizationConfig(
-            backend=ctx.config.quantize_backend,
-            dtype=ctx.config.dtype,
+        dgrad_grad_config = ctx.config.get_gradient_config(
             round_style=RoundStyle.stochastic,
-            scale_rule=ctx.config.get_gradient_scale_rule(),
         )
 
-        dgrad_weight_config = QuantizationConfig(
-            backend=ctx.config.quantize_backend,
+        dgrad_weight_config = ctx.config.get_weight_config(
             block_scale_2d=ctx.config.weight_scale_2d,
-            dtype=ctx.config.dtype,
-            scale_rule=ctx.config.get_weight_scale_rule(),
             transpose=True,
         )
 
@@ -97,20 +81,14 @@ class FourOverSixLinearFunction(torch.autograd.Function):
             out_dtype=ctx.config.output_dtype,
         ).unsqueeze(0)
 
-        wgrad_grad_config = QuantizationConfig(
-            backend=ctx.config.quantize_backend,
-            dtype=ctx.config.dtype,
+        wgrad_grad_config = ctx.config.get_gradient_config(
             rht=True,
             round_style=RoundStyle.stochastic,
-            scale_rule=ctx.config.get_gradient_scale_rule(),
             transpose=True,
         )
 
-        wgrad_activation_config = QuantizationConfig(
-            backend=ctx.config.quantize_backend,
-            dtype=ctx.config.dtype,
+        wgrad_activation_config = ctx.config.get_activation_config(
             rht=True,
-            scale_rule=ctx.config.get_activation_scale_rule(),
             transpose=True,
         )
 
@@ -275,11 +253,9 @@ class FourOverSixLinear(nn.Linear):
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         """Forward pass for the FP4 linear layer."""
 
-        (out,) = FourOverSixLinearFunction.apply(
+        return FourOverSixLinearFunction.apply(
             self.config,
             input,
             self.quantized_weight,
             self.bias,
         )
-
-        return out

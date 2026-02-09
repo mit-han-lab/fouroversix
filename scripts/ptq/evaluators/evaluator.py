@@ -107,6 +107,7 @@ class PTQEvaluator(ABC):
                 save_path=save_path,
                 quantization_config=quantization_config,
                 trust_remote_code=trust_remote_code,
+                **kwargs,
             )
 
             if eval_framework == EvaluationFramework.lm_eval:

@@ -43,12 +43,16 @@ from .utils import EvaluationFramework, PTQMethod
     default=ScaleRule.mse,
 )
 @click.option("--weight-scale-2d", "--w-scale-2d", is_flag=True)
-def cli(group_name: str | None, **kwargs: dict[str, Any]) -> None:
-    detach = kwargs.pop("detach", False)
+def cli(
+    detach: bool,
+    group_name: str | None,
+    modal_gpu: str,
+    **kwargs: dict[str, Any],
+) -> None:
     model_names = kwargs.pop("model_name")
     ptq_methods = kwargs.pop("ptq_method")
-    use_modal = kwargs.pop("modal", False)
-    kwargs["tasks"] = kwargs.pop("task")
+    tasks = kwargs.pop("task")
+    use_modal = kwargs.pop("modal")
 
     # Expand shortcuts
     if model_names[0] == "llamaqwen":
@@ -61,27 +65,22 @@ def cli(group_name: str | None, **kwargs: dict[str, Any]) -> None:
             "Qwen/Qwen3-32B",
         ]
 
-    if isinstance(kwargs.get("tasks"), tuple):
-        kwargs["tasks"] = list(kwargs.get("tasks"))
-
-    # Validate options
-    for ptq_method in ptq_methods:
-        if ptq_method != PTQMethod.rtn:
-            if kwargs.get("dtype") == DataType.mxfp4:
-                msg = "MXFP4 is only supported with RTN"
-                raise ValueError(msg)
-
-            if kwargs.get("weight_scale_2d"):
-                msg = "2D weight scales are only supported with RTN"
-                raise ValueError(msg)
+    if isinstance(tasks, tuple):
+        tasks = list(tasks)
 
     if use_modal:
         with modal.enable_output(), app.run(detach=detach):
             coordinator = ModalEvaluationCoordinator(group_name_str=group_name or "")
-            coordinator.start.remote(model_names, ptq_methods, **kwargs)
+            coordinator.start.remote(
+                model_names,
+                ptq_methods,
+                tasks,
+                modal_gpu=modal_gpu,
+                **kwargs,
+            )
     else:
         coordinator = LocalEvaluationCoordinator(group_name)
-        coordinator.start(model_names, ptq_methods, **kwargs)
+        coordinator.start(model_names, ptq_methods, tasks, **kwargs)
 
 
 if __name__ == "__main__":

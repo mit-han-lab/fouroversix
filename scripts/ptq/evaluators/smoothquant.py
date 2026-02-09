@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from fouroversix import QuantizationConfig
+from fouroversix import FourOverSixLayerConfig, QuantizationConfig, ScaleRule
 
 from ...resources import FOUROVERSIX_CACHE_PATH, app, cache_volume, hf_secret
 from ..experiment import Experiment
@@ -10,7 +11,6 @@ from ..utils import PTQMethod
 from .rtn import RTNEvaluatorImpl, rtn_img
 
 if TYPE_CHECKING:
-    from fouroversix.utils import AdaptiveBlockScalingRule, DataType
     from sqlalchemy.orm import Session
 
 
@@ -55,17 +55,9 @@ class FourOverSixLinearWithSmoothing(FourOverSixLinear):
             dtype=self.config.output_dtype.torch_dtype(),
         )
 
-        fprop_activation_config = QuantizationConfig(
-            backend=self.config.quantize_backend,
-            dtype=self.config.dtype,
-            scale_rule=self.config.get_activation_scale_rule(),
-        )
-
-        fprop_weight_config = QuantizationConfig(
-            backend=self.config.quantize_backend,
+        fprop_activation_config = self.config.get_activation_config()
+        fprop_weight_config = self.config.get_weight_config(
             block_scale_2d=self.config.weight_scale_2d,
-            dtype=self.config.dtype,
-            scale_rule=self.config.get_weight_scale_rule(),
         )
 
         for i in range(input.shape[0]):
@@ -171,25 +163,24 @@ class SmoothQuantEvaluator(RTNEvaluatorImpl):
         model_name: str,
         *,
         device: str,
-        dtype: DataType,
+        save_path: Path,
         smoothquant_alpha: float,
-        model_kwargs: dict[str, Any] | None = None,
-        **kwargs: dict[str, Any],
+        quantization_config: FourOverSixLayerConfig,
+        trust_remote_code: bool,
     ) -> AutoModelForCausalLM:
         """Quantize a model using SmoothQuant."""
 
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
             device_map=device,
-            dtype=dtype.torch_dtype(),
-            **(model_kwargs or {}),
+            trust_remote_code=trust_remote_code,
         )
 
         quantize_model(
             model,
+            quantization_config,
             linear_cls=FourOverSixLinearWithSmoothing,
             linear_kwargs={"smoothquant_alpha": smoothquant_alpha},
-            **kwargs,
         )
 
         return model
@@ -197,8 +188,8 @@ class SmoothQuantEvaluator(RTNEvaluatorImpl):
 
 def get_calibration_experiments(
     model_name: str,
-    activation_scale_rule: AdaptiveBlockScalingRule,
-    weight_scale_rule: AdaptiveBlockScalingRule,
+    activation_scale_rule: ScaleRule,
+    weight_scale_rule: ScaleRule,
     db_session: Session,
 ) -> list[Experiment]:
     return (
@@ -217,8 +208,8 @@ def get_calibration_experiments(
 
 def get_smoothquant_alpha(
     model_name: str,
-    activation_scale_rule: AdaptiveBlockScalingRule,
-    weight_scale_rule: AdaptiveBlockScalingRule,
+    activation_scale_rule: ScaleRule,
+    weight_scale_rule: ScaleRule,
     session: Session,
 ) -> float | None:
     calibration_experiments = get_calibration_experiments(
