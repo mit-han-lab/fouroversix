@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import torch.nn as nn
 
@@ -16,6 +16,7 @@ def quantize_model(
     *,
     exclude_layers: list[str] | None = None,
     linear_cls: type[FourOverSixLinear] | None = None,
+    linear_kwargs: dict[str, Any] | None = None,
 ) -> None:
     if exclude_layers is None:
         exclude_layers = ["lm_head"]
@@ -34,6 +35,7 @@ def quantize_model(
             device=module.weight.device,
             dtype=module.weight.dtype,
             config=config,
+            **(linear_kwargs or {}),
         )
 
         four_over_six_linear.weight = module.weight

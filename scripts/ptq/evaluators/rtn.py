@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from fouroversix import quantize_model
 
 from ...resources import (
     FOUROVERSIX_CACHE_PATH,
@@ -20,8 +22,9 @@ if TYPE_CHECKING:
 rtn_img = get_image()
 
 with rtn_img.imports():
-    from fouroversix import DataType, MatmulBackend, QuantizeBackend, ScaleRule
-    from transformers import AutoConfig, AutoModelForCausalLM, FourOverSixConfig
+    from fouroversix import FourOverSixLayerConfig
+    from transformers import AutoConfig, AutoModelForCausalLM
+    from transformers import FourOverSixConfig as HFFourOverSixConfig
 
 
 class RTNEvaluatorImpl(PTQEvaluator):
@@ -32,53 +35,60 @@ class RTNEvaluatorImpl(PTQEvaluator):
         model_name: str,
         *,
         device: str,
-        dtype: DataType,
         save_path: Path,
-        activation_scale_rule: ScaleRule,
-        weight_scale_rule: ScaleRule,
-        matmul_backend: MatmulBackend,
-        quantize_backend: QuantizeBackend,
-        weight_scale_2d: bool,
-        model_kwargs: dict[str, Any] | None = None,
-        **kwargs: dict[str, Any],  # noqa: ARG002
+        quantization_config: FourOverSixLayerConfig,
+        trust_remote_code: bool = False,
     ) -> AutoModelForCausalLM:
         """Quantize a model using round-to-nearest quantization."""
 
         model_save_path = (
             save_path
             / "rtn"
-            / f"{model_name}-{activation_scale_rule.value}-{weight_scale_rule.value}"
+            / (
+                f"{model_name}-{quantization_config.get_activation_scale_rule().value}"
+                f"-{quantization_config.get_weight_scale_rule().value}"
+            )
         )
 
         if not model_save_path.exists():
-            config = AutoConfig.from_pretrained(model_name)
+            model_config = AutoConfig.from_pretrained(model_name)
 
-            quantization_config = FourOverSixConfig(
-                activation_scale_rule=activation_scale_rule,
-                dtype=dtype,
-                matmul_backend=matmul_backend,
-                quantize_backend=quantize_backend,
-                output_dtype=DataType(
-                    str(config.torch_dtype).replace("torch.", ""),
-                ),
-                weight_scale_rule=weight_scale_rule,
-                weight_scale_2d=weight_scale_2d,
-            )
+            if hasattr(model_config, "quantization_config"):
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_name,
+                    device_map=device,
+                    trust_remote_code=trust_remote_code,
+                )
 
-            model = AutoModelForCausalLM.from_pretrained(
-                model_name,
-                device_map=device,
-                quantization_config=quantization_config,
-                **(model_kwargs or {}),
-            )
+                quantize_model(model, quantization_config)
+            else:
+                hf_quantization_config = HFFourOverSixConfig(
+                    activation_scale_rule=quantization_config.get_activation_scale_rule(),
+                    dtype=quantization_config.dtype,
+                    matmul_backend=quantization_config.matmul_backend,
+                    output_dtype=quantization_config.output_dtype,
+                    quantize_backend=quantization_config.quantize_backend,
+                    weight_scale_2d=quantization_config.weight_scale_2d,
+                    weight_scale_rule=quantization_config.get_weight_scale_rule(),
+                )
 
-            model.save_pretrained(model_save_path)
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_name,
+                    device_map=device,
+                    quantization_config=hf_quantization_config,
+                    trust_remote_code=trust_remote_code,
+                )
+
+                model.save_pretrained(model_save_path)
         else:
             model = AutoModelForCausalLM.from_pretrained(
                 model_save_path,
                 device_map=device,
+                trust_remote_code=trust_remote_code,
             )
-            model.name_or_path = model_name
+
+        # Fix for Inspect AI
+        model.name_or_path = model_name
 
         return model
 

@@ -113,7 +113,7 @@ def block_scaled_fp4_quantization_kernel(
             .reshape(BLOCK_SIZE_M, BLOCK_SIZE_N // 2, 2)
             .split()
         )
-    elif FP4_FORMAT == DATA_TYPE_MXFP4:
+    elif FP4_FORMAT == DATA_TYPE_NVFP4:
         x_amax = tl.load(x_amax_ptr)
         x_scale_blocks = x_block.reshape(128, 4, 16)
 

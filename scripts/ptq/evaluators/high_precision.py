@@ -1,6 +1,6 @@
-from typing import Any
+from pathlib import Path
 
-from fouroversix.utils import DataType
+from fouroversix import FourOverSixLayerConfig
 
 from ...resources import (
     FOUROVERSIX_CACHE_PATH,
@@ -32,13 +32,14 @@ class HighPrecisionEvaluator(PTQEvaluator):
         model_name: str,
         *,
         device: str,
-        dtype: DataType,
-        **kwargs: dict[str, Any],  # noqa: ARG002
+        save_path: Path,  # noqa: ARG002
+        quantization_config: FourOverSixLayerConfig,  # noqa: ARG002
+        trust_remote_code: bool = False,
     ) -> "AutoModelForCausalLM":
         """Return a model without any quantization."""
 
         return AutoModelForCausalLM.from_pretrained(
             model_name,
             device_map=device,
-            dtype=dtype.torch_dtype(),
+            trust_remote_code=trust_remote_code,
         )

@@ -26,7 +26,7 @@ class CUTLASSMatmulBackend(MatmulBackendBase):
         input: QuantizedTensor,
         other: QuantizedTensor,
         *,
-        out_dtype: torch.dtype,
+        out_dtype: DataType,
     ) -> torch.Tensor:
         """
         Perform a matrix multiplication (`a @ b.T`) between two quantized tensors using

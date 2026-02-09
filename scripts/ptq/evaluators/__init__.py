@@ -8,8 +8,8 @@ from ..utils import PTQMethod
 # from .gptq import GPTQEvaluator
 from .high_precision import HighPrecisionEvaluator
 from .rtn import RTNEvaluator
+from .smoothquant import SmoothQuantEvaluator
 
-# from .smoothquant import SmoothQuantEvaluator
 # from .spinquant import SpinQuantEvaluator
 
 if TYPE_CHECKING:

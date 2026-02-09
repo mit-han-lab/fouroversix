@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 
 import torch
 from fouroversix.quantize import QuantizedTensor
+from fouroversix.utils import DataType
 
 
 class MatmulBackendBase(ABC):
@@ -21,7 +22,7 @@ class MatmulBackendBase(ABC):
         input: QuantizedTensor,
         other: QuantizedTensor,
         *,
-        out_dtype: torch.dtype,
+        out_dtype: DataType,
     ) -> bool:
         """Return True if the backend supports the given inputs and output data type."""
 
@@ -49,7 +50,7 @@ class MatmulBackendBase(ABC):
         input: QuantizedTensor,
         other: QuantizedTensor,
         *,
-        out_dtype: torch.dtype,
+        out_dtype: DataType,
     ) -> torch.Tensor:
         """
         Perform a matrix multiplication (`a @ b.T`) between two quantized tensors using

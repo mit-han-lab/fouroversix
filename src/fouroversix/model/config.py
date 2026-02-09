@@ -20,11 +20,11 @@ class FourOverSixLayerConfig:
         matmul_backend (MatmulBackend | None): The backend to use for matrix
             multiplications. If not provided, a backend will be selected automatically
             based on the available GPU and the specified options.
+        output_dtype (DataType): The data type to use for the layer's output. Defaults
+            to `DataType.bfloat16`.
         quantize_backend (QuantizeBackend | None): The backend to use for quantization.
             If not provided, a backend will be selected automatically based on the
             available GPU and the specified options.
-        output_dtype (DataType): The data type to use for the layer's output. Defaults
-            to `DataType.bfloat16`.
         scale_rule (ScaleRule): The fallback scaling rule which will be used if any of
             the other scaling rules are not specified.
         weight_scale_2d (bool): Whether to use 2D block scaling for weights. Should be
