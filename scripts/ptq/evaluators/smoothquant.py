@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from fouroversix import FourOverSixLayerConfig, QuantizationConfig, ScaleRule
+from fouroversix import FourOverSixLayerConfig, ScaleRule
 
 from ...resources import FOUROVERSIX_CACHE_PATH, app, cache_volume, hf_secret
 from ..experiment import Experiment
@@ -11,6 +10,8 @@ from ..utils import PTQMethod
 from .rtn import RTNEvaluatorImpl, rtn_img
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from sqlalchemy.orm import Session
 
 
@@ -163,7 +164,7 @@ class SmoothQuantEvaluator(RTNEvaluatorImpl):
         model_name: str,
         *,
         device: str,
-        save_path: Path,
+        save_path: Path,  # noqa: ARG002
         smoothquant_alpha: float,
         quantization_config: FourOverSixLayerConfig,
         trust_remote_code: bool,

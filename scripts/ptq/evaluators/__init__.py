@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ..utils import PTQMethod
+from .awq import AWQEvaluator
 
-# from .awq import AWQEvaluator
 # from .gptq import GPTQEvaluator
 from .high_precision import HighPrecisionEvaluator
 from .rtn import RTNEvaluator

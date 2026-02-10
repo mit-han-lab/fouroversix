@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 from fouroversix.matmul import fp4_matmul
 from fouroversix.quantize import (
     QuantizationConfig,
@@ -6,7 +7,6 @@ from fouroversix.quantize import (
     quantize_to_fp4,
 )
 from fouroversix.utils import RoundStyle
-import torch.nn as nn
 
 from .config import FourOverSixLayerConfig
 
@@ -190,9 +190,8 @@ class FourOverSixLinear(nn.Linear):
         if self.weight.device.type == "meta":
             return
 
-        self.quantized_weight  # noqa: B018
+        self.quantized_weight()
 
-    @property
     def quantized_weight(self) -> QuantizedTensor:
         """
         Prepare this layer for post-training quantization by quantizing the weight,
@@ -212,6 +211,9 @@ class FourOverSixLinear(nn.Linear):
 
                 quantized_weight = quantize_to_fp4(self.weight, weight_config)
 
+                if self.config.keep_master_weights:
+                    return quantized_weight
+
                 self.quantized_weight_values.data = quantized_weight.values
                 self.quantized_weight_scale_factors.data = (
                     quantized_weight.scale_factors
@@ -225,9 +227,6 @@ class FourOverSixLinear(nn.Linear):
                         quantized_weight.padded_shape[1],
                     ],
                 )
-
-                if self.config.keep_master_weights:
-                    return quantized_weight
 
                 self.quantized_weight_original_shape = quantized_weight.original_shape
                 self.quantized_weight_padded_shape = quantized_weight.padded_shape
@@ -256,6 +255,6 @@ class FourOverSixLinear(nn.Linear):
         return FourOverSixLinearFunction.apply(
             self.config,
             input,
-            self.quantized_weight,
+            self.quantized_weight(),
             self.bias,
         )

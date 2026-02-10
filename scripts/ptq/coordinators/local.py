@@ -94,7 +94,7 @@ class LocalEvaluationCoordinator(BaseEvaluationCoordinator):
         result_queue = manager.Queue()
 
         # Start one worker per GPU
-        num_workers = max(torch.cuda.device_count(), 1)
+        num_workers = torch.cuda.device_count() if device == "cuda" else 1
         workers = []
 
         for gpu_id in range(num_workers):

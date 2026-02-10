@@ -44,6 +44,7 @@ from .utils import EvaluationFramework, PTQMethod
 )
 @click.option("--weight-scale-2d", "--w-scale-2d", is_flag=True)
 def cli(
+    *,
     detach: bool,
     group_name: str | None,
     modal_gpu: str,

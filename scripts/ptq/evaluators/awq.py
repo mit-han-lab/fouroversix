@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 import torch
 import torch.nn.functional as F
-from fouroversix.model import FP4Linear
+from fouroversix import FourOverSixLayerConfig, FourOverSixLinear
 
 from ...resources import (
     FOUROVERSIX_CACHE_PATH,
@@ -18,20 +18,20 @@ from ...resources import (
 from .rtn import RTNEvaluatorImpl
 
 if TYPE_CHECKING:
-    from fouroversix.utils import AdaptiveBlockScalingRule, DataType
     from transformers import AutoModelForCausalLM
 
 awq_img = get_image(dependencies=[Dependency.fouroversix, Dependency.awq])
 
 
-class FP4LinearForAWQ(FP4Linear):
+class FourOverSixLinearForAWQ(FourOverSixLinear):
     """
-    Drop-in replacement for `FP4Linear` that quantizes the weights and activations
-    during AWQ calibration.
+    Drop-in replacement for `FourOverSixLinear` that quantizes the weights and
+    activations during AWQ calibration.
     """
 
     def __init__(self, *args: list[Any], **kwargs: dict[str, Any]) -> None:
         super().__init__(*args, **kwargs)
+        self.config.keep_master_weights = True
         self.high_precision = False
 
     def apply_ptq(self) -> None:
@@ -69,12 +69,9 @@ class AWQEvaluator(RTNEvaluatorImpl):
         model_name: str,
         *,
         device: str,
-        dtype: DataType,
-        activation_scale_rule: AdaptiveBlockScalingRule,
-        weight_scale_rule: AdaptiveBlockScalingRule,
         save_path: Path,
-        model_kwargs: dict[str, Any] | None = None,
-        **kwargs: dict[str, Any],
+        quantization_config: FourOverSixLayerConfig,
+        trust_remote_code: bool,
     ) -> AutoModelForCausalLM:
         """Quantize a model using AWQ."""
 
@@ -86,29 +83,29 @@ class AWQEvaluator(RTNEvaluatorImpl):
         save_path = (
             save_path
             / "awq"
-            / f"{model_name}-{activation_scale_rule.value}-{weight_scale_rule.value}"
+            / (
+                f"{model_name}-{quantization_config.get_activation_scale_rule().value}"
+                f"-{quantization_config.get_weight_scale_rule().value}"
+            )
         )
 
         if not save_path.exists():
             model = AutoModelForCausalLM.from_pretrained(
                 model_name,
                 device_map=device,
-                dtype=dtype.torch_dtype(),
-                **(model_kwargs or {}),
+                trust_remote_code=trust_remote_code,
             ).eval()
 
             quantize_model(
                 model,
-                activation_scale_rule=activation_scale_rule,
-                weight_scale_rule=weight_scale_rule,
-                linear_cls=FP4LinearForAWQ,
-                **kwargs,
+                quantization_config,
+                linear_cls=FourOverSixLinearForAWQ,
             )
 
             enc = AutoTokenizer.from_pretrained(
                 model_name,
                 use_fast=False,
-                trust_remote_code=True,
+                trust_remote_code=trust_remote_code,
             )
 
             awq_results = run_awq(
@@ -127,8 +124,7 @@ class AWQEvaluator(RTNEvaluatorImpl):
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
             device_map=device,
-            dtype=dtype.torch_dtype(),
-            **(model_kwargs or {}),
+            trust_remote_code=trust_remote_code,
         )
 
         # Apply AWQ
@@ -136,11 +132,6 @@ class AWQEvaluator(RTNEvaluatorImpl):
         apply_awq(model, awq_results)
 
         # Quantize the model
-        quantize_model(
-            model,
-            activation_scale_rule=activation_scale_rule,
-            weight_scale_rule=weight_scale_rule,
-            **kwargs,
-        )
+        quantize_model(model, quantization_config)
 
         return model.to(device)
