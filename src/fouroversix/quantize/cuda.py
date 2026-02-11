@@ -1,5 +1,5 @@
 import torch
-from fouroversix.utils import DataType, RoundStyle
+from fouroversix.utils import SM_100, SM_110, SM_120, DataType
 
 from .backend import QuantizeBackendBase
 from .config import QuantizationConfig
@@ -17,8 +17,17 @@ class CUDAQuantizeBackend(QuantizeBackendBase):
     def is_available(cls) -> bool:
         """Return True if the CUDA backend is available on the current machine."""
 
-        # TODO(jack, junxian): Re-enable CUDA backend once precision issues are resolved
-        return False
+        if not torch.cuda.is_available() or torch.cuda.get_device_capability()[
+            0
+        ] not in [SM_100, SM_110, SM_120]:
+            return False
+
+        try:
+            import fouroversix._C  # noqa: F401
+        except ModuleNotFoundError:
+            return False
+
+        return True
 
     @classmethod
     def is_supported(cls, x: torch.Tensor, config: QuantizationConfig) -> bool:

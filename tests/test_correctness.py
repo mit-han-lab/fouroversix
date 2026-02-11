@@ -3,13 +3,13 @@ import itertools
 import pytest
 import torch
 from fouroversix import (
-    AdaptiveBlockScalingRule,
-    FP4Format,
+    DataType,
     QuantizeBackend,
     RoundStyle,
+    ScaleRule,
     quantize_to_fp4,
 )
-from fouroversix.quantize import from_blocked, get_rht_matrix
+from fouroversix.quantize.quantized_tensor import from_blocked
 
 MAE_MSE_MISMATCH_TOLERANCE = 1e-3
 NUM_RANDOM_SEEDS = 10
@@ -33,16 +33,16 @@ NUM_RANDOM_SEEDS = 10
     ),
 )
 @pytest.mark.parametrize("block_scale_2d", ["block_scale_2d", "no_block_scale_2d"])
-@pytest.mark.parametrize("fp4_format", [FP4Format.nvfp4])
-@pytest.mark.parametrize("had", ["had", "no_had"])
+@pytest.mark.parametrize("fp4_format", [DataType.nvfp4])
+@pytest.mark.parametrize("rht", ["rht", "no_rht"])
 @pytest.mark.parametrize(
     "scale_rule",
     [
-        AdaptiveBlockScalingRule.abs_max,
-        AdaptiveBlockScalingRule.l1_norm,
-        AdaptiveBlockScalingRule.mse,
-        AdaptiveBlockScalingRule.always_4,
-        AdaptiveBlockScalingRule.always_6,
+        ScaleRule.abs_max,
+        ScaleRule.mae,
+        ScaleRule.mse,
+        ScaleRule.static_4,
+        ScaleRule.static_6,
     ],
 )
 @pytest.mark.parametrize("round_style", [RoundStyle.nearest, RoundStyle.stochastic])
@@ -54,10 +54,10 @@ def test_backend_outputs_are_consistent(  # noqa: C901, PLR0915
     backend_b: QuantizeBackend,
     *,
     block_scale_2d: str,
-    fp4_format: FP4Format,
-    had: str,
+    fp4_format: DataType,
+    rht: str,
     round_style: RoundStyle,
-    scale_rule: AdaptiveBlockScalingRule,
+    scale_rule: ScaleRule,
     transpose: str,
 ) -> None:
     torch.set_printoptions(precision=10)
@@ -66,13 +66,13 @@ def test_backend_outputs_are_consistent(  # noqa: C901, PLR0915
         pytest.skip("Backend is not available")
 
     block_scale_2d = block_scale_2d == "block_scale_2d"
-    had = had == "had"
+    rht = rht == "rht"
     transpose = transpose == "transpose"
 
     kwargs = {
         "block_scale_2d": block_scale_2d,
         "fp4_format": fp4_format,
-        "had": get_rht_matrix() if had else None,
+        "rht": rht,
         "round_style": round_style,
         "scale_rule": scale_rule,
         "transpose": transpose,
@@ -134,12 +134,7 @@ def test_backend_outputs_are_consistent(  # noqa: C901, PLR0915
         scale_factors_mismatch_prop = (sf_a != sf_b).sum() / sf_a.numel()
 
         if (
-            scale_rule
-            in {
-                AdaptiveBlockScalingRule.always_6,
-                AdaptiveBlockScalingRule.always_4,
-                AdaptiveBlockScalingRule.abs_max,
-            }
+            scale_rule in {ScaleRule.static_6, ScaleRule.static_4, ScaleRule.abs_max}
             and scale_factors_mismatch_prop > 0
         ) or scale_factors_mismatch_prop >= MAE_MSE_MISMATCH_TOLERANCE:
             print(
@@ -163,12 +158,7 @@ def test_backend_outputs_are_consistent(  # noqa: C901, PLR0915
         ).sum() / quantized_a.e2m1_values.numel()
 
         if (
-            scale_rule
-            in {
-                AdaptiveBlockScalingRule.always_6,
-                AdaptiveBlockScalingRule.always_4,
-                AdaptiveBlockScalingRule.abs_max,
-            }
+            scale_rule in {ScaleRule.static_6, ScaleRule.static_4, ScaleRule.abs_max}
             and values_mismatch_prop > 0
         ) or values_mismatch_prop >= MAE_MSE_MISMATCH_TOLERANCE:
             print(
