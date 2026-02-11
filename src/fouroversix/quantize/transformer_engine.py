@@ -13,7 +13,8 @@ class TransformerEngineQuantizeBackend(QuantizeBackendBase):
     our implementations.
     """
 
-    def is_available(self) -> bool:
+    @classmethod
+    def is_available(cls) -> bool:
         """
         Return True if the Transformer Engine backend is available on the current
         machine.
@@ -21,13 +22,14 @@ class TransformerEngineQuantizeBackend(QuantizeBackendBase):
 
         return torch.cuda.is_available()
 
-    def is_supported(self, x: torch.Tensor, config: QuantizationConfig) -> bool:
+    @classmethod
+    def is_supported(cls, x: torch.Tensor, config: QuantizationConfig) -> bool:
         """
         Return True if the Transformer Engine backend supports the given input and
         quantization configuration.
         """
 
-        if not super().is_supported(x, config):
+        if not cls.is_supported(x, config):
             return False
 
         if config.dtype != DataType.nvfp4 or config.scale_rule != ScaleRule.static_6:
@@ -41,8 +43,9 @@ class TransformerEngineQuantizeBackend(QuantizeBackendBase):
 
         return True
 
+    @classmethod
     def quantize_to_fp4(
-        self,
+        cls,
         x: torch.Tensor,
         config: QuantizationConfig,
     ) -> QuantizedTensor:

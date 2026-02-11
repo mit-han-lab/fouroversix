@@ -4,11 +4,13 @@ import pytest
 import torch
 from fouroversix import (
     DataType,
+    QuantizationConfig,
     QuantizeBackend,
     RoundStyle,
     ScaleRule,
     quantize_to_fp4,
 )
+from fouroversix.quantize.frontend import AVAILABLE_BACKENDS
 from fouroversix.quantize.quantized_tensor import from_blocked
 
 MAE_MSE_MISMATCH_TOLERANCE = 1e-3
@@ -33,7 +35,7 @@ NUM_RANDOM_SEEDS = 10
     ),
 )
 @pytest.mark.parametrize("block_scale_2d", ["block_scale_2d", "no_block_scale_2d"])
-@pytest.mark.parametrize("fp4_format", [DataType.nvfp4])
+@pytest.mark.parametrize("dtype", [DataType.nvfp4])
 @pytest.mark.parametrize("rht", ["rht", "no_rht"])
 @pytest.mark.parametrize(
     "scale_rule",
@@ -54,7 +56,7 @@ def test_backend_outputs_are_consistent(  # noqa: C901, PLR0915
     backend_b: QuantizeBackend,
     *,
     block_scale_2d: str,
-    fp4_format: DataType,
+    dtype: DataType,
     rht: str,
     round_style: RoundStyle,
     scale_rule: ScaleRule,
@@ -62,21 +64,31 @@ def test_backend_outputs_are_consistent(  # noqa: C901, PLR0915
 ) -> None:
     torch.set_printoptions(precision=10)
 
-    if not backend_a.is_available() or not backend_b.is_available():
+    backend_a_cls = AVAILABLE_BACKENDS[backend_a]
+    backend_b_cls = AVAILABLE_BACKENDS[backend_b]
+
+    if not backend_a_cls.is_available() or not backend_b_cls.is_available():
         pytest.skip("Backend is not available")
 
-    block_scale_2d = block_scale_2d == "block_scale_2d"
-    rht = rht == "rht"
-    transpose = transpose == "transpose"
+    config_a = QuantizationConfig(
+        backend=backend_a,
+        block_scale_2d=block_scale_2d == "block_scale_2d",
+        dtype=dtype,
+        rht=rht == "rht",
+        round_style=round_style,
+        scale_rule=scale_rule,
+        transpose=transpose == "transpose",
+    )
 
-    kwargs = {
-        "block_scale_2d": block_scale_2d,
-        "fp4_format": fp4_format,
-        "rht": rht,
-        "round_style": round_style,
-        "scale_rule": scale_rule,
-        "transpose": transpose,
-    }
+    config_b = QuantizationConfig(
+        backend=backend_b,
+        block_scale_2d=block_scale_2d == "block_scale_2d",
+        dtype=dtype,
+        rht=rht == "rht",
+        round_style=round_style,
+        scale_rule=scale_rule,
+        transpose=transpose == "transpose",
+    )
 
     if round_style == RoundStyle.stochastic:
         pytest.xfail("This test is not currently targeting stochastic rounding")
@@ -99,14 +111,17 @@ def test_backend_outputs_are_consistent(  # noqa: C901, PLR0915
             msg = f"Invalid input type: {input_type}"
             raise ValueError(msg)
 
-        if not backend_a.is_supported(x, **kwargs) or not backend_b.is_supported(
+        if not backend_a_cls.is_supported(
             x,
-            **kwargs,
+            config_a,
+        ) or not backend_b_cls.is_supported(
+            x,
+            config_b,
         ):
             pytest.skip("Backend is not supported")
 
-        quantized_a = quantize_to_fp4(x.clone(), backend=backend_a, **kwargs)
-        quantized_b = quantize_to_fp4(x.clone(), backend=backend_b, **kwargs)
+        quantized_a = quantize_to_fp4(x.clone(), config_a)
+        quantized_b = quantize_to_fp4(x.clone(), config_b)
 
         if not torch.allclose(quantized_a.amax, quantized_b.amax):
             print("Backends A and B have different amax values!")
@@ -145,17 +160,17 @@ def test_backend_outputs_are_consistent(  # noqa: C901, PLR0915
             [i, *_], [j, *_] = torch.where(sf_a != sf_b)
             print(backend_a)
             print("sf", sf_a[i, j])
-            print("e2m1", quantized_a.e2m1_values[i, 8 * j : 8 * (j + 1)])
+            print("e2m1", quantized_a.values[i, 8 * j : 8 * (j + 1)])
             print(backend_b)
             print("sf", sf_b[i, j])
-            print("e2m1", quantized_b.e2m1_values[i, 8 * j : 8 * (j + 1)])
+            print("e2m1", quantized_b.values[i, 8 * j : 8 * (j + 1)])
             print("original")
             print("x", x[i, 16 * j : 16 * (j + 1)])
             pytest.fail("Backends A and B have different scale factors!")
 
         values_mismatch_prop = (
-            quantized_a.e2m1_values != quantized_b.e2m1_values
-        ).sum() / quantized_a.e2m1_values.numel()
+            quantized_a.values != quantized_b.values
+        ).sum() / quantized_a.values.numel()
 
         if (
             scale_rule in {ScaleRule.static_6, ScaleRule.static_4, ScaleRule.abs_max}
@@ -167,15 +182,15 @@ def test_backend_outputs_are_consistent(  # noqa: C901, PLR0915
             )
 
             [i, *_], [j, *_] = torch.where(
-                quantized_a.e2m1_values != quantized_b.e2m1_values,
+                quantized_a.values != quantized_b.values,
             )
             print(i, j)
             print("amax", quantized_a.amax)
             print("sf", sf_a[i, j // 8])
             print(backend_a)
-            print("e2m1", quantized_a.e2m1_values[i, 8 * (j // 8) : 8 * (j // 8 + 1)])
+            print("e2m1", quantized_a.values[i, 8 * (j // 8) : 8 * (j // 8 + 1)])
             print(backend_b)
-            print("e2m1", quantized_b.e2m1_values[i, 8 * (j // 8) : 8 * (j // 8 + 1)])
+            print("e2m1", quantized_b.values[i, 8 * (j // 8) : 8 * (j // 8 + 1)])
             print("original")
             print("x", x[i, 16 * (j // 8) : 16 * (j // 8 + 1)])
             pytest.fail("Backends A and B have different e2m1 values!")
