@@ -31,7 +31,6 @@ class LocalEvaluationCoordinator(BaseEvaluationCoordinator):
 
         return evaluator_cls().evaluate(
             model_name=model_name,
-            ptq_method=ptq_method,
             save_path=FOUROVERSIX_ROOT_DIR / "ptq",
             **kwargs,
         )
@@ -82,6 +81,7 @@ class LocalEvaluationCoordinator(BaseEvaluationCoordinator):
         model_names: list[str],
         ptq_methods: list[PTQMethod],
         tasks: list[str],
+        *,
         device: str,
         **kwargs: dict[str, Any],
     ) -> None:
@@ -94,7 +94,7 @@ class LocalEvaluationCoordinator(BaseEvaluationCoordinator):
         result_queue = manager.Queue()
 
         # Start one worker per GPU
-        num_workers = max(torch.cuda.device_count(), 1)
+        num_workers = torch.cuda.device_count() if device == "cuda" else 1
         workers = []
 
         for gpu_id in range(num_workers):

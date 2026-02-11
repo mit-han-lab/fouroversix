@@ -1,4 +1,5 @@
-from .fp4_linear import FP4Linear, TrainableFP4Linear
+from .config import FourOverSixLayerConfig
+from .linear import FourOverSixLinear
 from .quantize import quantize_model
 
-__all__ = ["FP4Linear", "TrainableFP4Linear", "quantize_model"]
+__all__ = ["FourOverSixLayerConfig", "FourOverSixLinear", "quantize_model"]

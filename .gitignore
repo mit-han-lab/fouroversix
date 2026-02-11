@@ -13,3 +13,4 @@ dist/
 *.egg-info/
 site/
 results.db
+/ptq/

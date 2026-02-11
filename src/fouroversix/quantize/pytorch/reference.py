@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import torch
-from fouroversix.utils import AdaptiveBlockScalingRule, FP4Format, RoundStyle
+from fouroversix.quantize.utils import to_blocked
+from fouroversix.utils import DataType, RoundStyle, ScaleRule
 
 E2M1_MAX_VALUE = 6
 E2M1_MAX_FOUR = 4
@@ -89,12 +90,9 @@ def pack_unpacked_fp4(x: torch.Tensor) -> torch.Tensor:
 def quantize_to_mxfp4(
     x_scale_blocks: torch.Tensor,
     *,
-    scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
+    scale_rule: ScaleRule = ScaleRule.mse,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    assert scale_rule in {
-        AdaptiveBlockScalingRule.always_6,
-        AdaptiveBlockScalingRule.always_4,
-    }
+    assert scale_rule in {ScaleRule.static_6, ScaleRule.static_4}
 
     x_scales_hp = (
         x_scale_blocks.abs().max(axis=-1).values / scale_rule.max_allowed_e2m1_value()
@@ -124,7 +122,7 @@ def quantize_to_nvfp4(
     x_scale_blocks: torch.Tensor,
     x_amax: torch.Tensor,
     *,
-    scale_rule: AdaptiveBlockScalingRule,
+    scale_rule: ScaleRule,
     scale_expansion_factor: float | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     if x_amax == 0:
@@ -183,7 +181,7 @@ def select_fouroversix(
     scales_4: torch.Tensor,
     x_amax: torch.Tensor,
     *,
-    scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
+    scale_rule: ScaleRule = ScaleRule.mse,
     round_style: RoundStyle = RoundStyle.nearest,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     x_fake_quantized_6 = fake_quantize_to_e2m1(
@@ -216,13 +214,13 @@ def select_fouroversix(
         )
     )
 
-    if scale_rule == AdaptiveBlockScalingRule.abs_max:
+    if scale_rule == ScaleRule.abs_max:
         x_error_4 = (x_dequantized_4 - x_scale_blocks).abs().max(axis=-1).values
         x_error_6 = (x_dequantized_6 - x_scale_blocks).abs().max(axis=-1).values
-    elif scale_rule == AdaptiveBlockScalingRule.l1_norm:
+    elif scale_rule == ScaleRule.mae:
         x_error_4 = (x_dequantized_4 - x_scale_blocks).abs().sum(axis=-1)
         x_error_6 = (x_dequantized_6 - x_scale_blocks).abs().sum(axis=-1)
-    elif scale_rule == AdaptiveBlockScalingRule.mse:
+    elif scale_rule == ScaleRule.mse:
         x_error_4 = ((x_dequantized_4 - x_scale_blocks) ** 2).sum(axis=-1)
         x_error_6 = ((x_dequantized_6 - x_scale_blocks) ** 2).sum(axis=-1)
 
@@ -247,9 +245,9 @@ def quantize_to_fp4(
     had: torch.Tensor | None = None,
     *,
     block_scale_2d: bool = False,
-    fp4_format: FP4Format = FP4Format.nvfp4,
+    fp4_format: DataType = DataType.nvfp4,
     round_style: RoundStyle = RoundStyle.nearest,
-    scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
+    scale_rule: ScaleRule = ScaleRule.mse,
     transpose: bool = False,
 ) -> (
     tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]
@@ -264,7 +262,7 @@ def quantize_to_fp4(
     if x_amax is None:
         x_amax = (
             torch.ones(1, device=x.device, dtype=x.dtype)
-            if fp4_format == FP4Format.mxfp4
+            if fp4_format == DataType.mxfp4
             else x.abs().max().float()
         )
 
@@ -288,21 +286,21 @@ def quantize_to_fp4(
 
     x_fake_quantized = None
 
-    if fp4_format == FP4Format.mxfp4:
+    if fp4_format == DataType.mxfp4:
         x_block_scaled, scales = quantize_to_mxfp4(
             x_scale_blocks,
             scale_rule=scale_rule,
         )
-    elif fp4_format == FP4Format.nvfp4 and scale_rule in {
-        AdaptiveBlockScalingRule.always_6,
-        AdaptiveBlockScalingRule.always_4,
+    elif fp4_format == DataType.nvfp4 and scale_rule in {
+        ScaleRule.static_6,
+        ScaleRule.static_4,
     }:
         x_block_scaled, scales = quantize_to_nvfp4(
             x_scale_blocks,
             x_amax,
             scale_rule=scale_rule,
         )
-    else:  # Four over six
+    elif fp4_format == DataType.nvfp4:  # Four over six
         x_block_scaled_6, scales_6 = quantize_to_nvfp4(
             x_scale_blocks,
             x_amax,
@@ -324,6 +322,9 @@ def quantize_to_fp4(
             scale_rule=scale_rule,
             round_style=round_style,
         )
+    else:
+        msg = f"Invalid FP4 format: {fp4_format}"
+        raise ValueError(msg)
 
     if x_fake_quantized is None:
         x_fake_quantized = fake_quantize_to_e2m1(
@@ -365,14 +366,3 @@ def quantize_to_fp4(
     )
 
     return x_quantized, reshaped_scales, x_amax
-
-
-def to_blocked(a: torch.Tensor) -> torch.Tensor:
-    return (
-        a.view(a.shape[0] // 128, 128, a.shape[1] // 4, 4)
-        .transpose(1, 2)
-        .reshape(-1, 4, 32, 4)
-        .transpose(1, 2)
-        .reshape(-1, 32, 16)
-        .flatten()
-    )

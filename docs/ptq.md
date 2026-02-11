@@ -56,8 +56,14 @@ No installation necessary!
 
 ### SpinQuant
 
-You just need to install Fast Hadamard Transform:
+1. Install Fast Hadamard Transform
 
 ```bash
 pip install --no-build-isolation third_party/fast-hadamard-transform
+```
+
+2. Downgrade Transformers if your installation is up-to-date
+
+```bash
+pip install "transformers<5.0"
 ```

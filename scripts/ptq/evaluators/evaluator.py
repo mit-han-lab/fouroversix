@@ -7,13 +7,21 @@ from typing import TYPE_CHECKING, Any
 
 import modal
 import torch
+from fouroversix import (
+    DataType,
+    FourOverSixLayerConfig,
+    MatmulBackend,
+    QuantizeBackend,
+    ScaleRule,
+)
 
 from ...resources import FOUROVERSIX_CACHE_PATH
 from ..utils import EvaluationFramework
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
-    from transformers import AutoModelForCausalLM
+
+from transformers import AutoConfig, AutoModelForCausalLM
 
 
 class PTQEvaluator(ABC):
@@ -61,6 +69,12 @@ class PTQEvaluator(ABC):
         tasks: list[str],
         trust_remote_code: bool = False,
         disable_inference_mode: bool = False,
+        matmul_backend: MatmulBackend | None = None,
+        quantize_backend: QuantizeBackend | None = None,
+        weight_scale_2d: bool = False,
+        activation_scale_rule: ScaleRule | None = None,
+        weight_scale_rule: ScaleRule | None = None,
+        save_path: Path | None = None,
         **kwargs: dict[str, Any],
     ) -> dict[str, Any]:
         """Evaluate a quantized model with lm-eval."""
@@ -70,16 +84,31 @@ class PTQEvaluator(ABC):
         )
 
         with inference_context:
-            if isinstance(model_name, str):
-                model = self.quantize_model(
-                    model_name=model_name,
-                    device=device,
-                    dtype=dtype,
-                    model_kwargs={"trust_remote_code": trust_remote_code},
-                    **kwargs,
-                )
-            else:
-                model = model_name
+            model_config = AutoConfig.from_pretrained(model_name)
+            quantization_config = FourOverSixLayerConfig(
+                activation_scale_rule=activation_scale_rule,
+                dtype=dtype,
+                matmul_backend=matmul_backend,
+                output_dtype=DataType(
+                    (
+                        str(model_config.dtype).replace("torch.", "")
+                        if model_config.dtype is not None
+                        else "bfloat16"
+                    ),
+                ),
+                quantize_backend=quantize_backend,
+                weight_scale_2d=weight_scale_2d,
+                weight_scale_rule=weight_scale_rule,
+            )
+
+            model = self.quantize_model(
+                model_name=model_name,
+                device=device,
+                save_path=save_path,
+                quantization_config=quantization_config,
+                trust_remote_code=trust_remote_code,
+                **kwargs,
+            )
 
             if eval_framework == EvaluationFramework.lm_eval:
                 from lm_eval import evaluator

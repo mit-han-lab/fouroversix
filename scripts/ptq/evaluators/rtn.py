@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from fouroversix import quantize_model
 
 from ...resources import (
     FOUROVERSIX_CACHE_PATH,
@@ -12,15 +14,17 @@ from ...resources import (
 from .evaluator import PTQEvaluator
 
 if TYPE_CHECKING:
-    from fouroversix.utils import DataType
+    from pathlib import Path
+
     from transformers import AutoModelForCausalLM
 
 
 rtn_img = get_image()
 
 with rtn_img.imports():
-    from fouroversix import quantize_model
-    from transformers import AutoModelForCausalLM
+    from fouroversix import FourOverSixLayerConfig
+    from transformers import AutoConfig, AutoModelForCausalLM
+    from transformers import FourOverSixConfig as HFFourOverSixConfig
 
 
 class RTNEvaluatorImpl(PTQEvaluator):
@@ -31,20 +35,61 @@ class RTNEvaluatorImpl(PTQEvaluator):
         model_name: str,
         *,
         device: str,
-        dtype: DataType,
-        model_kwargs: dict[str, Any] | None = None,
-        **kwargs: dict[str, Any],
+        save_path: Path,
+        quantization_config: FourOverSixLayerConfig,
+        trust_remote_code: bool = False,
     ) -> AutoModelForCausalLM:
         """Quantize a model using round-to-nearest quantization."""
 
-        model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            device_map=device,
-            dtype=dtype.torch(),
-            **(model_kwargs or {}),
+        model_save_path = (
+            save_path
+            / "rtn"
+            / (
+                f"{model_name}-{quantization_config.get_activation_scale_rule().value}"
+                f"-{quantization_config.get_weight_scale_rule().value}"
+            )
         )
 
-        quantize_model(model, **kwargs)
+        if not model_save_path.exists():
+            model_config = AutoConfig.from_pretrained(model_name)
+
+            if hasattr(model_config, "quantization_config"):
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_name,
+                    device_map=device,
+                    trust_remote_code=trust_remote_code,
+                )
+
+                quantize_model(model, quantization_config)
+            else:
+                hf_quantization_config = HFFourOverSixConfig(
+                    activation_scale_rule=quantization_config.get_activation_scale_rule(),
+                    dtype=quantization_config.dtype,
+                    matmul_backend=quantization_config.matmul_backend,
+                    output_dtype=quantization_config.output_dtype,
+                    quantize_backend=quantization_config.quantize_backend,
+                    weight_scale_2d=quantization_config.weight_scale_2d,
+                    weight_scale_rule=quantization_config.get_weight_scale_rule(),
+                )
+
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_name,
+                    device_map=device,
+                    quantization_config=hf_quantization_config,
+                    trust_remote_code=trust_remote_code,
+                )
+
+                model.save_pretrained(model_save_path)
+        else:
+            model = AutoModelForCausalLM.from_pretrained(
+                model_save_path,
+                device_map=device,
+                trust_remote_code=trust_remote_code,
+            )
+
+        # Fix for Inspect AI
+        model.name_or_path = model_name
+
         return model
 
 

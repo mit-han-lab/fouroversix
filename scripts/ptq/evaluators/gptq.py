@@ -1,10 +1,9 @@
 import sys
-import warnings
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import fouroversix
-from fouroversix.utils import AdaptiveBlockScalingRule, DataType
+from fouroversix import FourOverSixLayerConfig
 
 from ...resources import (
     FOUROVERSIX_CACHE_PATH,
@@ -25,8 +24,8 @@ gptq_img = get_image(
     dependencies=[
         Dependency.fast_hadamard_transform,
         Dependency.qutlass,
-        Dependency.fouroversix,
         Dependency.fp_quant,
+        Dependency.fouroversix,
     ],
 )
 
@@ -46,11 +45,9 @@ class GPTQEvaluator(PTQEvaluator):
         model_name: str,
         *,
         device: str,
-        dtype: DataType,
-        activation_scale_rule: AdaptiveBlockScalingRule,
-        weight_scale_rule: AdaptiveBlockScalingRule,
         save_path: Path,
-        **kwargs: dict[str, Any],  # noqa: ARG002
+        quantization_config: FourOverSixLayerConfig,
+        trust_remote_code: bool,
     ) -> "AutoModelForCausalLM":
         """Quantize a model with GPTQ."""
 
@@ -67,23 +64,18 @@ class GPTQEvaluator(PTQEvaluator):
         from model_quant import main
         from transformers import AutoModelForCausalLM
 
-        if dtype == DataType.auto:
-            dtype = DataType.bfloat16
-            msg = (
-                "GPTQ only supports bfloat16, dtype is currently set to auto. "
-                "Switching to bfloat16..."
-            )
-            warnings.warn(msg, stacklevel=2)
-
         save_path = (
             save_path
             / "gptq"
-            / (f"{model_name}-{activation_scale_rule.value}-{weight_scale_rule.value}")
+            / (
+                f"{model_name}-{quantization_config.get_activation_scale_rule().value}"
+                f"-{quantization_config.get_weight_scale_rule().value}"
+            )
         )
 
         if not save_path.exists():
             sys.argv = [
-                *sys.argv,
+                sys.argv[0],
                 "--model_name_or_path",
                 model_name,
                 "--dataset_name_or_path",
@@ -99,10 +91,10 @@ class GPTQEvaluator(PTQEvaluator):
                 "--gptq",
                 "--save_path",
                 save_path.as_posix(),
-                "--a_scale_selection_rule",
-                activation_scale_rule.value,
-                "--w_scale_selection_rule",
-                weight_scale_rule.value,
+                "--activation_scale_rule",
+                quantization_config.get_activation_scale_rule().value,
+                "--weight_scale_rule",
+                quantization_config.get_weight_scale_rule().value,
             ]
 
             main()
@@ -110,5 +102,5 @@ class GPTQEvaluator(PTQEvaluator):
         return AutoModelForCausalLM.from_pretrained(
             save_path,
             device_map=device,
-            dtype=dtype.torch(),
+            trust_remote_code=trust_remote_code,
         )
