@@ -126,22 +126,6 @@ def add_submodule(img: modal.Image, submodule: Submodule) -> modal.Image:
     )
 
 
-def build_fouroversix_ext() -> None:
-    shutil.copytree(
-        FOUROVERSIX_CACHE_PATH / "build",
-        FOUROVERSIX_INSTALL_PATH / "build",
-    )
-    subprocess.run(
-        ["python", "setup.py", "build_ext", "--inplace"],
-        check=False,
-    )
-    shutil.copytree(
-        FOUROVERSIX_INSTALL_PATH / "build",
-        FOUROVERSIX_CACHE_PATH / "build",
-        dirs_exist_ok=True,
-    )
-
-
 def install_flash_attn() -> None:
     subprocess.run(
         ["pip", "install", "flash-attn", "--no-build-isolation"],
@@ -164,6 +148,19 @@ def install_fouroversix() -> None:
 
 
 def install_fouroversix_non_editable() -> None:
+    shutil.copytree(
+        FOUROVERSIX_CACHE_PATH / "build",
+        FOUROVERSIX_INSTALL_PATH / "build",
+    )
+    subprocess.run(
+        ["python", "setup.py", "build_ext", "--inplace"],
+        check=False,
+    )
+    shutil.copytree(
+        FOUROVERSIX_INSTALL_PATH / "build",
+        FOUROVERSIX_CACHE_PATH / "build",
+        dirs_exist_ok=True,
+    )
     subprocess.run(
         [
             "pip",
@@ -269,7 +266,7 @@ def get_image(  # noqa: C901, PLR0912
             img = (
                 add_submodule(
                     img.env(
-                        {"CUDA_ARCHS": "100", "FORCE_BUILD": "1", "MAX_JOBS": "16"},
+                        {"CUDA_ARCHS": "100", "FORCE_BUILD": "1", "MAX_JOBS": "32"},
                     ),
                     Submodule.cutlass,
                 )
@@ -314,14 +311,7 @@ def get_image(  # noqa: C901, PLR0912
                 copy=True,
             )
 
-            if KERNEL_DEV_MODE:
-                img = img.run_function(
-                    build_fouroversix_ext,
-                    cpu=32,
-                    memory=64 * 1024,
-                    volumes={FOUROVERSIX_CACHE_PATH.as_posix(): cache_volume},
-                ).workdir("/root")
-            else:
+            if not KERNEL_DEV_MODE:
                 img = img.run_function(install_fouroversix, cpu=32, memory=64 * 1024)
 
         if dependency == Dependency.fp_quant:
@@ -332,7 +322,7 @@ def get_image(  # noqa: C901, PLR0912
         if dependency == Dependency.qutlass:
             img = (
                 add_submodule(img.apt_install("cmake"), Submodule.qutlass)
-                .env({"MAX_JOBS": "16"})
+                .env({"MAX_JOBS": "32"})
                 .run_function(install_qutlass, gpu="B200", cpu=32, memory=64 * 1024)
             )
 
@@ -377,6 +367,7 @@ def get_image(  # noqa: C901, PLR0912
                 "src",
                 f"{FOUROVERSIX_INSTALL_PATH}/src",
                 copy=deploy or KERNEL_DEV_MODE,
+                ignore=lambda p: p.suffix == ".so",
             ).add_local_file(
                 ".gitmodules",
                 f"{FOUROVERSIX_INSTALL_PATH}/.gitmodules",
@@ -386,8 +377,8 @@ def get_image(  # noqa: C901, PLR0912
             if KERNEL_DEV_MODE:
                 img = img.run_function(
                     install_fouroversix_non_editable,
-                    cpu=8,
-                    memory=32 * 1024,
+                    cpu=32,
+                    memory=64 * 1024,
                     volumes={FOUROVERSIX_CACHE_PATH.as_posix(): cache_volume},
                 )
 
