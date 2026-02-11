@@ -1,3 +1,4 @@
+import warnings
 from typing import Any
 
 import click
@@ -50,6 +51,10 @@ def cli(
     modal_gpu: str,
     **kwargs: dict[str, Any],
 ) -> None:
+    activation_scale_rule = kwargs.get("activation_scale_rule")
+    dtype = kwargs.get("dtype")
+    weight_scale_rule = kwargs.get("weight_scale_rule")
+
     model_names = kwargs.pop("model_name")
     ptq_methods = kwargs.pop("ptq_method")
     tasks = kwargs.pop("task")
@@ -68,6 +73,18 @@ def cli(
 
     if isinstance(tasks, tuple):
         tasks = list(tasks)
+
+    if dtype == DataType.mxfp4 and (
+        not activation_scale_rule.is_static() or not weight_scale_rule.is_static()
+    ):
+        msg = (
+            "MXFP4 quantization only supports static scale rules. Setting "
+            "activation_scale_rule and weight_scale_rule to static_6..."
+        )
+        warnings.warn(msg, stacklevel=1)
+
+        kwargs["activation_scale_rule"] = ScaleRule.static_6
+        kwargs["weight_scale_rule"] = ScaleRule.static_6
 
     if use_modal:
         with modal.enable_output(), app.run(detach=detach):

@@ -119,6 +119,10 @@ class ScaleRule(str, Enum):
             ScaleRule.static_6: 0,
         }[self]
 
+    def is_static(self) -> bool:
+        """Return True if the rule is static, False otherwise."""
+        return self in {ScaleRule.static_4, ScaleRule.static_6}
+
     def max_allowed_e2m1_value(self) -> int:
         """Return the maximum allowed E2M1 value for the rule."""
         return 4 if self == ScaleRule.static_4 else 6

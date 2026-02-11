@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 import fouroversix
 import modal
+from fouroversix import FourOverSixLayerConfig
 
 from ...resources import (
     FOUROVERSIX_CACHE_PATH,
@@ -20,7 +21,6 @@ from ..utils import get_model_size
 from .evaluator import PTQEvaluator
 
 if TYPE_CHECKING:
-    from fouroversix.utils import AdaptiveBlockScalingRule, DataType
     from transformers import AutoModelForCausalLM
 
 spinquant_img = get_image(
@@ -29,6 +29,7 @@ spinquant_img = get_image(
         Dependency.fouroversix,
         Dependency.spinquant,
     ],
+    extra_pip_dependencies=["transformers<5.0"],
 )
 
 
@@ -66,8 +67,7 @@ class SpinQuantOptimizer:
         self,
         model_name: str,
         *,
-        activation_scale_rule: AdaptiveBlockScalingRule,
-        weight_scale_rule: AdaptiveBlockScalingRule,
+        quantization_config: FourOverSixLayerConfig,
         spinquant_save_path: str,
         spinquant_steps: int,
     ) -> None:
@@ -109,9 +109,9 @@ class SpinQuantOptimizer:
                 "--max_steps",
                 str(spinquant_steps),
                 "--activation_scale_rule",
-                activation_scale_rule.value,
+                quantization_config.get_activation_scale_rule().value,
                 "--weight_scale_rule",
-                weight_scale_rule.value,
+                quantization_config.get_weight_scale_rule().value,
                 *SPINQUANT_ARGS,
             ],
             check=True,
@@ -132,6 +132,7 @@ class SpinQuantOptimizer:
 @app.cls(
     image=spinquant_img,
     timeout=24 * 60 * 60,
+    secrets=[hf_secret],
     gpu="B200",
     volumes={FOUROVERSIX_CACHE_PATH.as_posix(): cache_volume},
 )
@@ -143,9 +144,9 @@ class SpinQuantEvaluator(PTQEvaluator):
         model_name: str,
         *,
         device: str,
-        dtype: DataType,
         save_path: Path,
-        **kwargs: dict[str, Any],
+        quantization_config: FourOverSixLayerConfig,
+        trust_remote_code: bool,
     ) -> AutoModelForCausalLM:
         """Export a quantized model with SpinQuant."""
 
@@ -163,13 +164,13 @@ class SpinQuantEvaluator(PTQEvaluator):
         from transformers import AutoConfig, AutoModelForCausalLM
         from utils.process_args import process_args_ptq
 
-        activation_scale_rule = kwargs.get("activation_scale_rule")
-        weight_scale_rule = kwargs.get("weight_scale_rule")
-
         save_path = (
             save_path
             / "spinquant"
-            / f"{model_name}-{activation_scale_rule.value}-{weight_scale_rule.value}"
+            / (
+                f"{model_name}-{quantization_config.get_activation_scale_rule().value}"
+                f"-{quantization_config.get_weight_scale_rule().value}"
+            )
         )
 
         if not (save_path / "R.bin").exists():
@@ -184,8 +185,7 @@ class SpinQuantEvaluator(PTQEvaluator):
 
             SpinQuantOptimizer().optimize(
                 model_name,
-                activation_scale_rule=activation_scale_rule,
-                weight_scale_rule=weight_scale_rule,
+                quantization_config=quantization_config,
                 spinquant_save_path=save_path.as_posix(),
                 spinquant_steps=SPINQUANT_STEPS,
             )
@@ -204,9 +204,9 @@ class SpinQuantEvaluator(PTQEvaluator):
             "--optimized_rotation_path",
             (save_path / "R.bin").as_posix(),
             "--activation_scale_rule",
-            activation_scale_rule.value,
+            quantization_config.get_activation_scale_rule().value,
             "--weight_scale_rule",
-            weight_scale_rule.value,
+            quantization_config.get_weight_scale_rule().value,
             *SPINQUANT_ARGS,
         ]
 
@@ -222,7 +222,8 @@ class SpinQuantEvaluator(PTQEvaluator):
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
             config=config,
-            torch_dtype=dtype.torch_dtype(),
+            device_map=device,
+            trust_remote_code=trust_remote_code,
         )
 
         if process_word_embeddings:
