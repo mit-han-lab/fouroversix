@@ -8,7 +8,8 @@ from fouroversix.quantize import (
 )
 from fouroversix.utils import RoundStyle
 
-from .config import FourOverSixLayerConfig
+from .config import LayerQuantizationConfig
+from .quantize import QuantizedLayer
 
 
 class FourOverSixLinearFunction(torch.autograd.Function):
@@ -17,7 +18,7 @@ class FourOverSixLinearFunction(torch.autograd.Function):
     @staticmethod
     def forward(
         ctx: torch.autograd.function.FunctionCtx,
-        config: FourOverSixLayerConfig,
+        config: LayerQuantizationConfig,
         input: torch.Tensor,
         weight: torch.Tensor | QuantizedTensor,
         bias: torch.Tensor = None,
@@ -113,6 +114,7 @@ class FourOverSixLinearFunction(torch.autograd.Function):
         )
 
 
+@QuantizedLayer.register(nn.Linear)
 class FourOverSixLinear(nn.Linear):
     """
     Drop-in replacement for `nn.Linear` that quantizes weights, activations, and
@@ -121,39 +123,41 @@ class FourOverSixLinear(nn.Linear):
 
     def __init__(
         self,
-        in_features: int,
-        out_features: int,
-        bias: bool = True,  # noqa: FBT001, FBT002
-        device: torch.device | None = None,
-        dtype: torch.dtype | None = None,
-        config: FourOverSixLayerConfig | None = None,
+        module: nn.Linear,
+        config: LayerQuantizationConfig,
     ) -> None:
         """
         Initialize the FourOverSixLinear layer.
 
         Args:
-            in_features (int): The number of input features.
-            out_features (int): The number of output features.
-            bias (bool): Whether to include a bias term.
-            device (torch.device): The device to use for the layer.
-            dtype (torch.dtype): The data type to use for the layer.
-            config (FourOverSixLayerConfig): The quantization configuration to use for
+            module (nn.Linear): The high-precision module that this quantized layer will
+                replace.
+            config (LayerQuantizationConfig): The quantization configuration to use for
                 the layer.
 
         """
 
-        super().__init__(in_features, out_features, bias, device, dtype)
-        self.config = config or FourOverSixLayerConfig()
+        super().__init__(
+            module.in_features,
+            module.out_features,
+            module.bias is not None,
+            module.weight.device,
+            module.weight.dtype,
+        )
+
+        self.weight = module.weight
+        self.bias = module.bias
+        self.config = config
 
         if not self.config.keep_master_weights:
             self.register_buffer(
                 "quantized_weight_values",
                 nn.Parameter(
                     torch.zeros(
-                        out_features,
-                        in_features // 2,
+                        self.out_features,
+                        self.in_features // 2,
                         dtype=torch.uint8,
-                        device=device,
+                        device=self.weight.device,
                     ),
                     requires_grad=False,
                 ),
@@ -162,9 +166,11 @@ class FourOverSixLinear(nn.Linear):
                 "quantized_weight_scale_factors",
                 nn.Parameter(
                     torch.zeros(
-                        out_features * in_features // self.config.dtype.block_size(),
+                        self.out_features
+                        * self.in_features
+                        // self.config.dtype.block_size(),
                         dtype=self.config.dtype.scale_dtype(),
-                        device=device,
+                        device=self.weight.device,
                     ),
                     requires_grad=False,
                 ),
@@ -172,17 +178,19 @@ class FourOverSixLinear(nn.Linear):
             self.register_buffer(
                 "quantized_weight_amax",
                 nn.Parameter(
-                    torch.zeros(1, dtype=torch.float32, device=device),
+                    torch.zeros(1, dtype=torch.float32, device=self.weight.device),
                     requires_grad=False,
                 ),
             )
             self.register_buffer(
                 "quantized_weight_metadata",
                 nn.Parameter(
-                    torch.zeros(2 + 2, dtype=torch.int32, device=device),
+                    torch.zeros(2 + 2, dtype=torch.int32, device=self.weight.device),
                     requires_grad=False,
                 ),
             )
+
+        self.apply_ptq()
 
     def apply_ptq(self) -> None:
         """Apply post-training quantization to this layer."""

@@ -4,8 +4,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
-from fouroversix import FourOverSixLayerConfig, FourOverSixLinear
+from fouroversix import FourOverSixLinear, ModelQuantizationConfig
+from fouroversix.model.quantize import QuantizedLayer
 
 from ...resources import (
     FOUROVERSIX_CACHE_PATH,
@@ -70,7 +72,7 @@ class AWQEvaluator(RTNEvaluatorImpl):
         *,
         device: str,
         save_path: Path,
-        quantization_config: FourOverSixLayerConfig,
+        quantization_config: ModelQuantizationConfig,
         trust_remote_code: bool,
     ) -> AutoModelForCausalLM:
         """Quantize a model using AWQ."""
@@ -80,12 +82,18 @@ class AWQEvaluator(RTNEvaluatorImpl):
         from fouroversix import quantize_model
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
+        # Replace FourOverSixLinear with FourOverSixLinearForAWQ
+        QuantizedLayer.register(
+            nn.Linear,
+            replace_existing_layers=True,
+        )(FourOverSixLinearForAWQ)
+
         save_path = (
             save_path
             / "awq"
             / (
-                f"{model_name}-{quantization_config.get_activation_scale_rule().value}"
-                f"-{quantization_config.get_weight_scale_rule().value}"
+                f"{model_name}-{quantization_config.base_config.get_activation_scale_rule().value}"
+                f"-{quantization_config.base_config.get_weight_scale_rule().value}"
             )
         )
 

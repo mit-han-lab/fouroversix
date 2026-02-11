@@ -9,8 +9,9 @@ import modal
 import torch
 from fouroversix import (
     DataType,
-    FourOverSixLayerConfig,
+    LayerQuantizationConfig,
     MatmulBackend,
+    ModelQuantizationConfig,
     QuantizeBackend,
     ScaleRule,
 )
@@ -85,20 +86,22 @@ class PTQEvaluator(ABC):
 
         with inference_context:
             model_config = AutoConfig.from_pretrained(model_name)
-            quantization_config = FourOverSixLayerConfig(
-                activation_scale_rule=activation_scale_rule,
-                dtype=dtype,
-                matmul_backend=matmul_backend,
-                output_dtype=DataType(
-                    (
-                        str(model_config.dtype).replace("torch.", "")
-                        if model_config.dtype is not None
-                        else "bfloat16"
+            quantization_config = ModelQuantizationConfig(
+                base_config=LayerQuantizationConfig(
+                    activation_scale_rule=activation_scale_rule,
+                    dtype=dtype,
+                    matmul_backend=matmul_backend,
+                    output_dtype=DataType(
+                        (
+                            str(model_config.dtype).replace("torch.", "")
+                            if model_config.dtype is not None
+                            else "bfloat16"
+                        ),
                     ),
+                    quantize_backend=quantize_backend,
+                    weight_scale_2d=weight_scale_2d,
+                    weight_scale_rule=weight_scale_rule,
                 ),
-                quantize_backend=quantize_backend,
-                weight_scale_2d=weight_scale_2d,
-                weight_scale_rule=weight_scale_rule,
             )
 
             model = self.quantize_model(

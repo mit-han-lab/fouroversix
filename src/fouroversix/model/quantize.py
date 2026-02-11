@@ -1,45 +1,83 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import torch.nn as nn
 
-from .linear import FourOverSixLinear
-
 if TYPE_CHECKING:
-    from .config import FourOverSixLayerConfig
+    from collections.abc import Callable
+
+    from .config import ModelQuantizationConfig
+
+
+class QuantizedLayer:
+    """Base class for all quantized layers."""
+
+    _registry: ClassVar[dict[type[nn.Module], type[nn.Module]]] = {}
+
+    @classmethod
+    def get_cls(
+        cls,
+        high_precision_cls: type[nn.Module],
+    ) -> type[nn.Module] | None:
+        """Get the quantized layer for a given high-precision layer."""
+        return cls._registry.get(high_precision_cls)
+
+    @classmethod
+    def register(
+        cls,
+        high_precision_cls: type[nn.Module],
+        *,
+        replace_existing_layers: bool = False,
+    ) -> Callable[[type[nn.Module]], type[nn.Module]]:
+        """Register a new type of quantized layer."""
+
+        if high_precision_cls in cls._registry and not replace_existing_layers:
+            msg = f"High-precision layer {high_precision_cls} is already registered."
+            raise ValueError(msg)
+
+        modules_to_delete = []
+
+        for module_cls in cls._registry:
+            if issubclass(high_precision_cls, module_cls):
+                if replace_existing_layers:
+                    modules_to_delete.append(module_cls)
+                else:
+                    msg = (
+                        f"High-precision layer {high_precision_cls} is a subclass of "
+                        f"{module_cls}, which is already registered."
+                    )
+                    raise TypeError(msg)
+
+        for module_cls in modules_to_delete:
+            del cls._registry[module_cls]
+
+        def inner_wrapper(
+            wrapped_cls: type[nn.Module],
+        ) -> type[nn.Module]:
+            cls._registry[high_precision_cls] = wrapped_cls
+            return wrapped_cls
+
+        return inner_wrapper
 
 
 def quantize_model(
     model: nn.Module,
-    config: FourOverSixLayerConfig | None = None,
-    *,
-    exclude_layers: list[str] | None = None,
-    linear_cls: type[FourOverSixLinear] | None = None,
-    linear_kwargs: dict[str, Any] | None = None,
+    config: ModelQuantizationConfig,
+    **kwargs: dict[str, Any],
 ) -> None:
-    if exclude_layers is None:
-        exclude_layers = ["lm_head"]
-
-    if linear_cls is None:
-        linear_cls = FourOverSixLinear
-
     for name, module in model.named_modules():
-        if name in exclude_layers or not isinstance(module, nn.Linear):
+        if (
+            name == ""
+            or name in config.exclude_layers
+            or not isinstance(module, nn.Module)
+        ):
             continue
 
-        four_over_six_linear = linear_cls(
-            module.in_features,
-            module.out_features,
-            module.bias is not None,
-            device=module.weight.device,
-            dtype=module.weight.dtype,
-            config=config,
-            **(linear_kwargs or {}),
-        )
+        layer_cls = QuantizedLayer.get_cls(type(module))
 
-        four_over_six_linear.weight = module.weight
-        four_over_six_linear.bias = module.bias
-        four_over_six_linear.apply_ptq()
+        if layer_cls is None:
+            continue
 
-        model.set_submodule(name, four_over_six_linear)
+        layer = layer_cls(module, config.get_layer_config(name), **kwargs)
+        model.set_submodule(name, layer)

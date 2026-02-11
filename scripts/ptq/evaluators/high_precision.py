@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fouroversix import FourOverSixLayerConfig
+from fouroversix import ModelQuantizationConfig
 
 from ...resources import (
     FOUROVERSIX_CACHE_PATH,
@@ -33,7 +33,7 @@ class HighPrecisionEvaluator(PTQEvaluator):
         *,
         device: str,
         save_path: Path,  # noqa: ARG002
-        quantization_config: FourOverSixLayerConfig,  # noqa: ARG002
+        quantization_config: ModelQuantizationConfig,  # noqa: ARG002
         trust_remote_code: bool = False,
     ) -> "AutoModelForCausalLM":
         """Return a model without any quantization."""

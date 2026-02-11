@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import fouroversix
-from fouroversix import FourOverSixLayerConfig
+from fouroversix import ModelQuantizationConfig
 
 from ...resources import (
     FOUROVERSIX_CACHE_PATH,
@@ -46,7 +46,7 @@ class GPTQEvaluator(PTQEvaluator):
         *,
         device: str,
         save_path: Path,
-        quantization_config: FourOverSixLayerConfig,
+        quantization_config: ModelQuantizationConfig,
         trust_remote_code: bool,
     ) -> "AutoModelForCausalLM":
         """Quantize a model with GPTQ."""
@@ -68,8 +68,8 @@ class GPTQEvaluator(PTQEvaluator):
             save_path
             / "gptq"
             / (
-                f"{model_name}-{quantization_config.get_activation_scale_rule().value}"
-                f"-{quantization_config.get_weight_scale_rule().value}"
+                f"{model_name}-{quantization_config.base_config.get_activation_scale_rule().value}"
+                f"-{quantization_config.base_config.get_weight_scale_rule().value}"
             )
         )
 
@@ -92,9 +92,9 @@ class GPTQEvaluator(PTQEvaluator):
                 "--save_path",
                 save_path.as_posix(),
                 "--activation_scale_rule",
-                quantization_config.get_activation_scale_rule().value,
+                quantization_config.base_config.get_activation_scale_rule().value,
                 "--weight_scale_rule",
-                quantization_config.get_weight_scale_rule().value,
+                quantization_config.base_config.get_weight_scale_rule().value,
             ]
 
             main()

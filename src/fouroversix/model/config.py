@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from fouroversix.quantize import QuantizationConfig
@@ -6,7 +6,7 @@ from fouroversix.utils import DataType, MatmulBackend, QuantizeBackend, ScaleRul
 
 
 @dataclass
-class FourOverSixLayerConfig:
+class LayerQuantizationConfig:
     """
     Configuration for quantizing layers with Four Over Six.
 
@@ -112,3 +112,30 @@ class FourOverSixLayerConfig:
             scale_rule=self.get_weight_scale_rule(),
             **kwargs,
         )
+
+
+@dataclass
+class ModelQuantizationConfig:
+    """
+    Configuration for quantizing a model with Four Over Six.
+
+    Args:
+        base_config (LayerQuantizationConfig): The base quantization configuration to
+            use for all layers that do not have a specific configuration. If not
+            provided, a default configuration will be used.
+        exclude_layers (list[str]): A list of layer names that should not be quantized.
+        layer_configs (dict[str, LayerQuantizationConfig | None]): A mapping of layer
+            names to quantization configurations to use for each layer. If a layer is
+            not specified, `base_config` will be used.
+
+    """
+
+    base_config: LayerQuantizationConfig = field(
+        default_factory=LayerQuantizationConfig,
+    )
+    exclude_layers: list[str] = field(default_factory=lambda: ["lm_head"])
+    layer_configs: dict[str, LayerQuantizationConfig] = field(default_factory=dict)
+
+    def get_layer_config(self, layer_name: str) -> LayerQuantizationConfig:
+        """Return the quantization configuration for a given layer."""
+        return self.layer_configs.get(layer_name, self.base_config)

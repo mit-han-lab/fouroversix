@@ -22,9 +22,13 @@ if TYPE_CHECKING:
 rtn_img = get_image()
 
 with rtn_img.imports():
-    from fouroversix import FourOverSixLayerConfig
+    from fouroversix import ModelQuantizationConfig
     from transformers import AutoConfig, AutoModelForCausalLM
-    from transformers import FourOverSixConfig as HFFourOverSixConfig
+
+    try:
+        from transformers import FourOverSixConfig as HFFourOverSixConfig
+    except ImportError:
+        HFFourOverSixConfig = None
 
 
 class RTNEvaluatorImpl(PTQEvaluator):
@@ -36,7 +40,7 @@ class RTNEvaluatorImpl(PTQEvaluator):
         *,
         device: str,
         save_path: Path,
-        quantization_config: FourOverSixLayerConfig,
+        quantization_config: ModelQuantizationConfig,
         trust_remote_code: bool = False,
     ) -> AutoModelForCausalLM:
         """Quantize a model using round-to-nearest quantization."""
@@ -45,15 +49,18 @@ class RTNEvaluatorImpl(PTQEvaluator):
             save_path
             / "rtn"
             / (
-                f"{model_name}-{quantization_config.get_activation_scale_rule().value}"
-                f"-{quantization_config.get_weight_scale_rule().value}"
+                f"{model_name}-{quantization_config.base_config.get_activation_scale_rule().value}"
+                f"-{quantization_config.base_config.get_weight_scale_rule().value}"
             )
         )
 
         if not model_save_path.exists():
             model_config = AutoConfig.from_pretrained(model_name)
 
-            if hasattr(model_config, "quantization_config"):
+            if (
+                hasattr(model_config, "quantization_config")
+                or HFFourOverSixConfig is None
+            ):
                 model = AutoModelForCausalLM.from_pretrained(
                     model_name,
                     device_map=device,
@@ -63,13 +70,13 @@ class RTNEvaluatorImpl(PTQEvaluator):
                 quantize_model(model, quantization_config)
             else:
                 hf_quantization_config = HFFourOverSixConfig(
-                    activation_scale_rule=quantization_config.get_activation_scale_rule(),
-                    dtype=quantization_config.dtype,
-                    matmul_backend=quantization_config.matmul_backend,
-                    output_dtype=quantization_config.output_dtype,
-                    quantize_backend=quantization_config.quantize_backend,
-                    weight_scale_2d=quantization_config.weight_scale_2d,
-                    weight_scale_rule=quantization_config.get_weight_scale_rule(),
+                    activation_scale_rule=quantization_config.base_config.get_activation_scale_rule(),
+                    dtype=quantization_config.base_config.dtype,
+                    matmul_backend=quantization_config.base_config.matmul_backend,
+                    output_dtype=quantization_config.base_config.output_dtype,
+                    quantize_backend=quantization_config.base_config.quantize_backend,
+                    weight_scale_2d=quantization_config.base_config.weight_scale_2d,
+                    weight_scale_rule=quantization_config.base_config.get_weight_scale_rule(),
                 )
 
                 model = AutoModelForCausalLM.from_pretrained(

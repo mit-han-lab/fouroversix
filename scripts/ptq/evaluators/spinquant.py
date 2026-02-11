@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 import fouroversix
 import modal
-from fouroversix import FourOverSixLayerConfig
+from fouroversix import ModelQuantizationConfig
 
 from ...resources import (
     FOUROVERSIX_CACHE_PATH,
@@ -67,7 +67,7 @@ class SpinQuantOptimizer:
         self,
         model_name: str,
         *,
-        quantization_config: FourOverSixLayerConfig,
+        quantization_config: ModelQuantizationConfig,
         spinquant_save_path: str,
         spinquant_steps: int,
     ) -> None:
@@ -145,7 +145,7 @@ class SpinQuantEvaluator(PTQEvaluator):
         *,
         device: str,
         save_path: Path,
-        quantization_config: FourOverSixLayerConfig,
+        quantization_config: ModelQuantizationConfig,
         trust_remote_code: bool,
     ) -> AutoModelForCausalLM:
         """Export a quantized model with SpinQuant."""
@@ -168,8 +168,8 @@ class SpinQuantEvaluator(PTQEvaluator):
             save_path
             / "spinquant"
             / (
-                f"{model_name}-{quantization_config.get_activation_scale_rule().value}"
-                f"-{quantization_config.get_weight_scale_rule().value}"
+                f"{model_name}-{quantization_config.base_config.get_activation_scale_rule().value}"
+                f"-{quantization_config.base_config.get_weight_scale_rule().value}"
             )
         )
 
@@ -204,9 +204,9 @@ class SpinQuantEvaluator(PTQEvaluator):
             "--optimized_rotation_path",
             (save_path / "R.bin").as_posix(),
             "--activation_scale_rule",
-            quantization_config.get_activation_scale_rule().value,
+            quantization_config.base_config.get_activation_scale_rule().value,
             "--weight_scale_rule",
-            quantization_config.get_weight_scale_rule().value,
+            quantization_config.base_config.get_weight_scale_rule().value,
             *SPINQUANT_ARGS,
         ]
 

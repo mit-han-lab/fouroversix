@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from fouroversix import FourOverSixLayerConfig, ScaleRule
+from fouroversix import ModelQuantizationConfig, ScaleRule
 
 from ...resources import FOUROVERSIX_CACHE_PATH, app, cache_volume, hf_secret
 from ..experiment import Experiment
@@ -166,7 +166,7 @@ class SmoothQuantEvaluator(RTNEvaluatorImpl):
         device: str,
         save_path: Path,  # noqa: ARG002
         smoothquant_alpha: float,
-        quantization_config: FourOverSixLayerConfig,
+        quantization_config: ModelQuantizationConfig,
         trust_remote_code: bool,
     ) -> AutoModelForCausalLM:
         """Quantize a model using SmoothQuant."""
@@ -177,13 +177,7 @@ class SmoothQuantEvaluator(RTNEvaluatorImpl):
             trust_remote_code=trust_remote_code,
         )
 
-        quantize_model(
-            model,
-            quantization_config,
-            linear_cls=FourOverSixLinearWithSmoothing,
-            linear_kwargs={"smoothquant_alpha": smoothquant_alpha},
-        )
-
+        quantize_model(model, quantization_config, smoothquant_alpha=smoothquant_alpha)
         return model
 
 
