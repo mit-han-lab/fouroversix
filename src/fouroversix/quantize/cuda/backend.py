@@ -1,9 +1,8 @@
 import torch
-from fouroversix.utils import SM_100, SM_110, SM_120, DataType
-
-from .backend import QuantizeBackendBase
-from .config import QuantizationConfig
-from .quantized_tensor import QuantizedTensor
+from fouroversix.quantize.backend import QuantizeBackendBase
+from fouroversix.quantize.config import QuantizationConfig
+from fouroversix.quantize.quantized_tensor import QuantizedTensor
+from fouroversix.utils import SM_100, SM_110, SM_120, DataType, RoundStyle
 
 
 class CUDAQuantizeBackend(QuantizeBackendBase):
@@ -63,5 +62,24 @@ class CUDAQuantizeBackend(QuantizeBackendBase):
 
         """
 
-        msg = "The CUDA backend is currently disabled and will be updated soon"
-        raise NotImplementedError(msg)
+        from .ops import quantize_to_fp4
+
+        values, scale_factors, amax = quantize_to_fp4(
+            x,
+            config.dtype == DataType.nvfp4,
+            config.round_style == RoundStyle.nearest,
+            config.rht,
+            config.block_scale_2d,
+            config.transpose,
+            config.scale_rule.cuda_id(),
+            config.rbits,
+        )
+
+        return QuantizedTensor(
+            values,
+            scale_factors,
+            amax,
+            config.dtype,
+            (x.shape[1], x.shape[0]) if config.transpose else x.shape,
+            config.scale_rule,
+        )

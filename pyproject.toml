@@ -88,7 +88,7 @@ select = [
     "T201",  # Allow print statements in CLI tools
     "TID252",  # Allow relative imports from parent modules
 ]
-"src/fouroversix/matmul/cutlass/ops.py" = [
+"src/fouroversix/**/ops.py" = [
     "I001",  # Allow unsorted imports, because torch needs to be imported before fouroversix._C
 ]
 "src/fouroversix/quantize/pytorch/reference.py" = [

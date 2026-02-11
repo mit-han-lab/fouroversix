@@ -187,6 +187,7 @@ def block_scaled_fp4_quantization_kernel(
                 RBITS,
                 dtype=tl.uint32,
             )
+
         x_e2m1 = tl.inline_asm_elementwise(
             asm="""
             {
@@ -342,6 +343,7 @@ def nvfp4_fouroversix_quantization_kernel(
                 RBITS,
                 dtype=tl.uint32,
             )
+
         (x_e2m1_6, x_e2m1_4, x_fp16x2_6, x_fp16x2_4) = tl.inline_asm_elementwise(
             asm="""
                 {

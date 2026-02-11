@@ -65,6 +65,7 @@ class TritonQuantizeBackend(QuantizeBackendBase):
             scale_rule=config.scale_rule,
             block_scale_2d=config.block_scale_2d,
             transpose=config.transpose,
+            rbits=config.rbits,
         )
 
         return QuantizedTensor(
