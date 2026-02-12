@@ -107,12 +107,38 @@ def quantize_to_nvint4(
     x_scale_blocks: torch.Tensor,
     x_amax: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    x_scales_hp = x_scale_blocks.abs().max(axis=-1).values * E4M3_MAX_VALUE / x_amax
+    encode_scale = (
+        torch.tensor(
+            DataType.if4.max_allowed_e2m1_value(ScaleRule.static_6)
+            * DataType.if4.max_allowed_e4m3_value(ScaleRule.static_6),
+            dtype=x_amax.dtype,
+            device=x_amax.device,
+        )
+        / x_amax
+    )
+    x_scales_hp = (
+        x_scale_blocks.abs().max(axis=-1).values
+        / torch.tensor(
+            DataType.if4.max_allowed_e2m1_value(ScaleRule.static_6),
+            dtype=x_amax.dtype,
+            device=x_amax.device,
+        )
+        * encode_scale
+    )
     x_scales = x_scales_hp.to(torch.float8_e4m3fn)
+
+    decode_scale = 1 / (
+        torch.tensor(
+            DataType.if4.max_allowed_e2m1_value(ScaleRule.static_6)
+            * DataType.if4.max_allowed_e4m3_value(ScaleRule.static_6),
+            dtype=x_amax.dtype,
+            device=x_amax.device,
+        )
+        / x_amax
+    )
     x_block_scaled = torch.where(
         x_scales.unsqueeze(1) != 0,
-        (x_scale_blocks * SCALED_INT4_MAX_VALUE * E4M3_MAX_VALUE)
-        / (x_amax * x_scales.to(x_amax.dtype).unsqueeze(1)),
+        x_scale_blocks * (1 / (decode_scale * x_scales.to(x_amax.dtype).unsqueeze(1))),
         0,
     )
     x_block_scaled = torch.clamp(
@@ -120,6 +146,7 @@ def quantize_to_nvint4(
         min=-SCALED_INT4_MAX_VALUE,
         max=SCALED_INT4_MAX_VALUE,
     )
+
     return x_block_scaled, x_scales
 
 
