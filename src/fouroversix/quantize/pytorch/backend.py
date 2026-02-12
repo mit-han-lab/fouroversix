@@ -4,7 +4,6 @@ from fouroversix.quantize.backend import QuantizeBackendBase
 from fouroversix.quantize.config import QuantizationConfig
 from fouroversix.quantize.quantized_tensor import QuantizedTensor
 from fouroversix.quantize.utils import get_rht_matrix
-from fouroversix.utils import DataType
 
 from .reference import quantize_to_fp4
 
@@ -54,7 +53,7 @@ class PyTorchQuantizeBackend(QuantizeBackendBase):
         input_shape = (x.shape[1], x.shape[0]) if config.transpose else x.shape
 
         rows_div = 128
-        cols_div = 64 if config.dtype == DataType.nvfp4 else 128
+        cols_div = 4 * config.dtype.block_size()
 
         if input_shape[0] % rows_div != 0 or input_shape[1] % cols_div != 0:
             x = F.pad(
@@ -86,9 +85,9 @@ class PyTorchQuantizeBackend(QuantizeBackendBase):
                 input_shape[0] * input_shape[1] // config.dtype.block_size(),
                 device=x.device,
                 dtype=(
-                    torch.float8_e4m3fn
-                    if config.dtype == DataType.nvfp4
-                    else torch.uint8
+                    torch.uint8
+                    if config.dtype.scale_dtype() == torch.float8_e8m0fnu
+                    else config.dtype.scale_dtype()
                 ),
             )
             amax = torch.zeros(1, device=x.device, dtype=torch.float32)
@@ -108,6 +107,6 @@ class PyTorchQuantizeBackend(QuantizeBackendBase):
             scale_factors,
             amax,
             config.dtype,
-            (x.shape[1], x.shape[0]) if config.transpose else x.shape,
+            input_shape,
             config.scale_rule,
         )

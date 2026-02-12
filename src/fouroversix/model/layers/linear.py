@@ -1,15 +1,14 @@
 import torch
 import torch.nn as nn
 from fouroversix.matmul import fp4_matmul
+from fouroversix.model.config import LayerQuantizationConfig
+from fouroversix.model.quantize import QuantizedLayer
 from fouroversix.quantize import (
     QuantizationConfig,
     QuantizedTensor,
     quantize_to_fp4,
 )
 from fouroversix.utils import RoundStyle
-
-from .config import LayerQuantizationConfig
-from .quantize import QuantizedLayer
 
 
 class FourOverSixLinearFunction(torch.autograd.Function):
