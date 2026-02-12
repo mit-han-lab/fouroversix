@@ -143,7 +143,7 @@ namespace fouroversix
             }
             if constexpr (Is_rht)
             {
-                hadamard_quant_group<Is_nvfp4>(&x_vec_float[0]);
+                hadamard_quant_group<Is_nvfp4, Element>(&x_vec_float[0]);
                 VecTypeX x_vec;
 #pragma unroll
                 for (int i = 0; i < kGroupN; ++i)
@@ -183,6 +183,7 @@ namespace fouroversix
                 float sf = sSFT(g_row, g_col);
                 float blk_sf = Allreduce<kGroupN>::run(sf, max_op); // kGroupN is 16 or 32
                 sSFT(g_row, g_col) = blk_sf;
+                __syncthreads();
             }
         }
 
@@ -238,7 +239,7 @@ namespace fouroversix
         fouroversix::compute_fp4_quant_prologue_block<Kernel_traits, Is_nvfp4, Is_rht, Is_2d, Is_transpose, Is_rtn, kSelectionRule>(params, m_block, n_block);
     }
 
-    template <typename Kernel_traits, bool Is_nvfp4, bool Is_rht, bool Is_transpose, bool Is_rtn, int kSelectionRule, typename Params>
+    template <typename Kernel_traits, bool Is_nvfp4, bool Is_rht, bool Is_2d, bool Is_transpose, bool Is_rtn, int kSelectionRule, typename Params>
     inline __device__ void compute_fp4_quant_block(const Params &params, const int m_block, const int n_block)
     {
         // Type aliases
@@ -254,6 +255,7 @@ namespace fouroversix
         constexpr int kBlockNSF = Kernel_traits::kBlockNSF;
         constexpr int kNWarps = Kernel_traits::kNWarps;
         constexpr int kNumGroupsInRow = Kernel_traits::kNumGroupsInRow;
+        constexpr int kNumGroupsInCol = Kernel_traits::kNumGroupsInCol;
         constexpr float E4M3_MAX_VALUE = Kernel_traits::E4M3_MAX_VALUE;
 
         constexpr AdaptiveBlockScalingRuleType kRule = static_cast<AdaptiveBlockScalingRuleType>(kSelectionRule);
@@ -389,11 +391,11 @@ namespace fouroversix
 
         for (int g_idx = tidx; g_idx < num_groups; g_idx += blockDim.x)
         {
-            const int g_row = g_idx / kNumGroupsInRow;
-            const int g_col = g_idx % kNumGroupsInRow;
+            const int g_row = g_idx % kNumGroupsInCol;
+            const int g_col = g_idx / kNumGroupsInCol;
             const float g_max = sSFT(g_row, g_col);
 
-            const Tensor sGX = make_tensor(make_smem_ptr(sX.data() + g_idx * kGroupN),
+            const Tensor sGX = make_tensor(make_smem_ptr(sX.data() + g_row * kBlockN + g_col * kGroupN),
                                            Shape<Int<1>, Int<kGroupN>>{},
                                            Stride<Int<kGroupN>, _1>{});
 
@@ -411,7 +413,7 @@ namespace fouroversix
                 sf_[0] = static_cast<float>(static_cast<ScaleFactor>(sf_[0]));
                 sf_[1] = static_cast<float>(static_cast<ScaleFactor>(sf_[1]));
 
-                sf = fp4_conversion<Is_nvfp4, true, Is_rtn, kRule>(sGX, amax, sf_, res, params.rbits);
+                sf = fp4_conversion<Is_nvfp4, Is_2d, true, Is_rtn, kRule>(sGX, amax, sf_, res, params.rbits);
             }
             else
             {
@@ -433,7 +435,7 @@ namespace fouroversix
                 }
 
                 sf_val = static_cast<float>(static_cast<ScaleFactor>(sf_val));
-                sf = fp4_conversion<Is_nvfp4, false, Is_rtn, kRule>(sGX, amax, &sf_val, res, params.rbits);
+                sf = fp4_conversion<Is_nvfp4, false, false, Is_rtn, kRule>(sGX, amax, &sf_val, res, params.rbits);
             }
 
             // Write quantized data
@@ -450,6 +452,7 @@ namespace fouroversix
             const int sf_row = 32 * (blk_row * kSmemBlockInRow + blk_col) + r_in_blk % 32;
             const int sf_col = int(r_in_blk / 32) * 4 + c_in_blk;
             sSF(sf_row, sf_col) = static_cast<ScaleFactor>(sf);
+            __syncthreads();
         }
 
         // -------------------------------------------------------------------------
@@ -488,7 +491,7 @@ namespace fouroversix
         }
     }
 
-    template <typename Kernel_traits, bool Is_nvfp4, bool Is_rht, bool Is_transpose, bool Is_rtn, int kSelectionRule, typename Params>
+    template <typename Kernel_traits, bool Is_nvfp4, bool Is_rht, bool Is_2d, bool Is_transpose, bool Is_rtn, int kSelectionRule, typename Params>
     inline __device__ void compute_fp4_quant(const Params &params)
     {
         // TODO: Implement the fp4 quant kernel
@@ -496,7 +499,7 @@ namespace fouroversix
         // The block index for the batch.
         const int n_block = blockIdx.y;
 
-        fouroversix::compute_fp4_quant_block<Kernel_traits, Is_nvfp4, Is_rht, Is_transpose, Is_rtn, kSelectionRule>(params, m_block, n_block);
+        fouroversix::compute_fp4_quant_block<Kernel_traits, Is_nvfp4, Is_rht, Is_2d, Is_transpose, Is_rtn, kSelectionRule>(params, m_block, n_block);
     }
 
 } // namespace fouroversix

@@ -40,10 +40,10 @@ namespace fouroversix
 #endif
     }
 
-    DEFINE_FP4_QUANT_KERNEL(fp4_quant_kernel, bool Is_nvfp4, bool Is_rht, bool Is_transpose, bool Is_rtn, int kSelectionRule)
+    DEFINE_FP4_QUANT_KERNEL(fp4_quant_kernel, bool Is_nvfp4, bool Is_rht, bool Is_2d, bool Is_transpose, bool Is_rtn, int kSelectionRule)
     {
 #if defined(ARCH_SUPPORTS_FLASH)
-        fouroversix::compute_fp4_quant<Kernel_traits, Is_nvfp4, Is_rht, Is_transpose, Is_rtn, kSelectionRule>(params);
+        fouroversix::compute_fp4_quant<Kernel_traits, Is_nvfp4, Is_rht, Is_2d, Is_transpose, Is_rtn, kSelectionRule>(params);
 #else
         FLASH_UNSUPPORTED_ARCH
 #endif
@@ -89,15 +89,18 @@ namespace fouroversix
         dim3 grid(num_m_block, num_n_block);
         BOOL_SWITCH(params.is_rtn, Is_rtn, [&]
         {
-            SELECTION_RULE_SWITCH(params.selection_rule, kSelectionRule, [&]
+            BOOL_SWITCH(params.is_2d, Is_2d, [&] 
             {
-                auto kernel = &fp4_quant_kernel<Kernel_traits, Is_nvfp4, Is_rht, Is_transpose, Is_rtn, kSelectionRule>;
-                if (smem_size >= 48 * 1024) {
-                    C10_CUDA_CHECK(cudaFuncSetAttribute(
-                        kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
-                }
-                kernel<<<grid, Kernel_traits::kNThreads, smem_size, stream>>>(params);
-                C10_CUDA_KERNEL_LAUNCH_CHECK();
+                SELECTION_RULE_SWITCH(params.selection_rule, kSelectionRule, [&]
+                {
+                    auto kernel = &fp4_quant_kernel<Kernel_traits, Is_nvfp4, Is_rht, Is_2d, Is_transpose, Is_rtn, kSelectionRule>;
+                    if (smem_size >= 48 * 1024) {
+                        C10_CUDA_CHECK(cudaFuncSetAttribute(
+                            kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
+                    }
+                    kernel<<<grid, Kernel_traits::kNThreads, smem_size, stream>>>(params);
+                    C10_CUDA_KERNEL_LAUNCH_CHECK();
+                });
             });
         });
     }

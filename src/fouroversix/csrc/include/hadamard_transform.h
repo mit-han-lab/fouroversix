@@ -13,6 +13,7 @@
 
 namespace fouroversix {
 
+template <typename Element>
 __device__ __forceinline__ void hadamard_quant_group_16(float x[16]) {
     float out[16];
     out[0] = + x[0] + x[1] + x[2] - x[3] + x[4] - x[5] - x[6] - x[7] - x[8] - x[9] - x[10] + x[11] - x[12] + x[13] - x[14] - x[15];
@@ -32,20 +33,21 @@ __device__ __forceinline__ void hadamard_quant_group_16(float x[16]) {
     out[14] = + x[0] + x[1] - x[2] + x[3] - x[4] + x[5] - x[6] - x[7] + x[8] + x[9] - x[10] + x[11] - x[12] + x[13] + x[14] + x[15];
     out[15] = + x[0] - x[1] - x[2] - x[3] - x[4] - x[5] - x[6] + x[7] + x[8] - x[9] - x[10] - x[11] - x[12] - x[13] + x[14] - x[15];
     #pragma unroll
-    for (int i = 0; i < 16; i++) { x[i] = out[i] / 4; }
+    for (int i = 0; i < 16; i++) { x[i] = static_cast<float>(static_cast<Element>(out[i] / 4)); }
 }
 
+template <typename Element>
 __device__ __forceinline__ void hadamard_quant_group_32(float x[32]) {
-    hadamard_quant_group_16(x);
-    hadamard_quant_group_16(x + 16);
+    hadamard_quant_group_16<Element>(x);
+    hadamard_quant_group_16<Element>(x + 16);
 }
 
-template <bool Is_nvfp4>
+template <bool Is_nvfp4, typename Element>
 __device__ __forceinline__ void hadamard_quant_group(float* x) {
     if constexpr (Is_nvfp4) {
-        hadamard_quant_group_16(x);
+        hadamard_quant_group_16<Element>(x);
     } else {
-        hadamard_quant_group_32(x);
+        hadamard_quant_group_32<Element>(x);
     }
 }
 

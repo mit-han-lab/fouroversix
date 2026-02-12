@@ -412,14 +412,14 @@ namespace fouroversix
                     unsigned short out_dequant_4_hi = (out_dequant_4 >> 16) & 0xFFFF;
                     unsigned short out_dequant_4_lo = out_dequant_4 & 0xFFFF;
 
-                    float val0 = __half2float(__ushort_as_half(out_dequant_1_lo)) * sf * amax;
-                    float val1 = __half2float(__ushort_as_half(out_dequant_1_hi)) * sf * amax;
-                    float val2 = __half2float(__ushort_as_half(out_dequant_2_lo)) * sf * amax;
-                    float val3 = __half2float(__ushort_as_half(out_dequant_2_hi)) * sf * amax;
-                    float val4 = __half2float(__ushort_as_half(out_dequant_3_lo)) * sf * amax;
-                    float val5 = __half2float(__ushort_as_half(out_dequant_3_hi)) * sf * amax;
-                    float val6 = __half2float(__ushort_as_half(out_dequant_4_lo)) * sf * amax;
-                    float val7 = __half2float(__ushort_as_half(out_dequant_4_hi)) * sf * amax;
+                    float val0 = __half2float(__ushort_as_half(out_dequant_1_lo)) * sf * amax / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX);
+                    float val1 = __half2float(__ushort_as_half(out_dequant_1_hi)) * sf * amax / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX);
+                    float val2 = __half2float(__ushort_as_half(out_dequant_2_lo)) * sf * amax / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX);
+                    float val3 = __half2float(__ushort_as_half(out_dequant_2_hi)) * sf * amax / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX);
+                    float val4 = __half2float(__ushort_as_half(out_dequant_3_lo)) * sf * amax / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX);
+                    float val5 = __half2float(__ushort_as_half(out_dequant_3_hi)) * sf * amax / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX);
+                    float val6 = __half2float(__ushort_as_half(out_dequant_4_lo)) * sf * amax / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX);
+                    float val7 = __half2float(__ushort_as_half(out_dequant_4_hi)) * sf * amax / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX);
 
                     if constexpr (kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::MAE_4o6)
                     {
@@ -530,14 +530,14 @@ namespace fouroversix
                     unsigned short out_dequant_4_hi = (out_dequant_4 >> 16) & 0xFFFF;
                     unsigned short out_dequant_4_lo = out_dequant_4 & 0xFFFF;
 
-                    float val0 = __half2float(__ushort_as_half(out_dequant_1_lo)) * sf * amax;
-                    float val1 = __half2float(__ushort_as_half(out_dequant_1_hi)) * sf * amax;
-                    float val2 = __half2float(__ushort_as_half(out_dequant_2_lo)) * sf * amax;
-                    float val3 = __half2float(__ushort_as_half(out_dequant_2_hi)) * sf * amax;
-                    float val4 = __half2float(__ushort_as_half(out_dequant_3_lo)) * sf * amax;
-                    float val5 = __half2float(__ushort_as_half(out_dequant_3_hi)) * sf * amax;
-                    float val6 = __half2float(__ushort_as_half(out_dequant_4_lo)) * sf * amax;
-                    float val7 = __half2float(__ushort_as_half(out_dequant_4_hi)) * sf * amax;
+                    float val0 = __half2float(__ushort_as_half(out_dequant_1_lo)) * sf * amax / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX);
+                    float val1 = __half2float(__ushort_as_half(out_dequant_1_hi)) * sf * amax / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX);
+                    float val2 = __half2float(__ushort_as_half(out_dequant_2_lo)) * sf * amax / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX);
+                    float val3 = __half2float(__ushort_as_half(out_dequant_2_hi)) * sf * amax / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX);
+                    float val4 = __half2float(__ushort_as_half(out_dequant_3_lo)) * sf * amax / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX);
+                    float val5 = __half2float(__ushort_as_half(out_dequant_3_hi)) * sf * amax / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX);
+                    float val6 = __half2float(__ushort_as_half(out_dequant_4_lo)) * sf * amax / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX);
+                    float val7 = __half2float(__ushort_as_half(out_dequant_4_hi)) * sf * amax / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX);
 
                     if constexpr (kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::MAE_4o6)
                     {
@@ -616,7 +616,7 @@ namespace fouroversix
         }
     };
 
-    template <bool Is_nvfp4, bool Is_4o6, bool Is_rtn, AdaptiveBlockScalingRuleType kAdaptiveBlockScalingRuleType, typename Engine, typename Layout, typename OutputType>
+    template <bool Is_nvfp4, bool Is_2d, bool Is_4o6, bool Is_rtn, AdaptiveBlockScalingRuleType kRule, typename Engine, typename Layout, typename OutputType>
     __forceinline__ __device__ float fp4_conversion(Tensor<Engine, Layout> const &tensor, const float amax, float *sf_, OutputType *res, const uint32_t rbits)
     {
         constexpr int numel = decltype(size(tensor))::value;
@@ -628,13 +628,14 @@ namespace fouroversix
 
         using InputType = cutlass::Array<float, loop_size>;
 
-        Fp4ArrayQuant<Is_4o6, Is_rtn, kAdaptiveBlockScalingRuleType> fp4_array_quant;
+        Fp4ArrayQuant<Is_4o6, Is_rtn, kRule> fp4_array_quant;
 
         if constexpr (Is_4o6)
         {
             float err[2] = {0.0f, 0.0f};
             OutputType res_4[num_loops];
             OutputType res_6[num_loops];
+            float final_err[2] = {0.0f, 0.0f};
 
 #pragma unroll
             for (int i = 0; i < num_loops; ++i)
@@ -649,8 +650,22 @@ namespace fouroversix
                 res_6[i] = fp4_array_quant.convert(x, amax, sf_[1], rbits, &err[1]);
             }
 
+            if (Is_2d){
+                // For 2D tensors we want to pick the same format for the entire tensor, to keep it simple for downstream processing.
+                // So we pick the format with smaller total error across the entire tensor.
+
+                // If the method is MAE or MSE, we need to sum the error across the entire tensor. If the method is ABS_MAX, we need to take the max error across the entire tensor.
+                using RedOp = std::conditional_t<kRule == AdaptiveBlockScalingRuleType::ABS_MAX_4o6, MaxOp<float>, SumOp<float>>;
+                RedOp op;
+                final_err[0] = Allreduce<numel>::run(err[0], op);
+                final_err[1] = Allreduce<numel>::run(err[1], op);
+            } else {
+                final_err[0] = err[0];
+                final_err[1] = err[1];
+            }
+
             // pick_first = true means choose 4, false means choose 6
-            bool const pick_first = err[0] < err[1];
+            bool const pick_first = final_err[0] < final_err[1];
 #pragma unroll
             for (int i = 0; i < num_loops; ++i)
             {
