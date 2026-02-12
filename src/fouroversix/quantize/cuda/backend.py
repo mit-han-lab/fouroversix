@@ -1,9 +1,8 @@
 import torch
-from fouroversix.utils import DataType, RoundStyle
-
-from .backend import QuantizeBackendBase
-from .config import QuantizationConfig
-from .quantized_tensor import QuantizedTensor
+from fouroversix.quantize.backend import QuantizeBackendBase
+from fouroversix.quantize.config import QuantizationConfig
+from fouroversix.quantize.quantized_tensor import QuantizedTensor
+from fouroversix.utils import BLACKWELL_SM_IDS, DataType, RoundStyle
 
 
 class CUDAQuantizeBackend(QuantizeBackendBase):
@@ -17,8 +16,18 @@ class CUDAQuantizeBackend(QuantizeBackendBase):
     def is_available(cls) -> bool:
         """Return True if the CUDA backend is available on the current machine."""
 
-        # TODO(jack, junxian): Re-enable CUDA backend once precision issues are resolved
-        return False
+        if (
+            not torch.cuda.is_available()
+            or torch.cuda.get_device_capability()[0] not in BLACKWELL_SM_IDS
+        ):
+            return False
+
+        try:
+            import fouroversix._C  # noqa: F401
+        except ModuleNotFoundError:
+            return False
+
+        return True
 
     @classmethod
     def is_supported(cls, x: torch.Tensor, config: QuantizationConfig) -> bool:
@@ -32,10 +41,7 @@ class CUDAQuantizeBackend(QuantizeBackendBase):
 
         return (
             x.device.type == "cuda"
-            and not config.rht
             and config.dtype == DataType.nvfp4
-            and config.round_style == RoundStyle.nearest
-            and not config.block_scale_2d
             and not config.transpose
         )
 
@@ -57,5 +63,24 @@ class CUDAQuantizeBackend(QuantizeBackendBase):
 
         """
 
-        msg = "The CUDA backend is currently disabled and will be updated soon"
-        raise NotImplementedError(msg)
+        from .ops import quantize_to_fp4
+
+        values, scale_factors, amax = quantize_to_fp4(
+            x,
+            config.dtype == DataType.nvfp4,
+            config.round_style == RoundStyle.nearest,
+            config.rht,
+            config.block_scale_2d,
+            config.transpose,
+            config.scale_rule.cuda_id(),
+            config.rbits,
+        )
+
+        return QuantizedTensor(
+            values,
+            scale_factors,
+            amax,
+            config.dtype,
+            (x.shape[1], x.shape[0]) if config.transpose else x.shape,
+            config.scale_rule,
+        )

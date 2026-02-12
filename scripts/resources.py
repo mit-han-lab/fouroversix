@@ -126,22 +126,6 @@ def add_submodule(img: modal.Image, submodule: Submodule) -> modal.Image:
     )
 
 
-def build_fouroversix_ext() -> None:
-    shutil.copytree(
-        FOUROVERSIX_CACHE_PATH / "build",
-        FOUROVERSIX_INSTALL_PATH / "build",
-    )
-    subprocess.run(
-        ["python", "setup.py", "build_ext", "--inplace"],
-        check=False,
-    )
-    shutil.copytree(
-        FOUROVERSIX_INSTALL_PATH / "build",
-        FOUROVERSIX_CACHE_PATH / "build",
-        dirs_exist_ok=True,
-    )
-
-
 def install_flash_attn() -> None:
     subprocess.run(
         ["pip", "install", "flash-attn", "--no-build-isolation"],
@@ -164,6 +148,19 @@ def install_fouroversix() -> None:
 
 
 def install_fouroversix_non_editable() -> None:
+    shutil.copytree(
+        FOUROVERSIX_CACHE_PATH / "build",
+        FOUROVERSIX_INSTALL_PATH / "build",
+    )
+    subprocess.run(
+        ["python", "setup.py", "build_ext", "--inplace"],
+        check=False,
+    )
+    shutil.copytree(
+        FOUROVERSIX_INSTALL_PATH / "build",
+        FOUROVERSIX_CACHE_PATH / "build",
+        dirs_exist_ok=True,
+    )
     subprocess.run(
         [
             "pip",
@@ -191,7 +188,7 @@ def install_qutlass() -> None:
 def get_image(  # noqa: C901, PLR0912
     dependencies: list[Dependency] | None = None,
     *,
-    cuda_version: str = "13.0",
+    cuda_version: str = "12.9",
     deploy: bool = False,
     extra_env: dict[str, str] | None = None,
     extra_pip_dependencies: list[str] | None = None,
@@ -314,14 +311,7 @@ def get_image(  # noqa: C901, PLR0912
                 copy=True,
             )
 
-            if KERNEL_DEV_MODE:
-                img = img.run_function(
-                    build_fouroversix_ext,
-                    cpu=32,
-                    memory=64 * 1024,
-                    volumes={FOUROVERSIX_CACHE_PATH.as_posix(): cache_volume},
-                ).workdir("/root")
-            else:
+            if not KERNEL_DEV_MODE:
                 img = img.run_function(install_fouroversix, cpu=32, memory=64 * 1024)
 
         if dependency == Dependency.fp_quant:
@@ -387,8 +377,8 @@ def get_image(  # noqa: C901, PLR0912
             if KERNEL_DEV_MODE:
                 img = img.run_function(
                     install_fouroversix_non_editable,
-                    cpu=8,
-                    memory=32 * 1024,
+                    cpu=32,
+                    memory=64 * 1024,
                     volumes={FOUROVERSIX_CACHE_PATH.as_posix(): cache_volume},
                 )
 

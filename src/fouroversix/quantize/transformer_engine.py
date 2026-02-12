@@ -1,6 +1,6 @@
 import torch
 from fouroversix.quantize.utils import to_blocked
-from fouroversix.utils import DataType, RoundStyle, ScaleRule
+from fouroversix.utils import BLACKWELL_SM_IDS, DataType, RoundStyle, ScaleRule
 
 from .backend import QuantizeBackendBase
 from .config import QuantizationConfig
@@ -13,15 +13,28 @@ class TransformerEngineQuantizeBackend(QuantizeBackendBase):
     our implementations.
     """
 
-    def is_available(self) -> bool:
+    @classmethod
+    def is_available(cls) -> bool:
         """
         Return True if the Transformer Engine backend is available on the current
         machine.
         """
 
-        return torch.cuda.is_available()
+        if (
+            not torch.cuda.is_available()
+            or torch.cuda.get_device_capability()[0] not in BLACKWELL_SM_IDS
+        ):
+            return False
 
-    def is_supported(self, x: torch.Tensor, config: QuantizationConfig) -> bool:
+        try:
+            import transformer_engine  # noqa: F401
+        except ModuleNotFoundError:
+            return False
+
+        return True
+
+    @classmethod
+    def is_supported(cls, x: torch.Tensor, config: QuantizationConfig) -> bool:
         """
         Return True if the Transformer Engine backend supports the given input and
         quantization configuration.
@@ -41,8 +54,9 @@ class TransformerEngineQuantizeBackend(QuantizeBackendBase):
 
         return True
 
+    @classmethod
     def quantize_to_fp4(
-        self,
+        cls,
         x: torch.Tensor,
         config: QuantizationConfig,
     ) -> QuantizedTensor:

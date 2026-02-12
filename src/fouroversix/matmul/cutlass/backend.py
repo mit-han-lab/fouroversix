@@ -1,7 +1,7 @@
 import torch
 from fouroversix.matmul.backend import MatmulBackendBase
 from fouroversix.quantize import QuantizedTensor
-from fouroversix.utils import SM_100, SM_110, SM_120, DataType
+from fouroversix.utils import BLACKWELL_SM_IDS, SM_100, SM_120, DataType
 
 
 class CUTLASSMatmulBackend(MatmulBackendBase):
@@ -14,11 +14,18 @@ class CUTLASSMatmulBackend(MatmulBackendBase):
     def is_available(cls) -> bool:
         """Return True if the CUTLASS backend is available on the current machine."""
 
-        return torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in [
-            SM_100,
-            SM_110,
-            SM_120,
-        ]
+        if (
+            not torch.cuda.is_available()
+            or torch.cuda.get_device_capability()[0] not in BLACKWELL_SM_IDS
+        ):
+            return False
+
+        try:
+            import fouroversix._C  # noqa: F401
+        except ModuleNotFoundError:
+            return False
+
+        return True
 
     @classmethod
     def fp4_matmul(

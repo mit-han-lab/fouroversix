@@ -3,7 +3,7 @@ from fouroversix.quantize.backend import QuantizeBackendBase
 from fouroversix.quantize.config import QuantizationConfig
 from fouroversix.quantize.quantized_tensor import QuantizedTensor
 from fouroversix.quantize.utils import get_rht_matrix
-from fouroversix.utils import SM_100, SM_110, SM_120, RoundStyle
+from fouroversix.utils import BLACKWELL_SM_IDS, SM_100, RoundStyle
 
 
 class TritonQuantizeBackend(QuantizeBackendBase):
@@ -16,11 +16,10 @@ class TritonQuantizeBackend(QuantizeBackendBase):
     @classmethod
     def is_available(cls) -> bool:
         """Return True if the Triton backend is available on the current machine."""
-        return torch.cuda.is_available() and torch.cuda.get_device_capability()[0] in {
-            SM_100,
-            SM_110,
-            SM_120,
-        }
+        return (
+            torch.cuda.is_available()
+            and torch.cuda.get_device_capability()[0] in BLACKWELL_SM_IDS
+        )
 
     @classmethod
     def is_supported(cls, x: torch.Tensor, config: QuantizationConfig) -> bool:
@@ -65,6 +64,7 @@ class TritonQuantizeBackend(QuantizeBackendBase):
             scale_rule=config.scale_rule,
             block_scale_2d=config.block_scale_2d,
             transpose=config.transpose,
+            rbits=config.rbits,
         )
 
         return QuantizedTensor(
