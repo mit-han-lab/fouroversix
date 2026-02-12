@@ -9,6 +9,7 @@
 // #include "philox_unpack.cuh" // For at::cuda::philox::unpack
 
 #include <cute/tensor.hpp>
+#include <type_traits>
 
 #include <cutlass/cutlass.h>
 #include <cutlass/array.h>
@@ -16,6 +17,7 @@
 
 #include "kernel_traits.h"
 #include "utils.h"
+#include "hadamard_transform.h"
 // #include "softmax.h"
 // #include "mask.h"
 // #include "dropout.h"
@@ -26,33 +28,41 @@ namespace fouroversix
 
     using namespace cute;
 
-    template <typename Kernel_traits, bool Is_nvfp4, bool Is_rht, bool Is_transpose, bool Is_rtn, int kSelectionRule, typename Params>
+    template <typename Kernel_traits, bool Is_nvfp4, bool Is_rht, bool Is_2d, bool Is_transpose, bool Is_rtn, int kSelectionRule, typename Params>
     inline __device__ void compute_fp4_quant_prologue_block(const Params &params, const int m_block, const int n_block)
     {
+        // Type aliases
         using Element = typename Kernel_traits::Element;
-        using ElementScaleFactor = typename Kernel_traits::ElementScaleFactor;
+        using ScaleFactor = typename Kernel_traits::ScaleFactor;
         using index_t = typename Kernel_traits::index_t;
+
+        // Compile-time constants
+        constexpr int kGroupN = Kernel_traits::kGroupN;
+        constexpr int kBlockM = Kernel_traits::kBlockM;
+        constexpr int kBlockN = Kernel_traits::kBlockN;
+        constexpr int kNWarps = Kernel_traits::kNWarps;
+        constexpr int kNumGroupsInRow = Kernel_traits::kNumGroupsInRow;
+        constexpr int kNumGroupsInCol = Kernel_traits::kNumGroupsInCol;
+        constexpr float E4M3_MAX_VALUE = Kernel_traits::E4M3_MAX_VALUE;
+        constexpr float E2M1_MAX_VALUE = Kernel_traits::E2M1_MAX_VALUE;
+
+        constexpr AdaptiveBlockScalingRuleType kRule = static_cast<AdaptiveBlockScalingRuleType>(kSelectionRule);
+        constexpr bool Is_4o6 = kRule == AdaptiveBlockScalingRuleType::MAE_4o6 ||
+                                kRule == AdaptiveBlockScalingRuleType::MSE_4o6 ||
+                                kRule == AdaptiveBlockScalingRuleType::ABS_MAX_4o6;
+
+        using VecTypeX = cutlass::Array<Element, kGroupN>;
+        using VecTypeXFloat = cutlass::Array<float, kGroupN>;
+        using VecTypeSFT = cutlass::Array<float, 4>;
+        constexpr int kVecSizeSFT = 4;
 
         // Shared memory
         extern __shared__ char smem[];
 
-        // Constants
-        constexpr AdaptiveBlockScalingRuleType kAdaptiveBlockScalingRuleType = static_cast<AdaptiveBlockScalingRuleType>(kSelectionRule);
-        constexpr bool Is_4o6 = kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::L1_NORM_4o6 || kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::MSE_4o6 || kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::ABS_MAX_4o6;
-        constexpr int kBlockM = Kernel_traits::kBlockM;
-        constexpr int kBlockN = Kernel_traits::kBlockN;
-        constexpr int kNWarps = Kernel_traits::kNWarps;
-        constexpr int kGroupN = Kernel_traits::kGroupN;
-        constexpr int kNumGroupsInRow = Kernel_traits::kNumGroupsInRow;
-        constexpr float E4M3_MAX_VALUE = Kernel_traits::E4M3_MAX_VALUE;
-        constexpr float E2M1_MAX_VALUE = Kernel_traits::E2M1_MAX_VALUE;
-        constexpr float TS_SCALE = Is_4o6 ? (384 * 4) : (E4M3_MAX_VALUE * (kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::ALL_4 ? 4 : E2M1_MAX_VALUE));
-
+        // Runtime variables
         const int tidx = threadIdx.x;
         const int num_groups = kNumGroupsInRow * kBlockM;
-
-        // Pointers
-        float *ts_ptr = reinterpret_cast<float *>(params.ts_ptr);
+        float *amax_ptr = reinterpret_cast<float *>(params.amax_ptr);
 
         // -------------------------------------------------------------------------
         // Tensor Definitions
@@ -64,6 +74,12 @@ namespace fouroversix
                                 make_stride(params.x_row_stride, _1{}));
         Tensor gX = local_tile(mX(_, _), Shape<Int<kBlockM>, Int<kBlockN>>{},
                                make_coord(m_block, n_block));
+
+        Tensor mXRHT = make_tensor(make_gmem_ptr(reinterpret_cast<Element *>(params.x_rht_ptr)),
+                                   make_shape(params.M_rounded, params.N_rounded),
+                                   make_stride(params.x_rht_row_stride, _1{}));
+        Tensor gXRHT = local_tile(mXRHT(_, _), Shape<Int<kBlockM>, Int<kBlockN>>{},
+                                  make_coord(m_block, n_block));
 
         // Scale Factor Temp SFT (Global Memory)
         Tensor mSFT = make_tensor(make_gmem_ptr(reinterpret_cast<float *>(params.x_sft_ptr)),
@@ -77,8 +93,7 @@ namespace fouroversix
                                 typename Kernel_traits::SmemLayoutX{});
 
         // SFT in Shared Memory (placed after X)
-        Tensor sSFT = make_tensor(make_smem_ptr(reinterpret_cast<float *>(reinterpret_cast<char *>(sX.data().get()) 
-                                  + sizeof(Element) * size(sX))),
+        Tensor sSFT = make_tensor(make_smem_ptr(reinterpret_cast<float *>(reinterpret_cast<char *>(sX.data().get()) + sizeof(Element) * size(sX))),
                                   typename Kernel_traits::SmemLayoutSFT{});
 
         // -------------------------------------------------------------------------
@@ -115,83 +130,105 @@ namespace fouroversix
         // Scale Factor Computation
         // -------------------------------------------------------------------------
 
-        float thr_max_scale_factor = static_cast<float>(0.0f);
-        for (int group_idx = tidx; group_idx < num_groups; group_idx += blockDim.x)
+        float thr_max = 0.0f;
+        for (int g_idx = tidx; g_idx < num_groups; g_idx += blockDim.x)
         {
-            const int group_row_idx = group_idx / kNumGroupsInRow;
-            const int group_col_idx = group_idx % kNumGroupsInRow;
+            const int g_row = g_idx / kNumGroupsInRow;
+            const int g_col = g_idx % kNumGroupsInRow;
 
-            float scale_factor = static_cast<float>(0.0f);
+            VecTypeXFloat x_vec_float;
+            for (int i = 0; i < kGroupN; ++i)
+            {
+                x_vec_float[i] = static_cast<float>(sX(g_row, g_col * kGroupN + i));
+            }
+            if constexpr (Is_rht)
+            {
+                hadamard_quant_group<Is_nvfp4, Element>(&x_vec_float[0]);
+                VecTypeX x_vec;
+#pragma unroll
+                for (int i = 0; i < kGroupN; ++i)
+                {
+                    // sX(g_row, g_col * kGroupN + i) = static_cast<Element>(x_vec_float[i]);
+                    x_vec[i] = static_cast<Element>(x_vec_float[i]);
+                }
+
+                *reinterpret_cast<VecTypeX *>(&gXRHT(g_row, g_col * kGroupN)) = *reinterpret_cast<VecTypeX *>(&x_vec);
+            }
+            // VecTypeX x_vec = *reinterpret_cast<VecTypeX *>(&sX(g_row, g_col * kGroupN));
+
+            // Compute max absolute value in group
+            float sf = 0.0f;
 #pragma unroll
             for (int i = 0; i < kGroupN; ++i)
             {
-                float val = abs(static_cast<float>(sX(group_row_idx, group_col_idx * kGroupN + i)));
-                if (val > scale_factor)
-                {
-                    scale_factor = val;
-                }
+                sf = max(sf, abs(x_vec_float[i]));
             }
 
-            if (scale_factor > thr_max_scale_factor)
+            thr_max = max(thr_max, sf);
+            sSFT(g_row, g_col) = sf;
+        }
+
+        if constexpr (Is_2d)
+        {
+            __syncthreads();
+        }
+
+        if constexpr (Is_2d)
+        {
+            MaxOp<float> max_op;
+            for (int g_idx = tidx; g_idx < num_groups; g_idx += blockDim.x)
             {
-                thr_max_scale_factor = scale_factor;
+                const int g_row = g_idx % kNumGroupsInCol;
+                const int g_col = g_idx / kNumGroupsInCol;
+                float sf = sSFT(g_row, g_col);
+                float blk_sf = Allreduce<kGroupN>::run(sf, max_op); // kGroupN is 16 or 32
+                sSFT(g_row, g_col) = blk_sf;
+                __syncthreads();
             }
-
-            sSFT(group_row_idx, group_col_idx) = scale_factor;
         }
 
         // -------------------------------------------------------------------------
         // Normalization Constant Reduction (Block-wide Max)
         // -------------------------------------------------------------------------
 
-        // Warp-level reduce
+        // Warp-level reduction
         MaxOp<float> max_op;
-        float max_val = static_cast<float>(thr_max_scale_factor);
-        max_val = Allreduce<32>::run(max_val, max_op);
-        thr_max_scale_factor = max_val;
+        float warp_max = Allreduce<32>::run(thr_max, max_op);
 
-        // Block-level reduce via Shared Memory
-        float *sRed = reinterpret_cast<float *>(smem); // Reuse smem
+        // Block-level reduction via shared memory
+        float *sRed = reinterpret_cast<float *>(smem);
         if (tidx % 32 == 0)
         {
-            sRed[tidx / 32] = thr_max_scale_factor;
+            sRed[tidx / 32] = warp_max;
         }
         __syncthreads();
 
         if (tidx == 0)
         {
-            float block_max = static_cast<float>(0.0f);
+            float blk_max = 0.0f;
 #pragma unroll
             for (int i = 0; i < kNWarps; ++i)
             {
-                float t = sRed[i];
-                if (t > block_max)
-                {
-                    block_max = t;
-                }
+                blk_max = max(blk_max, sRed[i]);
             }
-            float block_ts = block_max / TS_SCALE;
-            atomicMaxFloat(ts_ptr, block_ts);
+            atomicMaxFloat(amax_ptr, blk_max);
         }
 
         // -------------------------------------------------------------------------
         // Write Back SFT (Shared -> Global)
         // -------------------------------------------------------------------------
 
-        using VecType = uint4;
-        constexpr int kVecSize = sizeof(VecType) / sizeof(float);
-
         for (int r_idx = tidx; r_idx < kBlockM; r_idx += blockDim.x)
         {
 #pragma unroll
-            for (int i = 0; i < int(kBlockN / kGroupN); i += kVecSize)
+            for (int i = 0; i < int(kBlockN / kGroupN); i += kVecSizeSFT)
             {
-                *reinterpret_cast<VecType *>(&gSFT(r_idx, i)) = *reinterpret_cast<VecType *>(&sSFT(r_idx, i));
+                *reinterpret_cast<VecTypeSFT *>(&gSFT(r_idx, i)) = *reinterpret_cast<VecTypeSFT *>(&sSFT(r_idx, i));
             }
         }
     }
 
-    template <typename Kernel_traits, bool Is_nvfp4, bool Is_rht, bool Is_transpose, bool Is_rtn, int kSelectionRule, typename Params>
+    template <typename Kernel_traits, bool Is_nvfp4, bool Is_rht, bool Is_2d, bool Is_transpose, bool Is_rtn, int kSelectionRule, typename Params>
     inline __device__ void compute_fp4_quant_prologue(const Params &params)
     {
         // TODO: Implement the fp4 quant kernel
@@ -199,54 +236,74 @@ namespace fouroversix
         // The block index for the batch.
         const int n_block = blockIdx.y;
 
-        fouroversix::compute_fp4_quant_prologue_block<Kernel_traits, Is_nvfp4, Is_rht, Is_transpose, Is_rtn, kSelectionRule>(params, m_block, n_block);
+        fouroversix::compute_fp4_quant_prologue_block<Kernel_traits, Is_nvfp4, Is_rht, Is_2d, Is_transpose, Is_rtn, kSelectionRule>(params, m_block, n_block);
     }
 
-    template <typename Kernel_traits, bool Is_nvfp4, bool Is_rht, bool Is_transpose, bool Is_rtn, int kSelectionRule, typename Params>
+    template <typename Kernel_traits, bool Is_nvfp4, bool Is_rht, bool Is_2d, bool Is_transpose, bool Is_rtn, int kSelectionRule, typename Params>
     inline __device__ void compute_fp4_quant_block(const Params &params, const int m_block, const int n_block)
     {
+        // Type aliases
         using Element = typename Kernel_traits::Element;
-        using ElementScaleFactor = typename Kernel_traits::ElementScaleFactor;
-        using ElementXe2m1Packed = typename Kernel_traits::ElementXe2m1Packed;
+        using ScaleFactor = typename Kernel_traits::ScaleFactor;
         using index_t = typename Kernel_traits::index_t;
 
-        // Shared memory
-        extern __shared__ char smem[];
-
-        // Constants
-        constexpr AdaptiveBlockScalingRuleType kAdaptiveBlockScalingRuleType = static_cast<AdaptiveBlockScalingRuleType>(kSelectionRule);
-        constexpr bool Is_4o6 = kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::L1_NORM_4o6 || kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::MSE_4o6 || kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::ABS_MAX_4o6;
+        // Compile-time constants
+        constexpr int kGroupN = Kernel_traits::kGroupN;
         constexpr int kBlockM = Kernel_traits::kBlockM;
         constexpr int kBlockN = Kernel_traits::kBlockN;
         constexpr int kBlockMSF = Kernel_traits::kBlockMSF;
         constexpr int kBlockNSF = Kernel_traits::kBlockNSF;
         constexpr int kNWarps = Kernel_traits::kNWarps;
-        constexpr int kGroupN = Kernel_traits::kGroupN;
         constexpr int kNumGroupsInRow = Kernel_traits::kNumGroupsInRow;
-        constexpr float E2M1_MAX_VALUE = Kernel_traits::E2M1_MAX_VALUE;
+        constexpr int kNumGroupsInCol = Kernel_traits::kNumGroupsInCol;
         constexpr float E4M3_MAX_VALUE = Kernel_traits::E4M3_MAX_VALUE;
-        constexpr float E4M3_MIN_POSITIVE_NORMAL = Kernel_traits::E4M3_MIN_POSITIVE_NORMAL;
-        constexpr int TS_SCALE = Is_4o6 ? (384 * 4) : (E4M3_MAX_VALUE * E2M1_MAX_VALUE);
+
+        constexpr AdaptiveBlockScalingRuleType kRule = static_cast<AdaptiveBlockScalingRuleType>(kSelectionRule);
+        constexpr bool Is_4o6 = kRule == AdaptiveBlockScalingRuleType::MAE_4o6 ||
+                                kRule == AdaptiveBlockScalingRuleType::MSE_4o6 ||
+                                kRule == AdaptiveBlockScalingRuleType::ABS_MAX_4o6;
+        constexpr float E4M3_SCALE_4 = Is_4o6 ? Kernel_traits::E4M3_MAX_FOUROVERSIX : E4M3_MAX_VALUE;
+        constexpr float E4M3_SCALE_6 = Is_4o6 ? Kernel_traits::E4M3_MAX_FOUROVERSIX : E4M3_MAX_VALUE;
+        constexpr float E2M1_SCALE_4 = Is_4o6 ? 6.0f : 4.0f;
+        constexpr float E2M1_SCALE_6 = 6.0f;
 
         constexpr int kSmemBlockInRow = int(kNumGroupsInRow / 4);
         constexpr int kSmemBlockInCol = int(kBlockM / 128);
 
+        using VecTypeXe2m1 = std::conditional_t<Is_nvfp4, cutlass::Array<uint8_t, 8>, cutlass::Array<uint8_t, 16>>;
+        using VecTypeSFT = cutlass::Array<float, 4>;
+        using VecTypeSF = cutlass::Array<ScaleFactor, 16>;
+        using OutputType = cutlass::Array<cutlass::float_e2m1_t, 8>;
+        constexpr int kVecSizeXe2m1 = Is_nvfp4 ? 8 : 16;
+        constexpr int kVecSizeSFT = 4;
+        constexpr int kVecSizeSF = 16;
+
+        // Shared memory
+        extern __shared__ char smem[];
+
+        // Runtime variables
         const int tidx = threadIdx.x;
         const int num_groups = kNumGroupsInRow * kBlockM;
+        // JXGuo: assure amax is not zero before calling this kernel
+        const float amax = *reinterpret_cast<float *>(params.amax_ptr);
 
-        // Pointers
-        const float ts = *reinterpret_cast<float *>(params.ts_ptr);
-        const float sf_scale_6 = max(ts * E2M1_MAX_VALUE, 1e-12f);
-        const float sf_scale_4 = max(ts * 4, 1e-12f);
+        if (amax == 0.0f)
+        {
+            return;
+        }
 
         // -------------------------------------------------------------------------
         // Tensor Definitions
         // -------------------------------------------------------------------------
 
         // Input X (Global Memory)
-        Tensor mX = make_tensor(make_gmem_ptr(reinterpret_cast<Element *>(params.x_ptr)),
-                                make_shape(params.M, params.N),
-                                make_stride(params.x_row_stride, _1{}));
+        // void *__restrict__ x_ptr = Is_rht ? params.x_rht_ptr : params.x_ptr;
+        Tensor mX = Is_rht ? make_tensor(make_gmem_ptr(reinterpret_cast<Element *>(params.x_rht_ptr)),
+                                         make_shape(params.M_rounded, params.N_rounded),
+                                         make_stride(params.x_rht_row_stride, _1{}))
+                           : make_tensor(make_gmem_ptr(reinterpret_cast<Element *>(params.x_ptr)),
+                                         make_shape(params.M, params.N),
+                                         make_stride(params.x_row_stride, _1{}));
         Tensor gX = local_tile(mX(_, _), Shape<Int<kBlockM>, Int<kBlockN>>{},
                                make_coord(m_block, n_block));
 
@@ -263,7 +320,7 @@ namespace fouroversix
         Tensor gSFT = local_tile(mSFT(_, _), Shape<Int<kBlockM>, Int<kBlockN / kGroupN>>{},
                                  make_coord(m_block, n_block));
 
-        Tensor gSF = make_tensor(make_gmem_ptr(reinterpret_cast<ElementScaleFactor *>(params.x_sf_ptr)),
+        Tensor gSF = make_tensor(make_gmem_ptr(reinterpret_cast<ScaleFactor *>(params.x_sf_ptr)),
                                  make_shape(params.M_sf, params.N_sf),
                                  make_stride(params.x_sf_row_stride, _1{}));
         // Tensor gSF = local_tile(mSF(_, _), Shape<Int<1>, Int<16>>{},
@@ -274,16 +331,14 @@ namespace fouroversix
                                 typename Kernel_traits::SmemLayoutX{});
 
         // SFT in Shared Memory (placed after X)
-        Tensor sSFT = make_tensor(make_smem_ptr(reinterpret_cast<float *>(reinterpret_cast<char *>(sX.data().get()) 
-                                  + sizeof(Element) * size(sX))),
+        Tensor sSFT = make_tensor(make_smem_ptr(reinterpret_cast<float *>(reinterpret_cast<char *>(sX.data().get()) + sizeof(Element) * size(sX))),
                                   typename Kernel_traits::SmemLayoutSFT{});
 
-        Tensor sXe2m1 = make_tensor(make_smem_ptr(reinterpret_cast<uint8_t *>(reinterpret_cast<char *>(sSFT.data().get()) 
-                                  + sizeof(float) * size(sSFT))),
+        Tensor sXe2m1 = make_tensor(make_smem_ptr(reinterpret_cast<uint8_t *>(reinterpret_cast<char *>(sSFT.data().get()) + sizeof(float) * size(sSFT))),
                                     Shape<Int<kBlockM>, Int<kBlockN / 2>>{},
                                     Stride<Int<kBlockN / 2>, _1>{});
 
-        Tensor sSF = make_tensor(make_smem_ptr(reinterpret_cast<ElementScaleFactor *>(reinterpret_cast<char *>(sXe2m1.data().get()) + sizeof(uint8_t) * size(sXe2m1))),
+        Tensor sSF = make_tensor(make_smem_ptr(reinterpret_cast<ScaleFactor *>(reinterpret_cast<char *>(sXe2m1.data().get()) + sizeof(uint8_t) * size(sXe2m1))),
                                  typename Kernel_traits::SmemLayoutSF{});
 
         // -------------------------------------------------------------------------
@@ -318,9 +373,6 @@ namespace fouroversix
         // Data Loading (SFT -> Shared)
         // -------------------------------------------------------------------------
 
-        using VecTypeSFT = uint4;
-        constexpr int kVecSizeSFT = sizeof(VecTypeSFT) / sizeof(float);
-
         for (int r_idx = tidx; r_idx < kBlockM; r_idx += blockDim.x)
         {
 #pragma unroll
@@ -337,160 +389,109 @@ namespace fouroversix
         // Quantization
         // -------------------------------------------------------------------------
 
-        for (int group_idx = tidx; group_idx < num_groups; group_idx += blockDim.x)
+        for (int g_idx = tidx; g_idx < num_groups; g_idx += blockDim.x)
         {
-            const int group_row_idx = group_idx / kNumGroupsInRow;
-            const int group_col_idx = group_idx % kNumGroupsInRow;
+            const int g_row = g_idx % kNumGroupsInCol;
+            const int g_col = g_idx / kNumGroupsInCol;
+            const float g_max = sSFT(g_row, g_col);
 
-            const float group_max = sSFT(group_row_idx, group_col_idx);
-
-            const Tensor sGX = make_tensor(make_smem_ptr(sX.data() + group_idx * kGroupN),
+            const Tensor sGX = make_tensor(make_smem_ptr(sX.data() + g_row * kBlockN + g_col * kGroupN),
                                            Shape<Int<1>, Int<kGroupN>>{},
                                            Stride<Int<kGroupN>, _1>{});
 
-            using OutputType = cutlass::Array<cutlass::float_e2m1_t, 8>;
             OutputType res[int(kGroupN / 8)];
+            float encode_scale;
             float sf;
+
             if constexpr (Is_4o6)
             {
-                float sf_[2] = {
-                    clamp(
-                        group_max / sf_scale_4,
-                        E4M3_MIN_POSITIVE_NORMAL, E4M3_MAX_VALUE),
-                    clamp(
-                        group_max / sf_scale_6,
-                        E4M3_MIN_POSITIVE_NORMAL, E4M3_MAX_VALUE)};
+                encode_scale = E2M1_SCALE_6 * E4M3_SCALE_6 / amax;
 
-                sf_[0] = static_cast<float>(static_cast<ElementScaleFactor>(sf_[0]));
-                sf_[1] = static_cast<float>(static_cast<ElementScaleFactor>(sf_[1]));
+                float sf_high_precision = g_max / E2M1_SCALE_6 * encode_scale;
+                float sf_[2] = {sf_high_precision * 1.5, sf_high_precision};
 
-                sf = fp4_convertion<Is_nvfp4, true, Is_rtn, kAdaptiveBlockScalingRuleType>(sGX, ts, sf_, res);
-                // if (cute::thread0()) {
-                //     printf("in fp4_quant_block, 4o6, sf = %f, res[0] = %lx\n", sf, reinterpret_cast<uint64_t&>(res[0]));
-                // }
+                sf_[0] = static_cast<float>(static_cast<ScaleFactor>(sf_[0]));
+                sf_[1] = static_cast<float>(static_cast<ScaleFactor>(sf_[1]));
+
+                sf = fp4_conversion<Is_nvfp4, Is_2d, true, Is_rtn, kRule>(sGX, amax, sf_, res, params.rbits);
             }
             else
             {
-                // static_assert(kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::ALL_6 || kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::ALL_4, "kAdaptiveBlockScalingRuleType must be AdaptiveBlockScalingRuleType::ALL_6 or AdaptiveBlockScalingRuleType::ALL_4");
                 float sf_val = 0.0f;
-                if constexpr (kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::ALL_6)
+                if constexpr (kRule == AdaptiveBlockScalingRuleType::STATIC_6)
                 {
-                    sf_val = clamp(
-                        group_max / sf_scale_6,
-                        E4M3_MIN_POSITIVE_NORMAL, E4M3_MAX_VALUE);
+                    encode_scale = E4M3_SCALE_6 * E2M1_SCALE_6 / amax;
+                    sf_val = clamp(g_max / E2M1_SCALE_6 * encode_scale, 0, E4M3_MAX_VALUE);
                 }
-                else if constexpr (kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::ALL_4)
+                else if constexpr (kRule == AdaptiveBlockScalingRuleType::STATIC_4)
                 {
-                    sf_val = clamp(
-                        group_max / sf_scale_4,
-                        E4M3_MIN_POSITIVE_NORMAL, E4M3_MAX_VALUE);
+                    encode_scale = E2M1_SCALE_4 * E4M3_SCALE_4 / amax;
+                    sf_val = clamp(g_max / E2M1_SCALE_4 * encode_scale, 0, E4M3_MAX_VALUE);
                 }
                 else
                 {
-                    printf("in fp4_quant_block, kAdaptiveBlockScalingRuleType = %d, not supported\n", kAdaptiveBlockScalingRuleType);
+                    printf("in fp4_quant_block, kRule = %d, not supported\n", kRule);
                     assert(false);
                 }
 
-                // Add by JXGuo: convert the float to ElementScaleFactor and convert back for better accuracy.
-                sf_val = static_cast<float>(static_cast<ElementScaleFactor>(sf_val));
-
-                sf = fp4_convertion<Is_nvfp4, false, Is_rtn, kAdaptiveBlockScalingRuleType>(sGX, ts, &sf_val, res);
-                // if (cute::thread0()) {
-                //     printf("in fp4_quant_block, not 4o6, sf = %f, res[0] = %lx\n", sf, reinterpret_cast<uint64_t&>(res[0]));
-                // }
+                sf_val = static_cast<float>(static_cast<ScaleFactor>(sf_val));
+                sf = fp4_conversion<Is_nvfp4, false, false, Is_rtn, kRule>(sGX, amax, &sf_val, res, params.rbits);
             }
-            // printf("in fp4_quant_block, group_idx = %d, group_row_idx = %d, group_col_idx = %d, res[0] = %lx\n", group_idx, group_row_idx, group_col_idx, reinterpret_cast<uint64_t&>(res[0]));
-            // if (group_row_idx == 30 || group_row_idx == 31 || group_row_idx == 32) {
-            //     printf("in fp4_quant_block, group_row_idx = %d, group_col_idx = %d, res[0] = %lx\n", group_row_idx, group_col_idx, reinterpret_cast<uint64_t&>(res[0]));
-            // }
-            for (int i = 0; i < int(kGroupN / 8); i++)
+
+            // Write quantized data
+            for (int i = 0; i < int(kGroupN / 8); ++i)
             {
-                *reinterpret_cast<OutputType *>(&sXe2m1(group_row_idx, group_col_idx * (kGroupN / 2) + i * 4)) = res[i];
+                *reinterpret_cast<OutputType *>(&sXe2m1(g_row, g_col * (kGroupN / 2) + i * 4)) = res[i];
             }
 
-            // *reinterpret_cast<ElementXe2m1Packed*>(&sXe2m1(group_row_idx, group_col_idx * kGroupN / 2)) = *reinterpret_cast<ElementXe2m1Packed*>(res);
-            const int row_in_block = group_row_idx % 128;
-            const int col_in_block = group_col_idx % 4;
-            const int block_row_idx = int(group_row_idx / 128);
-            const int block_col_idx = int(group_col_idx / 4);
-            // const int block_in_row = kSmemBlockInRow;
-            const int row_sf_layout_idx = 32 * (block_row_idx * kSmemBlockInRow + block_col_idx) + row_in_block % 32;
-            const int col_sf_layout_idx = int(row_in_block / 32) * 4 + col_in_block;
-            // const int row_in_block = group_row_idx % 128;
-            // const int col_in_block = group_col_idx % 4;
-            // const int row_sf_layout_idx = int(group_row_idx / 128) * 32 + row_in_block % 32;
-            // const int col_sf_layout_idx = int(row_in_block / 32) * 4 + col_in_block;
-            sSF(row_sf_layout_idx, col_sf_layout_idx) = static_cast<ElementScaleFactor>(sf);
+            // Write scale factor (layout: 128x4 blocks, 32 rows per block)
+            const int r_in_blk = g_row % 128;
+            const int c_in_blk = g_col % 4;
+            const int blk_row = int(g_row / 128);
+            const int blk_col = int(g_col / 4);
+            const int sf_row = 32 * (blk_row * kSmemBlockInRow + blk_col) + r_in_blk % 32;
+            const int sf_col = int(r_in_blk / 32) * 4 + c_in_blk;
+            sSF(sf_row, sf_col) = static_cast<ScaleFactor>(sf);
+            __syncthreads();
         }
 
-        constexpr int kVecSizeX = sizeof(ElementXe2m1Packed) / sizeof(uint8_t);
-
-        // if (cute::thread0()) {
-        //     printf("in fp4_quant_block, sXe2m1(32, 0) = %lx\n", reinterpret_cast<uint64_t&>(sXe2m1(32, 0)));
-        //     print_tensor(sXe2m1);
-        //     printf("########################################################\n");
-        // }
+        // -------------------------------------------------------------------------
+        // Write Back Xe2m1 (Shared -> Global)
+        // -------------------------------------------------------------------------
 
         __syncthreads();
 
         for (int r_idx = tidx; r_idx < kBlockM; r_idx += blockDim.x)
         {
-// printf("in fp4_quant_block, r_idx = %d, kBlockM = %d, blockDim.x = %d, sXe2m1(r_idx, 0) = %lx\n", r_idx, kBlockM, blockDim.x, reinterpret_cast<uint64_t&>(sXe2m1(r_idx, 0)));
 #pragma unroll
-            for (int i = 0; i < int(kBlockN / 2); i += kVecSizeX)
+            for (int i = 0; i < int(kBlockN / 2); i += kVecSizeXe2m1)
             {
-                // if (cute::thread0()) {
-                //     printf("in fp4_quant_block, r_idx = %d, i = %d, sXe2m1(r_idx, i) = %lx\n", r_idx, i, reinterpret_cast<uint64_t&>(sXe2m1(r_idx, i)));
-                // }
-                *reinterpret_cast<ElementXe2m1Packed *>(&gXe2m1(r_idx, i)) = *reinterpret_cast<ElementXe2m1Packed *>(&sXe2m1(r_idx, i));
+                *reinterpret_cast<VecTypeXe2m1 *>(&gXe2m1(r_idx, i)) = *reinterpret_cast<VecTypeXe2m1 *>(&sXe2m1(r_idx, i));
             }
         }
 
-        // const int row_in_block = group_row_idx % 128;
-        // const int col_in_block = group_col_idx % 4;
-        // const int block_row_idx = int(group_row_idx / 128);
-        // const int block_col_idx = int(group_col_idx / 4);
-        // const int block_in_row = int(kNumGroupsInRow / 4);
-        // const int row_sf_layout_idx = 32 * (block_row_idx * block_in_row + block_col_idx) + row_in_block_idx;
-        // const int col_sf_layout_idx = int(row_in_block / 32) * 4 + col_in_block;
+        // -------------------------------------------------------------------------
+        // Write Back SF (Shared -> Global)
+        // -------------------------------------------------------------------------
 
-        using VecTypeSF = uint4;
-        constexpr int kVecSizeSF = sizeof(VecTypeSF) / sizeof(ElementScaleFactor);
-
-        // const int global_block_row_idx_base = int(kBlockM / 128) * m_block;
-        // const int global_block_in_row = int(params.N_rounded / (kGroupN * 4));
-        // // const index_t global_sf_row_idx_base = index_t(32) * global_block_in_row * global_block_row_idx_base;
-        // for (int r_idx = tidx; r_idx < kBlockMSF; r_idx += blockDim.x) {
-        //     const int local_block_row_idx = int(r_idx / 32);
-        //     const index_t global_sf_row_idx_base = index_t(32) * (global_block_row_idx_base + local_block_row_idx) * global_block_in_row;
-
-        //     #pragma unroll
-        //     for (int i = 0; i < int(kBlockNSF); i += kVecSizeSF) {
-        //         const int local_block_col_idx = int(i / 16);
-        //         const index_t global_sf_row_idx = global_sf_row_idx_base + index_t(32) * local_block_col_idx;
-        //         const index_t global_sf_col_idx = index_t(16) * local_block_col_idx;
-        //         *reinterpret_cast<VecTypeSF*>(&gSF(global_sf_row_idx, global_sf_col_idx)) = *reinterpret_cast<VecTypeSF*>(&sSF(r_idx, i));
-        //     }
-        // }
-
-        const int global_blk_row_stride = int(params.N_rounded / (kGroupN * 4));
-        const int global_blk_col_stride = 1;
-        const int global_blk_idx_base = (m_block * kSmemBlockInCol) * global_blk_row_stride + (n_block * kSmemBlockInRow) * global_blk_col_stride;
+        const int gbl_blk_row_stride = int(params.N_rounded / (kGroupN * 4));
+        const int gbl_blk_col_stride = 1;
+        const int gbl_blk_idx_base = (m_block * kSmemBlockInCol) * gbl_blk_row_stride + (n_block * kSmemBlockInRow) * gbl_blk_col_stride;
 
         static_assert(kVecSizeSF == kBlockNSF, "kVecSizeSF must be equal to kBlockNSF");
         for (int r_idx = tidx; r_idx < kBlockMSF; r_idx += blockDim.x)
         {
-            const int local_block_idx = int(r_idx / 32);
-            const int local_row_idx = r_idx % 32;
-            const int local_block_row_idx = int(local_block_idx / kSmemBlockInRow);
-            const int local_block_col_idx = int(local_block_idx % kSmemBlockInRow);
-            const int global_blk_idx = global_blk_idx_base + local_block_row_idx * global_blk_row_stride + local_block_col_idx * global_blk_col_stride;
-            const index_t global_row_idx = index_t(32) * global_blk_idx + local_row_idx;
-            *reinterpret_cast<VecTypeSF *>(&gSF(global_row_idx, 0)) = *reinterpret_cast<VecTypeSF *>(&sSF(r_idx, 0));
+            const int loc_blk_idx = int(r_idx / 32);
+            const int loc_row = r_idx % 32;
+            const int loc_blk_row = int(loc_blk_idx / kSmemBlockInRow);
+            const int loc_blk_col = int(loc_blk_idx % kSmemBlockInRow);
+            const int gbl_blk_idx = gbl_blk_idx_base + loc_blk_row * gbl_blk_row_stride + loc_blk_col * gbl_blk_col_stride;
+            const index_t gbl_row = index_t(32) * gbl_blk_idx + loc_row;
+            *reinterpret_cast<VecTypeSF *>(&gSF(gbl_row, 0)) = *reinterpret_cast<VecTypeSF *>(&sSF(r_idx, 0));
         }
     }
 
-    template <typename Kernel_traits, bool Is_nvfp4, bool Is_rht, bool Is_transpose, bool Is_rtn, int kSelectionRule, typename Params>
+    template <typename Kernel_traits, bool Is_nvfp4, bool Is_rht, bool Is_2d, bool Is_transpose, bool Is_rtn, int kSelectionRule, typename Params>
     inline __device__ void compute_fp4_quant(const Params &params)
     {
         // TODO: Implement the fp4 quant kernel
@@ -498,7 +499,7 @@ namespace fouroversix
         // The block index for the batch.
         const int n_block = blockIdx.y;
 
-        fouroversix::compute_fp4_quant_block<Kernel_traits, Is_nvfp4, Is_rht, Is_transpose, Is_rtn, kSelectionRule>(params, m_block, n_block);
+        fouroversix::compute_fp4_quant_block<Kernel_traits, Is_nvfp4, Is_rht, Is_2d, Is_transpose, Is_rtn, kSelectionRule>(params, m_block, n_block);
     }
 
 } // namespace fouroversix

@@ -44,10 +44,10 @@ Also, if you don't have a Blackwell GPU, you may use our reference implementatio
 To run PTQ experiments, make sure to install our test dependencies using either:
 
 ```bash
-pip install "fouroversix[extras]" --no-build-isolation
+pip install "fouroversix[evals]" --no-build-isolation
 
 # Or, if installing from source:
-pip install --no-build-isolation -e ".[extras]"
+pip install --no-build-isolation -e ".[evals]"
 ```
 
 Also, make sure all submodules are pulled and up to date:
@@ -74,8 +74,8 @@ quantize_model(model)
 model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-3.2-1B")
 quantize_model(
     model,
-    a_scale_rule=AdaptiveBlockScalingRule.always_6,
-    w_scale_rule=AdaptiveBlockScalingRule.always_6,
+    activation_scale_rule=AdaptiveBlockScalingRule.always_6,
+    weight_scale_rule=AdaptiveBlockScalingRule.always_6,
 )
 ```
 

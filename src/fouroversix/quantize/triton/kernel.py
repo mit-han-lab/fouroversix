@@ -3,27 +3,26 @@ from __future__ import annotations
 import torch
 import triton
 import triton.language as tl
-from fouroversix.quantize.reference import E2M1_MAX_VALUE, E4M3_MAX_VALUE
-from fouroversix.utils import AdaptiveBlockScalingRule, FP4Format, RoundStyle
+from fouroversix.utils import DataType, RoundStyle, ScaleRule
 from triton.tools.tensor_descriptor import TensorDescriptor
 
-E2M1_MAX_VALUE = tl.constexpr(E2M1_MAX_VALUE)
+E2M1_MAX_VALUE = tl.constexpr(6)
 E2M1_MAX_FOUR = tl.constexpr(4)
-E4M3_MAX_VALUE = tl.constexpr(E4M3_MAX_VALUE)
+E4M3_MAX_VALUE = tl.constexpr(448)
 E4M3_MAX_FOUROVERSIX = tl.constexpr(256)
 SCALE_MEGABLOCK_SIZE = tl.constexpr(512)
 
-FP4_FORMAT_MXFP4 = tl.constexpr(FP4Format.mxfp4.value)
-FP4_FORMAT_NVFP4 = tl.constexpr(FP4Format.nvfp4.value)
+DATA_TYPE_MXFP4 = tl.constexpr(DataType.mxfp4.value)
+DATA_TYPE_NVFP4 = tl.constexpr(DataType.nvfp4.value)
 
 ROUND_STYLE_NEAREST = tl.constexpr(RoundStyle.nearest.value)
 ROUND_STYLE_STOCHASTIC = tl.constexpr(RoundStyle.stochastic.value)
 
-SCALE_RULE_ABS_MAX = tl.constexpr(AdaptiveBlockScalingRule.abs_max.value)
-SCALE_RULE_ALWAYS_4 = tl.constexpr(AdaptiveBlockScalingRule.always_4.value)
-SCALE_RULE_ALWAYS_6 = tl.constexpr(AdaptiveBlockScalingRule.always_6.value)
-SCALE_RULE_L1_NORM = tl.constexpr(AdaptiveBlockScalingRule.l1_norm.value)
-SCALE_RULE_MSE = tl.constexpr(AdaptiveBlockScalingRule.mse.value)
+SCALE_RULE_ABS_MAX = tl.constexpr(ScaleRule.abs_max.value)
+SCALE_RULE_STATIC_4 = tl.constexpr(ScaleRule.static_4.value)
+SCALE_RULE_STATIC_6 = tl.constexpr(ScaleRule.static_6.value)
+SCALE_RULE_MAE = tl.constexpr(ScaleRule.mae.value)
+SCALE_RULE_MSE = tl.constexpr(ScaleRule.mse.value)
 
 
 @triton.jit
@@ -74,12 +73,13 @@ def block_scaled_fp4_quantization_kernel(
     ROUND_STYLE: tl.constexpr,
     BLOCK_SCALE_2D: tl.constexpr,
     SCALE_RULE: tl.constexpr,
+    RBITS: tl.constexpr,
 ) -> None:
     E2M1_MAX_ALLOWED_VALUE: tl.constexpr = (
-        E2M1_MAX_VALUE if SCALE_RULE == SCALE_RULE_ALWAYS_6 else E2M1_MAX_FOUR
+        E2M1_MAX_VALUE if SCALE_RULE == SCALE_RULE_STATIC_6 else E2M1_MAX_FOUR
     )
 
-    if FP4_FORMAT == FP4_FORMAT_MXFP4:
+    if FP4_FORMAT == DATA_TYPE_MXFP4:
         x_scale_blocks = x_block.reshape(128, 4, 32)
         x_scales_hp = tl.max(x_scale_blocks.abs(), axis=-1) / E2M1_MAX_ALLOWED_VALUE
         x_scales_e8m0_u32 = x_scales_hp.cast(tl.uint32, bitcast=True)
@@ -114,7 +114,7 @@ def block_scaled_fp4_quantization_kernel(
             .reshape(BLOCK_SIZE_M, BLOCK_SIZE_N // 2, 2)
             .split()
         )
-    elif FP4_FORMAT == FP4_FORMAT_NVFP4:
+    elif FP4_FORMAT == DATA_TYPE_NVFP4:
         x_amax = tl.load(x_amax_ptr)
         x_scale_blocks = x_block.reshape(128, 4, 16)
 
@@ -175,11 +175,18 @@ def block_scaled_fp4_quantization_kernel(
             pack=4,
         )
     elif ROUND_STYLE == ROUND_STYLE_STOCHASTIC:
-        rbits = tl.rand(
-            0,
-            tl.arange(0, BLOCK_SIZE_M)[:, None] * BLOCK_SIZE_N // 2
-            + tl.arange(0, BLOCK_SIZE_N // 2)[None, :],
-        ).cast(tl.uint32, bitcast=True)
+        if RBITS == -1:
+            rbits = tl.rand(
+                0,
+                tl.arange(0, BLOCK_SIZE_M)[:, None] * BLOCK_SIZE_N // 2
+                + tl.arange(0, BLOCK_SIZE_N // 2)[None, :],
+            ).cast(tl.uint32, bitcast=True)
+        else:
+            rbits = tl.full(
+                (BLOCK_SIZE_M, BLOCK_SIZE_N // 2),
+                RBITS,
+                dtype=tl.uint32,
+            )
 
         x_e2m1 = tl.inline_asm_elementwise(
             asm="""
@@ -201,7 +208,7 @@ def block_scaled_fp4_quantization_kernel(
 
 
 @triton.jit
-def nvfp4_fouroversix_quantization_kernel(
+def nvfp4_fouroversix_quantization_kernel(  # noqa: C901, PLR0912, PLR0915
     x_block,
     x_amax_ptr,
     BLOCK_SIZE_M: tl.constexpr,
@@ -209,6 +216,7 @@ def nvfp4_fouroversix_quantization_kernel(
     ROUND_STYLE: tl.constexpr,
     BLOCK_SCALE_2D: tl.constexpr,
     SCALE_RULE: tl.constexpr,
+    RBITS: tl.constexpr,
 ) -> None:
     x_amax = tl.load(x_amax_ptr)
     x_scale_blocks = x_block.reshape(128, 4, 16)
@@ -323,11 +331,19 @@ def nvfp4_fouroversix_quantization_kernel(
             pack=8,
         )
     elif ROUND_STYLE == ROUND_STYLE_STOCHASTIC:
-        rbits = tl.rand(
-            0,
-            tl.arange(0, BLOCK_SIZE_M)[:, None] * BLOCK_SIZE_N // 2
-            + tl.arange(0, BLOCK_SIZE_N // 2)[None, :],
-        ).cast(tl.uint32, bitcast=True)
+        if RBITS == -1:
+            rbits = tl.rand(
+                0,
+                tl.arange(0, BLOCK_SIZE_M)[:, None] * BLOCK_SIZE_N // 2
+                + tl.arange(0, BLOCK_SIZE_N // 2)[None, :],
+            ).cast(tl.uint32, bitcast=True)
+        else:
+            rbits = tl.full(
+                (BLOCK_SIZE_M, BLOCK_SIZE_N // 2),
+                RBITS,
+                dtype=tl.uint32,
+            )
+
         (x_e2m1_6, x_e2m1_4, x_fp16x2_6, x_fp16x2_4) = tl.inline_asm_elementwise(
             asm="""
                 {
@@ -429,39 +445,27 @@ def nvfp4_fouroversix_quantization_kernel(
     diff_6 = x_dequantized_6 - x_scale_blocks
     diff_4 = x_dequantized_4 - x_scale_blocks
 
-    if BLOCK_SCALE_2D:
-        diff_6 = diff_6.reshape(8, 16, 4, 16).permute(0, 2, 1, 3).reshape(8, 4, 256)
-        diff_4 = diff_4.reshape(8, 16, 4, 16).permute(0, 2, 1, 3).reshape(8, 4, 256)
-
     if SCALE_RULE == SCALE_RULE_ABS_MAX:
-        six_error = tl.max(
-            tl.abs(diff_6),
-            axis=-1,
-        )
-        four_error = tl.max(
-            tl.abs(diff_4),
-            axis=-1,
-        )
-    elif SCALE_RULE == SCALE_RULE_L1_NORM:
-        six_error = tl.sum(
-            tl.abs(diff_6),
-            axis=-1,
-        )
-        four_error = tl.sum(
-            tl.abs(diff_4),
-            axis=-1,
-        )
+        six_error = tl.max(tl.abs(diff_6), axis=-1)
+        four_error = tl.max(tl.abs(diff_4), axis=-1)
+    elif SCALE_RULE == SCALE_RULE_MAE:
+        six_error = tl.sum(tl.abs(diff_6), axis=-1)
+        four_error = tl.sum(tl.abs(diff_4), axis=-1)
     elif SCALE_RULE == SCALE_RULE_MSE:
-        six_error = tl.sum(
-            diff_6 * diff_6,
-            axis=-1,
-        )
-        four_error = tl.sum(
-            diff_4 * diff_4,
-            axis=-1,
-        )
+        six_error = tl.sum(diff_6 * diff_6, axis=-1)
+        four_error = tl.sum(diff_4 * diff_4, axis=-1)
 
     if BLOCK_SCALE_2D:
+        six_error = six_error.reshape(8, 16, 4).permute(0, 2, 1)
+        four_error = four_error.reshape(8, 16, 4).permute(0, 2, 1)
+
+        if SCALE_RULE == SCALE_RULE_ABS_MAX:
+            six_error = tl.max(six_error, axis=-1)
+            four_error = tl.max(four_error, axis=-1)
+        elif SCALE_RULE == SCALE_RULE_MAE or SCALE_RULE == SCALE_RULE_MSE:
+            six_error = tl.sum(six_error, axis=-1)
+            four_error = tl.sum(four_error, axis=-1)
+
         six_error = (
             six_error.expand_dims(0)
             .broadcast_to(16, 8, 4)
@@ -505,6 +509,7 @@ def fp4_quantization_kernel(
     ROUND_STYLE: tl.constexpr,
     BLOCK_SCALE_2D: tl.constexpr,
     SCALE_RULE: tl.constexpr,
+    RBITS: tl.constexpr,
 ) -> None:
     pid_m = tl.program_id(0)
     pid_n = tl.program_id(1)
@@ -520,7 +525,7 @@ def fp4_quantization_kernel(
 
     x_block = x_block.to(tl.float32)
 
-    if SCALE_RULE == SCALE_RULE_ALWAYS_6 or SCALE_RULE == SCALE_RULE_ALWAYS_4:  # noqa: PLR1714, SIM109
+    if SCALE_RULE == SCALE_RULE_STATIC_6 or SCALE_RULE == SCALE_RULE_STATIC_4:
         x_e2m1, x_scales = block_scaled_fp4_quantization_kernel(
             x_block,
             x_amax_ptr,
@@ -530,6 +535,7 @@ def fp4_quantization_kernel(
             ROUND_STYLE,
             BLOCK_SCALE_2D,
             SCALE_RULE,
+            RBITS,
         )
     else:
         x_e2m1, x_scales = nvfp4_fouroversix_quantization_kernel(
@@ -540,6 +546,7 @@ def fp4_quantization_kernel(
             ROUND_STYLE,
             BLOCK_SCALE_2D,
             SCALE_RULE,
+            RBITS,
         )
 
     e2m1_n_block_offset = pid_n * BLOCK_SIZE_N // 2
@@ -554,11 +561,12 @@ def quantize_to_fp4(
     x_amax: torch.Tensor | None = None,
     had: torch.Tensor | None = None,
     *,
-    fp4_format: FP4Format = FP4Format.nvfp4,
+    fp4_format: DataType = DataType.nvfp4,
     round_style: RoundStyle = RoundStyle.nearest,
-    scale_rule: AdaptiveBlockScalingRule = AdaptiveBlockScalingRule.mse,
+    scale_rule: ScaleRule = ScaleRule.mse,
     block_scale_2d: bool = False,
     transpose: bool = False,
+    rbits: int = 0,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
     if transpose:
         N, M = x.shape
@@ -567,12 +575,12 @@ def quantize_to_fp4(
 
     block_size_m = 128
     block_size_n = 4 * fp4_format.block_size()
-    scale_dtype = torch.float8_e4m3fn if fp4_format == FP4Format.nvfp4 else torch.uint8
+    scale_dtype = torch.float8_e4m3fn if fp4_format == DataType.nvfp4 else torch.uint8
 
     if x_amax is None:
         x_amax = (
             x.abs().max().float()
-            if fp4_format == FP4Format.nvfp4
+            if fp4_format == DataType.nvfp4
             else torch.ones(1, device=x.device, dtype=torch.float32)
         )
 
@@ -664,9 +672,10 @@ def quantize_to_fp4(
         ROUND_STYLE=round_style.value,
         BLOCK_SCALE_2D=block_scale_2d,
         SCALE_RULE=scale_rule.value,
+        RBITS=rbits,
     )
 
-    if fp4_format == FP4Format.mxfp4:
+    if fp4_format == DataType.mxfp4:
         x_sf = x_sf.view(torch.float8_e8m0fnu)
 
     return x_e2m1, x_sf, x_amax

@@ -2,20 +2,22 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from fouroversix import ModelQuantizationConfig, ScaleRule
+
 from ...resources import FOUROVERSIX_CACHE_PATH, app, cache_volume, hf_secret
 from ..experiment import Experiment
 from ..utils import PTQMethod
 from .rtn import RTNEvaluatorImpl, rtn_img
 
 if TYPE_CHECKING:
-    from fouroversix.utils import AdaptiveBlockScalingRule, DataType
+    from pathlib import Path
+
     from sqlalchemy.orm import Session
 
 
 with rtn_img.imports():
     import torch
-    from fouroversix import fp4_matmul, quantize_model
-    from fouroversix.model import FP4Linear
+    from fouroversix import FourOverSixLinear, fp4_matmul, quantize_model
     from transformers import AutoModelForCausalLM
 
 
@@ -23,8 +25,11 @@ ALPHA_CANDIDATES = [x / 10 for x in range(11)]
 WIKITEXT_TRAIN = "wikitext_train"
 
 
-class FP4LinearWithSmoothing(FP4Linear):
-    """Drop-in replacement for `FP4Linear` that implements SmoothQuant-style scaling."""
+class FourOverSixLinearWithSmoothing(FourOverSixLinear):
+    """
+    Drop-in replacement for `FourOverSixLinear` that implements SmoothQuant-style
+    scaling.
+    """
 
     def __init__(
         self,
@@ -42,16 +47,20 @@ class FP4LinearWithSmoothing(FP4Linear):
         """
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
-        """Forward pass for the FP4 linear layer with SmoothQuant-style scaling."""
+        """Forward pass with SmoothQuant-style scaling."""
 
         out = torch.empty(
             *input.shape[:-1],
             self.weight.shape[0],
             device=input.device,
-            dtype=self.out_dtype,
+            dtype=self.config.output_dtype.torch_dtype(),
         )
 
-        # Slow bmm
+        fprop_activation_config = self.config.get_activation_config()
+        fprop_weight_config = self.config.get_weight_config(
+            block_scale_2d=self.config.weight_scale_2d,
+        )
+
         for i in range(input.shape[0]):
             s = (input[i].abs().max(dim=0).values ** self.smoothquant_alpha) / (
                 self.weight.abs().max(dim=0).values ** (1 - self.smoothquant_alpha)
@@ -60,15 +69,9 @@ class FP4LinearWithSmoothing(FP4Linear):
             out[i] = fp4_matmul(
                 input[i] / s[None, :],
                 self.weight * s[None, :],
-                out_dtype=self.out_dtype,
-                input_quantize_kwargs={
-                    "scale_rule": self.a_scale_rule,
-                    "fp4_format": self.fp4_format,
-                },
-                other_quantize_kwargs={
-                    "scale_rule": self.w_scale_rule,
-                    "fp4_format": self.fp4_format,
-                },
+                out_dtype=self.config.output_dtype,
+                input_config=fprop_activation_config,
+                other_config=fprop_weight_config,
             )
 
         if self.bias is not None:
@@ -101,15 +104,15 @@ class SmoothQuantEvaluator(RTNEvaluatorImpl):
 
         smoothquant_alpha = get_smoothquant_alpha(
             model_name,
-            kwargs.get("a_scale_rule"),
-            kwargs.get("w_scale_rule"),
+            kwargs.get("activation_scale_rule"),
+            kwargs.get("weight_scale_rule"),
             session,
         )
 
         calibration_experiments = get_calibration_experiments(
             model_name,
-            kwargs.get("a_scale_rule"),
-            kwargs.get("w_scale_rule"),
+            kwargs.get("activation_scale_rule"),
+            kwargs.get("weight_scale_rule"),
             session,
         )
 
@@ -142,8 +145,8 @@ class SmoothQuantEvaluator(RTNEvaluatorImpl):
 
         smoothquant_alpha = get_smoothquant_alpha(
             model_name,
-            kwargs.get("a_scale_rule"),
-            kwargs.get("w_scale_rule"),
+            kwargs.get("activation_scale_rule"),
+            kwargs.get("weight_scale_rule"),
             session,
         )
 
@@ -161,34 +164,27 @@ class SmoothQuantEvaluator(RTNEvaluatorImpl):
         model_name: str,
         *,
         device: str,
-        dtype: DataType,
+        save_path: Path,  # noqa: ARG002
         smoothquant_alpha: float,
-        model_kwargs: dict[str, Any] | None = None,
-        **kwargs: dict[str, Any],
+        quantization_config: ModelQuantizationConfig,
+        trust_remote_code: bool,
     ) -> AutoModelForCausalLM:
         """Quantize a model using SmoothQuant."""
 
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
             device_map=device,
-            dtype=dtype.torch(),
-            **(model_kwargs or {}),
+            trust_remote_code=trust_remote_code,
         )
 
-        quantize_model(
-            model,
-            linear_cls=FP4LinearWithSmoothing,
-            smoothquant_alpha=smoothquant_alpha,
-            **kwargs,
-        )
-
+        quantize_model(model, quantization_config, smoothquant_alpha=smoothquant_alpha)
         return model
 
 
 def get_calibration_experiments(
     model_name: str,
-    a_scale_rule: AdaptiveBlockScalingRule,
-    w_scale_rule: AdaptiveBlockScalingRule,
+    activation_scale_rule: ScaleRule,
+    weight_scale_rule: ScaleRule,
     db_session: Session,
 ) -> list[Experiment]:
     return (
@@ -197,8 +193,8 @@ def get_calibration_experiments(
             Experiment.ptq_method == PTQMethod.smoothquant.value,
             Experiment.task == WIKITEXT_TRAIN,
             Experiment.model_name == model_name,
-            Experiment.a_scale_rule == a_scale_rule.value,
-            Experiment.w_scale_rule == w_scale_rule.value,
+            Experiment.activation_scale_rule == activation_scale_rule.value,
+            Experiment.weight_scale_rule == weight_scale_rule.value,
             Experiment.smoothquant_alpha.isnot(None),
         )
         .all()
@@ -207,14 +203,14 @@ def get_calibration_experiments(
 
 def get_smoothquant_alpha(
     model_name: str,
-    a_scale_rule: AdaptiveBlockScalingRule,
-    w_scale_rule: AdaptiveBlockScalingRule,
+    activation_scale_rule: ScaleRule,
+    weight_scale_rule: ScaleRule,
     session: Session,
 ) -> float | None:
     calibration_experiments = get_calibration_experiments(
         model_name,
-        a_scale_rule,
-        w_scale_rule,
+        activation_scale_rule,
+        weight_scale_rule,
         session,
     )
 

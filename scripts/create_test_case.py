@@ -10,8 +10,8 @@ with img.imports():
 
 @app.function(image=img, gpu="B200")
 def create_test_case(
-    backend_a: str = "triton",
-    backend_b: str = "pytorch",
+    backend_a: str = "cuda",
+    backend_b: str = "transformer_engine",
     scale_rule: str = "mse",
 ) -> None:
     M, N = 1024, 1024  # noqa: N806

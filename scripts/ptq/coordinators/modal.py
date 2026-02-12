@@ -42,6 +42,7 @@ class ModalEvaluationCoordinator(BaseEvaluationCoordinator):
         model_names: list[str],
         ptq_methods: list[PTQMethod],
         tasks: list[str],
+        modal_gpu: str,
         **kwargs: dict[str, Any],
     ) -> None:
         """
@@ -61,7 +62,7 @@ class ModalEvaluationCoordinator(BaseEvaluationCoordinator):
             if len(tasks_to_evaluate) == 0:
                 continue
 
-            evaluator_cls = get_evaluator(ptq_method)
+            evaluator_cls = get_evaluator(ptq_method).with_options(gpu=modal_gpu)
 
             function_calls_with_inputs.extend(
                 [
@@ -71,7 +72,6 @@ class ModalEvaluationCoordinator(BaseEvaluationCoordinator):
                         {**kwargs, **calibration_task_kwargs},
                         evaluator_cls().evaluate_on_modal.spawn(
                             model_name=model_name,
-                            ptq_method=ptq_method,
                             save_path=FOUROVERSIX_CACHE_PATH / "ptq",
                             **{
                                 **kwargs,
@@ -105,15 +105,17 @@ class ModalEvaluationCoordinator(BaseEvaluationCoordinator):
         model_names: list[str],
         ptq_methods: list[PTQMethod],
         tasks: list[str],
+        modal_gpu: str,
         **kwargs: dict[str, Any],
     ) -> None:
         """Start the evaluation coordinator."""
 
-        self.run_calibration_tasks(model_names, ptq_methods, tasks, **kwargs)
+        self.run_calibration_tasks(model_names, ptq_methods, tasks, modal_gpu, **kwargs)
 
+        models_and_ptq_methods = list(itertools.product(model_names, ptq_methods))
         function_calls = []
 
-        for model_name, ptq_method in itertools.product(model_names, ptq_methods):
+        for model_name, ptq_method in models_and_ptq_methods:
             tasks_to_evaluate = self.get_tasks_to_evaluate(
                 model_name,
                 ptq_method,
@@ -123,7 +125,7 @@ class ModalEvaluationCoordinator(BaseEvaluationCoordinator):
             if len(tasks_to_evaluate) == 0:
                 continue
 
-            evaluator_cls = get_evaluator(ptq_method)
+            evaluator_cls = get_evaluator(ptq_method).with_options(gpu=modal_gpu)
 
             calibrated_kwargs = evaluator_cls.get_calibrated_kwargs(
                 model_name,
@@ -134,18 +136,17 @@ class ModalEvaluationCoordinator(BaseEvaluationCoordinator):
             function_calls.append(
                 evaluator_cls().evaluate_on_modal.spawn(
                     model_name=model_name,
-                    ptq_method=ptq_method,
                     tasks=tasks_to_evaluate,
                     save_path=FOUROVERSIX_CACHE_PATH / "ptq",
                     **{**kwargs, **calibrated_kwargs},
                 ),
             )
 
-        results = modal.FunctionCall.gather(*function_calls)
+        all_results = modal.FunctionCall.gather(*function_calls)
 
-        for (model_name, ptq_method), result in zip(
-            itertools.product(model_names, ptq_methods),
-            results,
+        for (model_name, ptq_method), results in zip(
+            models_and_ptq_methods,
+            all_results,
             strict=True,
         ):
-            self.save_results(model_name, ptq_method, kwargs, result)
+            self.save_results(model_name, ptq_method, kwargs, results)

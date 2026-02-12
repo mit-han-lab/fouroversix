@@ -3,15 +3,17 @@ import itertools
 import pytest
 import torch
 from fouroversix import (
-    AdaptiveBlockScalingRule,
-    FP4Format,
+    DataType,
+    QuantizationConfig,
     QuantizeBackend,
     RoundStyle,
+    ScaleRule,
     quantize_to_fp4,
 )
-from fouroversix.quantize import get_rht_matrix
+from fouroversix.quantize.frontend import AVAILABLE_BACKENDS
+from fouroversix.quantize.quantized_tensor import from_blocked
 
-MSE_L1_NORM_MISMATCH_TOLERANCE = 1e-3
+MAE_MSE_MISMATCH_TOLERANCE = 1e-3
 NUM_RANDOM_SEEDS = 10
 
 
@@ -33,50 +35,60 @@ NUM_RANDOM_SEEDS = 10
     ),
 )
 @pytest.mark.parametrize("block_scale_2d", ["block_scale_2d", "no_block_scale_2d"])
-@pytest.mark.parametrize("fp4_format", [FP4Format.nvfp4])
-@pytest.mark.parametrize("had", ["had", "no_had"])
+@pytest.mark.parametrize("dtype", [DataType.nvfp4])
+@pytest.mark.parametrize("rht", ["rht", "no_rht"])
 @pytest.mark.parametrize(
     "scale_rule",
     [
-        AdaptiveBlockScalingRule.abs_max,
-        AdaptiveBlockScalingRule.l1_norm,
-        AdaptiveBlockScalingRule.mse,
-        AdaptiveBlockScalingRule.always_4,
-        AdaptiveBlockScalingRule.always_6,
+        ScaleRule.abs_max,
+        ScaleRule.mae,
+        ScaleRule.mse,
+        ScaleRule.static_4,
+        ScaleRule.static_6,
     ],
 )
 @pytest.mark.parametrize("round_style", [RoundStyle.nearest, RoundStyle.stochastic])
 @pytest.mark.parametrize("transpose", ["transpose", "no_transpose"])
-def test_backend_outputs_are_consistent(
+def test_backend_outputs_are_consistent(  # noqa: C901, PLR0915
     input_type: str,
     input_shape: tuple[int, int],
     backend_a: QuantizeBackend,
     backend_b: QuantizeBackend,
     *,
     block_scale_2d: str,
-    fp4_format: FP4Format,
-    had: str,
+    dtype: DataType,
+    rht: str,
     round_style: RoundStyle,
-    scale_rule: AdaptiveBlockScalingRule,
+    scale_rule: ScaleRule,
     transpose: str,
 ) -> None:
     torch.set_printoptions(precision=10)
 
-    if not backend_a.is_available() or not backend_b.is_available():
+    backend_a_cls = AVAILABLE_BACKENDS[backend_a]
+    backend_b_cls = AVAILABLE_BACKENDS[backend_b]
+
+    if not backend_a_cls.is_available() or not backend_b_cls.is_available():
         pytest.skip("Backend is not available")
 
-    block_scale_2d = block_scale_2d == "block_scale_2d"
-    had = had == "had"
-    transpose = transpose == "transpose"
+    config_a = QuantizationConfig(
+        backend=backend_a,
+        block_scale_2d=block_scale_2d == "block_scale_2d",
+        dtype=dtype,
+        rht=rht == "rht",
+        round_style=round_style,
+        scale_rule=scale_rule,
+        transpose=transpose == "transpose",
+    )
 
-    kwargs = {
-        "block_scale_2d": block_scale_2d,
-        "fp4_format": fp4_format,
-        "had": get_rht_matrix() if had else None,
-        "round_style": round_style,
-        "scale_rule": scale_rule,
-        "transpose": transpose,
-    }
+    config_b = QuantizationConfig(
+        backend=backend_b,
+        block_scale_2d=block_scale_2d == "block_scale_2d",
+        dtype=dtype,
+        rht=rht == "rht",
+        round_style=round_style,
+        scale_rule=scale_rule,
+        transpose=transpose == "transpose",
+    )
 
     if round_style == RoundStyle.stochastic:
         pytest.xfail("This test is not currently targeting stochastic rounding")
@@ -99,80 +111,86 @@ def test_backend_outputs_are_consistent(
             msg = f"Invalid input type: {input_type}"
             raise ValueError(msg)
 
-        if not backend_a.is_supported(x, **kwargs) or not backend_b.is_supported(
+        if not backend_a_cls.is_supported(
             x,
-            **kwargs,
+            config_a,
+        ) or not backend_b_cls.is_supported(
+            x,
+            config_b,
         ):
             pytest.skip("Backend is not supported")
 
-        quantized_a = quantize_to_fp4(x, backend=backend_a, **kwargs)
-        quantized_b = quantize_to_fp4(x, backend=backend_b, **kwargs)
+        quantized_a = quantize_to_fp4(x.clone(), config_a)
+        quantized_b = quantize_to_fp4(x.clone(), config_b)
 
-        assert torch.allclose(quantized_a.amax, quantized_b.amax)
+        if not torch.allclose(quantized_a.amax, quantized_b.amax):
+            print("Backends A and B have different amax values!")
+            print(f"{backend_a}: {quantized_a.amax}")
+            print(f"{backend_b}: {quantized_b.amax}")
+            pytest.fail("Backends A and B have different amax values!")
 
-        sf_a = quantized_a.scale_factors.bfloat16()
-        sf_b = quantized_b.scale_factors.bfloat16()
+        sf_a = from_blocked(
+            quantized_a.scale_factors.bfloat16(),
+            (input_shape[0], input_shape[1] // 16),
+        )
+        sf_b = from_blocked(
+            quantized_b.scale_factors.bfloat16(),
+            (input_shape[0], input_shape[1] // 16),
+        )
 
-        if scale_rule in {
-            AdaptiveBlockScalingRule.always_6,
-            AdaptiveBlockScalingRule.always_4,
-            AdaptiveBlockScalingRule.abs_max,
-        }:
-            assert torch.allclose(sf_a, sf_b)
-            assert torch.allclose(quantized_a.e2m1_values, quantized_b.e2m1_values)
-        else:
-            # When computing 4/6 with the MSE and L1 norm scale rules, computing the
-            # errors requires summing the errors in each block of 16 values. This
-            # operation executes differently (elements are summed in different orders,
-            # and floating-point addition is not associative) in PyTorch and Triton, and
-            # can not be easily made deterministic in a way that allows for good
-            # performance. As a result, we allow a small number of mismatches between
-            # the scale factors and e2m1 values for these two rules. Fortunately,
-            # abs_max does not involve a summation, so we can use it to test the
-            # correctness of the rest of the 4/6 implementation.
+        # When computing 4/6 with the MAE and MSE scale rules, computing the errors
+        # requires summing the errors in each block of 16 values. This operation
+        # differently (elements are summed in different orders, and floating-point
+        # addition is not associative) in PyTorch and Triton, and can not be easily made
+        # deterministic in a way that allows for good performance. As a result, we allow
+        # a small number of mismatches between the scale factors and values for these
+        # two rules. Fortunately, abs_max does not involve a summation, so we can use it
+        # to test the correctness of the rest of the 4/6 implementation.
+        scale_factors_mismatch_prop = (sf_a != sf_b).sum() / sf_a.numel()
 
-            scale_factors_mismatch_prop = (sf_a != sf_b).sum() / sf_a.numel()
-            assert scale_factors_mismatch_prop < MSE_L1_NORM_MISMATCH_TOLERANCE
+        if (
+            scale_rule in {ScaleRule.static_6, ScaleRule.static_4, ScaleRule.abs_max}
+            and scale_factors_mismatch_prop > 0
+        ) or scale_factors_mismatch_prop >= MAE_MSE_MISMATCH_TOLERANCE:
+            print(
+                "Backends A and B have different scale factors! "
+                f"{scale_factors_mismatch_prop:.2%} mismatch",
+            )
 
-            e2m1_values_mismatch_prop = (
-                quantized_a.e2m1_values != quantized_b.e2m1_values
-            ).sum() / quantized_a.e2m1_values.numel()
-            assert e2m1_values_mismatch_prop < MSE_L1_NORM_MISMATCH_TOLERANCE
+            [i, *_], [j, *_] = torch.where(sf_a != sf_b)
+            print(backend_a)
+            print("sf", sf_a[i, j])
+            print("e2m1", quantized_a.values[i, 8 * j : 8 * (j + 1)])
+            print(backend_b)
+            print("sf", sf_b[i, j])
+            print("e2m1", quantized_b.values[i, 8 * j : 8 * (j + 1)])
+            print("original")
+            print("x", x[i, 16 * j : 16 * (j + 1)])
+            pytest.fail("Backends A and B have different scale factors!")
 
+        values_mismatch_prop = (
+            quantized_a.values != quantized_b.values
+        ).sum() / quantized_a.values.numel()
 
-@pytest.mark.parametrize(
-    "scale_rule",
-    [
-        AdaptiveBlockScalingRule.abs_max,
-        AdaptiveBlockScalingRule.l1_norm,
-        AdaptiveBlockScalingRule.mse,
-        AdaptiveBlockScalingRule.always_4,
-        AdaptiveBlockScalingRule.always_6,
-    ],
-)
-def test_zeros(scale_rule: AdaptiveBlockScalingRule) -> None:
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+        if (
+            scale_rule in {ScaleRule.static_6, ScaleRule.static_4, ScaleRule.abs_max}
+            and values_mismatch_prop > 0
+        ) or values_mismatch_prop >= MAE_MSE_MISMATCH_TOLERANCE:
+            print(
+                "Backends A and B have different e2m1 values! "
+                f"{values_mismatch_prop:.2%} mismatch",
+            )
 
-    x = torch.zeros(1024, 1024, dtype=torch.bfloat16, device=device)
-    x_e2m1, x_sf, x_normconst = quantize_to_fp4(
-        x,
-        backend=QuantizeBackend.pytorch,
-        scale_rule=scale_rule,
-    )
-
-    x_e2m1_expected = torch.zeros(1024, 512, dtype=torch.uint8, device=device)
-    x_sf_expected = torch.full(
-        (1024 * 1024 // 16,),
-        0,
-        dtype=torch.float8_e4m3fn,
-        device=device,
-    )
-    x_normconst_expected = torch.tensor(
-        0,
-        dtype=torch.bfloat16,
-        device=device,
-    )
-
-    assert torch.allclose(x_normconst, x_normconst_expected)
-    assert torch.allclose(x_sf.bfloat16(), x_sf_expected.bfloat16())
-    assert torch.allclose(x_e2m1, x_e2m1_expected)
+            [i, *_], [j, *_] = torch.where(
+                quantized_a.values != quantized_b.values,
+            )
+            print(i, j)
+            print("amax", quantized_a.amax)
+            print("sf", sf_a[i, j // 8])
+            print(backend_a)
+            print("e2m1", quantized_a.values[i, 8 * (j // 8) : 8 * (j // 8 + 1)])
+            print(backend_b)
+            print("e2m1", quantized_b.values[i, 8 * (j // 8) : 8 * (j // 8 + 1)])
+            print("original")
+            print("x", x[i, 16 * (j // 8) : 16 * (j // 8 + 1)])
+            pytest.fail("Backends A and B have different e2m1 values!")

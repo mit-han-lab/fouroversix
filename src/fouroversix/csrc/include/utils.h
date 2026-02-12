@@ -350,17 +350,30 @@ namespace fouroversix
         __device__ __forceinline__
             OutputType
             convert(InputType const &x,
-                    // Only used when Is_4o6 is true
-                    const ScaleFactorType sf /*nullable*/,
+                    const float amax,
+                    const ScaleFactorType sf,
+                    const uint32_t rbits,
                     // Usage depends on Is_rtn
                     ErrorType *err /*nullable*/)
         {
             InputType x_scaled;
+            constexpr float E2M1_MAX_VALUE = 6.0f;
+            constexpr float E2M1_MAX_FOUR = 4.0f;
+            constexpr float E4M3_MAX_VALUE = 448.0f;
+            constexpr float E4M3_MAX_FOUROVERSIX = 256.0f;
 
-            #pragma unroll
+            constexpr float e2m1_limit = kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::STATIC_4 ? E2M1_MAX_FOUR : E2M1_MAX_VALUE;
+            constexpr float e4m3_limit = (kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::STATIC_6 || kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::STATIC_4)
+                                             ? E4M3_MAX_VALUE
+                                             : E4M3_MAX_FOUROVERSIX;
+            const float encode_scale = e4m3_limit * e2m1_limit / amax;
+            const float decode_scale = 1.0 / encode_scale;
+            const float block_scale_inv = fminf(1.0f / (decode_scale * sf), std::numeric_limits<float>::max());
+
+#pragma unroll
             for (int i = 0; i < 8; ++i)
             {
-                x_scaled[i] = x[i] / sf;
+                x_scaled[i] = x[i] * block_scale_inv;
             }
 
             unsigned out;
@@ -399,61 +412,61 @@ namespace fouroversix
                     unsigned short out_dequant_4_hi = (out_dequant_4 >> 16) & 0xFFFF;
                     unsigned short out_dequant_4_lo = out_dequant_4 & 0xFFFF;
 
-                    float val0 = __half2float(__ushort_as_half(out_dequant_1_lo));
-                    float val1 = __half2float(__ushort_as_half(out_dequant_1_hi));
-                    float val2 = __half2float(__ushort_as_half(out_dequant_2_lo));
-                    float val3 = __half2float(__ushort_as_half(out_dequant_2_hi));
-                    float val4 = __half2float(__ushort_as_half(out_dequant_3_lo));
-                    float val5 = __half2float(__ushort_as_half(out_dequant_3_hi));
-                    float val6 = __half2float(__ushort_as_half(out_dequant_4_lo));
-                    float val7 = __half2float(__ushort_as_half(out_dequant_4_hi));
+                    float val0 = __half2float(__ushort_as_half(out_dequant_1_lo)) * sf * amax / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX);
+                    float val1 = __half2float(__ushort_as_half(out_dequant_1_hi)) * sf * amax / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX);
+                    float val2 = __half2float(__ushort_as_half(out_dequant_2_lo)) * sf * amax / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX);
+                    float val3 = __half2float(__ushort_as_half(out_dequant_2_hi)) * sf * amax / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX);
+                    float val4 = __half2float(__ushort_as_half(out_dequant_3_lo)) * sf * amax / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX);
+                    float val5 = __half2float(__ushort_as_half(out_dequant_3_hi)) * sf * amax / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX);
+                    float val6 = __half2float(__ushort_as_half(out_dequant_4_lo)) * sf * amax / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX);
+                    float val7 = __half2float(__ushort_as_half(out_dequant_4_hi)) * sf * amax / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX);
 
-                    if constexpr (kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::L1_NORM_4o6)
+                    if constexpr (kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::MAE_4o6)
                     {
-                        *err += std::abs(val0 * sf - x[0]);
-                        *err += std::abs(val1 * sf - x[1]);
-                        *err += std::abs(val2 * sf - x[2]);
-                        *err += std::abs(val3 * sf - x[3]);
-                        *err += std::abs(val4 * sf - x[4]);
-                        *err += std::abs(val5 * sf - x[5]);
-                        *err += std::abs(val6 * sf - x[6]);
-                        *err += std::abs(val7 * sf - x[7]);
+                        *err += std::abs(val0 - x[0]);
+                        *err += std::abs(val1 - x[1]);
+                        *err += std::abs(val2 - x[2]);
+                        *err += std::abs(val3 - x[3]);
+                        *err += std::abs(val4 - x[4]);
+                        *err += std::abs(val5 - x[5]);
+                        *err += std::abs(val6 - x[6]);
+                        *err += std::abs(val7 - x[7]);
                     }
                     else if constexpr (kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::MSE_4o6)
                     {
-                        *err += (val0 * sf - x[0]) * (val0 * sf - x[0]);
-                        *err += (val1 * sf - x[1]) * (val1 * sf - x[1]);
-                        *err += (val2 * sf - x[2]) * (val2 * sf - x[2]);
-                        *err += (val3 * sf - x[3]) * (val3 * sf - x[3]);
-                        *err += (val4 * sf - x[4]) * (val4 * sf - x[4]);
-                        *err += (val5 * sf - x[5]) * (val5 * sf - x[5]);
-                        *err += (val6 * sf - x[6]) * (val6 * sf - x[6]);
-                        *err += (val7 * sf - x[7]) * (val7 * sf - x[7]);
+                        *err += (val0 - x[0]) * (val0 - x[0]);
+                        *err += (val1 - x[1]) * (val1 - x[1]);
+                        *err += (val2 - x[2]) * (val2 - x[2]);
+                        *err += (val3 - x[3]) * (val3 - x[3]);
+                        *err += (val4 - x[4]) * (val4 - x[4]);
+                        *err += (val5 - x[5]) * (val5 - x[5]);
+                        *err += (val6 - x[6]) * (val6 - x[6]);
+                        *err += (val7 - x[7]) * (val7 - x[7]);
                     }
                     else if constexpr (kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::ABS_MAX_4o6)
                     {
-                        float val0_err = std::abs(val0 * sf - x[0]);
+                        float val0_err = std::abs(val0 - x[0]);
                         if (val0_err > *err)
                             *err = val0_err;
-                        float val1_err = std::abs(val1 * sf - x[1]);
+                        float val1_err = std::abs(val1 - x[1]);
                         if (val1_err > *err)
                             *err = val1_err;
-                        float val2_err = std::abs(val2 * sf - x[2]);
+                        float val2_err = std::abs(val2 - x[2]);
                         if (val2_err > *err)
                             *err = val2_err;
-                        float val3_err = std::abs(val3 * sf - x[3]);
+                        float val3_err = std::abs(val3 - x[3]);
                         if (val3_err > *err)
                             *err = val3_err;
-                        float val4_err = std::abs(val4 * sf - x[4]);
+                        float val4_err = std::abs(val4 - x[4]);
                         if (val4_err > *err)
                             *err = val4_err;
-                        float val5_err = std::abs(val5 * sf - x[5]);
+                        float val5_err = std::abs(val5 - x[5]);
                         if (val5_err > *err)
                             *err = val5_err;
-                        float val6_err = std::abs(val6 * sf - x[6]);
+                        float val6_err = std::abs(val6 - x[6]);
                         if (val6_err > *err)
                             *err = val6_err;
-                        float val7_err = std::abs(val7 * sf - x[7]);
+                        float val7_err = std::abs(val7 - x[7]);
                         if (val7_err > *err)
                             *err = val7_err;
                     }
@@ -483,13 +496,128 @@ namespace fouroversix
             }
             else
             {
-                // TODO: implement
+                if constexpr (Is_4o6)
+                {
+                    unsigned out_dequant_1;
+                    unsigned out_dequant_2;
+                    unsigned out_dequant_3;
+                    unsigned out_dequant_4;
+
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ == 1000 || __CUDA_ARCH__ == 1030)
+                    asm volatile(
+                        "{\n"
+                        ".reg .b16 tmp0, tmp1;\n"
+                        ".reg .b8 byte0, byte1;\n"
+                        "cvt.rs.satfinite.e2m1x4.f32   tmp0, {%8, %7, %6, %5}, %13;\n"
+                        "mov.b16 {byte1, byte0}, tmp0;\n"
+                        "cvt.rn.f16x2.e2m1x2 %1, byte0;\n"
+                        "cvt.rn.f16x2.e2m1x2 %2, byte1;\n"
+                        "cvt.rs.satfinite.e2m1x4.f32   tmp1, {%12, %11, %10, %9}, %14;\n"
+                        "mov.b16 {byte1, byte0}, tmp1;\n"
+                        "cvt.rn.f16x2.e2m1x2 %3, byte0;\n"
+                        "cvt.rn.f16x2.e2m1x2 %4, byte1;\n"
+                        "mov.b32 %0, {tmp0, tmp1};\n"
+                        "}"
+                        : "=r"(out), "=r"(out_dequant_1), "=r"(out_dequant_2), "=r"(out_dequant_3), "=r"(out_dequant_4) : "f"(x_scaled[0]), "f"(x_scaled[1]), "f"(x_scaled[2]), "f"(x_scaled[3]), "f"(x_scaled[4]), "f"(x_scaled[5]), "f"(x_scaled[6]), "f"(x_scaled[7]), "r"(rbits), "r"(rbits));
+#endif
+
+                    unsigned short out_dequant_1_hi = (out_dequant_1 >> 16) & 0xFFFF;
+                    unsigned short out_dequant_1_lo = out_dequant_1 & 0xFFFF;
+                    unsigned short out_dequant_2_hi = (out_dequant_2 >> 16) & 0xFFFF;
+                    unsigned short out_dequant_2_lo = out_dequant_2 & 0xFFFF;
+                    unsigned short out_dequant_3_hi = (out_dequant_3 >> 16) & 0xFFFF;
+                    unsigned short out_dequant_3_lo = out_dequant_3 & 0xFFFF;
+                    unsigned short out_dequant_4_hi = (out_dequant_4 >> 16) & 0xFFFF;
+                    unsigned short out_dequant_4_lo = out_dequant_4 & 0xFFFF;
+
+                    float val0 = __half2float(__ushort_as_half(out_dequant_1_lo)) * sf * amax / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX);
+                    float val1 = __half2float(__ushort_as_half(out_dequant_1_hi)) * sf * amax / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX);
+                    float val2 = __half2float(__ushort_as_half(out_dequant_2_lo)) * sf * amax / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX);
+                    float val3 = __half2float(__ushort_as_half(out_dequant_2_hi)) * sf * amax / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX);
+                    float val4 = __half2float(__ushort_as_half(out_dequant_3_lo)) * sf * amax / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX);
+                    float val5 = __half2float(__ushort_as_half(out_dequant_3_hi)) * sf * amax / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX);
+                    float val6 = __half2float(__ushort_as_half(out_dequant_4_lo)) * sf * amax / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX);
+                    float val7 = __half2float(__ushort_as_half(out_dequant_4_hi)) * sf * amax / (E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX);
+
+                    if constexpr (kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::MAE_4o6)
+                    {
+                        *err += std::abs(val0 - x[0]);
+                        *err += std::abs(val1 - x[1]);
+                        *err += std::abs(val2 - x[2]);
+                        *err += std::abs(val3 - x[3]);
+                        *err += std::abs(val4 - x[4]);
+                        *err += std::abs(val5 - x[5]);
+                        *err += std::abs(val6 - x[6]);
+                        *err += std::abs(val7 - x[7]);
+                    }
+                    else if constexpr (kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::MSE_4o6)
+                    {
+                        *err += (val0 - x[0]) * (val0 - x[0]);
+                        *err += (val1 - x[1]) * (val1 - x[1]);
+                        *err += (val2 - x[2]) * (val2 - x[2]);
+                        *err += (val3 - x[3]) * (val3 - x[3]);
+                        *err += (val4 - x[4]) * (val4 - x[4]);
+                        *err += (val5 - x[5]) * (val5 - x[5]);
+                        *err += (val6 - x[6]) * (val6 - x[6]);
+                        *err += (val7 - x[7]) * (val7 - x[7]);
+                    }
+                    else if constexpr (kAdaptiveBlockScalingRuleType == AdaptiveBlockScalingRuleType::ABS_MAX_4o6)
+                    {
+                        float val0_err = std::abs(val0 - x[0]);
+                        if (val0_err > *err)
+                            *err = val0_err;
+                        float val1_err = std::abs(val1 - x[1]);
+                        if (val1_err > *err)
+                            *err = val1_err;
+                        float val2_err = std::abs(val2 - x[2]);
+                        if (val2_err > *err)
+                            *err = val2_err;
+                        float val3_err = std::abs(val3 - x[3]);
+                        if (val3_err > *err)
+                            *err = val3_err;
+                        float val4_err = std::abs(val4 - x[4]);
+                        if (val4_err > *err)
+                            *err = val4_err;
+                        float val5_err = std::abs(val5 - x[5]);
+                        if (val5_err > *err)
+                            *err = val5_err;
+                        float val6_err = std::abs(val6 - x[6]);
+                        if (val6_err > *err)
+                            *err = val6_err;
+                        float val7_err = std::abs(val7 - x[7]);
+                        if (val7_err > *err)
+                            *err = val7_err;
+                    }
+                    else
+                    {
+                        printf("in Fp4ArrayQuant::convert, kAdaptiveBlockScalingRuleType = %d, not supported\n", kAdaptiveBlockScalingRuleType);
+                        assert(false);
+                    }
+
+                    return reinterpret_cast<OutputType const &>(out);
+                }
+                else
+                {
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ == 1000 || __CUDA_ARCH__ == 1030)
+                    asm volatile(
+                        "{\n"
+                        ".reg .b16 tmp0, tmp1;\n"
+                        "cvt.rs.satfinite.e2m1x4.f32   tmp0, {%4, %3, %2, %1}, %9;\n"
+                        "cvt.rs.satfinite.e2m1x4.f32   tmp1, {%8, %7, %6, %5}, %10;\n"
+                        "mov.b32 %0, {tmp0, tmp1};\n"
+                        "}"
+                        : "=r"(out) : "f"(x_scaled[0]), "f"(x_scaled[1]), "f"(x_scaled[2]), "f"(x_scaled[3]),
+                                      "f"(x_scaled[4]), "f"(x_scaled[5]), "f"(x_scaled[6]), "f"(x_scaled[7]),
+                                      "r"(rbits), "r"(rbits));
+#endif
+                    return reinterpret_cast<OutputType const &>(out);
+                }
             }
         }
     };
 
-    template <bool Is_nvfp4, bool Is_4o6, bool Is_rtn, AdaptiveBlockScalingRuleType kAdaptiveBlockScalingRuleType, typename Engine, typename Layout, typename OutputType>
-    __forceinline__ __device__ float fp4_convertion(Tensor<Engine, Layout> const &tensor, const float ts, float *sf_, OutputType *res)
+    template <bool Is_nvfp4, bool Is_2d, bool Is_4o6, bool Is_rtn, AdaptiveBlockScalingRuleType kRule, typename Engine, typename Layout, typename OutputType>
+    __forceinline__ __device__ float fp4_conversion(Tensor<Engine, Layout> const &tensor, const float amax, float *sf_, OutputType *res, const uint32_t rbits)
     {
         constexpr int numel = decltype(size(tensor))::value;
         static_assert((numel == 16 && Is_nvfp4) || numel == 32);
@@ -500,15 +628,14 @@ namespace fouroversix
 
         using InputType = cutlass::Array<float, loop_size>;
 
-        Fp4ArrayQuant<Is_4o6, Is_rtn, kAdaptiveBlockScalingRuleType> fp4_array_quant;
+        Fp4ArrayQuant<Is_4o6, Is_rtn, kRule> fp4_array_quant;
 
         if constexpr (Is_4o6)
         {
             float err[2] = {0.0f, 0.0f};
-            float sf_4o6[2] = {max(sf_[0], 1e-12f), max(sf_[1], 1e-12f)};
-            float sf_hp_4o6[2] = {max(ts * sf_[0], 1e-12f), max(ts * sf_[1], 1e-12f)};
             OutputType res_4[num_loops];
             OutputType res_6[num_loops];
+            float final_err[2] = {0.0f, 0.0f};
 
 #pragma unroll
             for (int i = 0; i < num_loops; ++i)
@@ -517,30 +644,37 @@ namespace fouroversix
 #pragma unroll
                 for (int j = 0; j < loop_size; ++j)
                 {
-                    float val = static_cast<float>(tensor(i * loop_size + j));
-                    x[j] = val;
-                    // x_4[j] = val / sf_hp_4o6[0];
-                    // x_6[j] = val / sf_hp_4o6[1];
+                    x[j] = static_cast<float>(tensor(i * loop_size + j));
                 }
-                res_4[i] = fp4_array_quant.convert(x, sf_hp_4o6[0], &err[0]);
-                res_6[i] = fp4_array_quant.convert(x, sf_hp_4o6[1], &err[1]);
+                res_4[i] = fp4_array_quant.convert(x, amax, sf_[0], rbits, &err[0]);
+                res_6[i] = fp4_array_quant.convert(x, amax, sf_[1], rbits, &err[1]);
             }
 
-            bool const pick_first = err[0] < err[1];
+            if (Is_2d){
+                // For 2D tensors we want to pick the same format for the entire tensor, to keep it simple for downstream processing.
+                // So we pick the format with smaller total error across the entire tensor.
+
+                // If the method is MAE or MSE, we need to sum the error across the entire tensor. If the method is ABS_MAX, we need to take the max error across the entire tensor.
+                using RedOp = std::conditional_t<kRule == AdaptiveBlockScalingRuleType::ABS_MAX_4o6, MaxOp<float>, SumOp<float>>;
+                RedOp op;
+                final_err[0] = Allreduce<numel>::run(err[0], op);
+                final_err[1] = Allreduce<numel>::run(err[1], op);
+            } else {
+                final_err[0] = err[0];
+                final_err[1] = err[1];
+            }
+
+            // pick_first = true means choose 4, false means choose 6
+            bool const pick_first = final_err[0] < final_err[1];
 #pragma unroll
             for (int i = 0; i < num_loops; ++i)
             {
                 res[i] = pick_first ? res_4[i] : res_6[i];
             }
-            return sf_4o6[!pick_first];
+            return sf_[!pick_first];
         }
         else
         {
-            float sf = max(sf_[0], 1e-12f);
-            float sf_hp = max(ts * sf_[0], 1e-12f);
-// if (cute::thread0()) {
-//     printf("in fp4_convertion, not 4o6, sf = %f, sf_hp = %f\n", sf, sf_hp);
-// }
 #pragma unroll
             for (int i = 0; i < num_loops; ++i)
             {
@@ -548,19 +682,12 @@ namespace fouroversix
 #pragma unroll
                 for (int j = 0; j < loop_size; ++j)
                 {
-                    float val = static_cast<float>(tensor(i * loop_size + j));
-                    // if (cute::thread0()) {
-                    //     printf("in fp4_convertion, not 4o6, i = %d, j = %d, val = %f\n", i, j, val);
-                    // }
-                    x[j] = val; // / sf_hp;
+                    x[j] = static_cast<float>(tensor(i * loop_size + j));
                 }
-                // if (cute::thread0()) {
-                //     printf("in fp4_convertion, not 4o6, i = %d, x = %f, %f, %f, %f, %f, %f, %f, %f\n", i, x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7]);
-                // }
-                res[i] = fp4_array_quant.convert(x, sf_hp, nullptr);
+                res[i] = fp4_array_quant.convert(x, amax, sf_[0], rbits, nullptr);
             }
 
-            return sf;
+            return sf_[0];
         }
     }
 

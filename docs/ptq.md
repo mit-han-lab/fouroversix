@@ -5,7 +5,7 @@
 Before doing anything, make sure you've installed fouroversix with our test dependencies:
 
 ```bash
-pip install -e .[extras] --no-build-isolation
+pip install -e .[evals] --no-build-isolation
 ```
 
 Also, make sure you've cloned all of our submodules:
@@ -56,8 +56,14 @@ No installation necessary!
 
 ### SpinQuant
 
-You just need to install Fast Hadamard Transform:
+1. Install Fast Hadamard Transform
 
 ```bash
 pip install --no-build-isolation third_party/fast-hadamard-transform
+```
+
+2. Downgrade Transformers if your installation is up-to-date
+
+```bash
+pip install "transformers<5.0"
 ```
