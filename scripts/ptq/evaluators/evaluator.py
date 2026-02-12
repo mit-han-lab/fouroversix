@@ -16,7 +16,6 @@ from fouroversix import (
     ScaleRule,
 )
 
-from ...resources import FOUROVERSIX_CACHE_PATH
 from ..utils import EvaluationFramework
 
 if TYPE_CHECKING:
@@ -169,7 +168,8 @@ class PTQEvaluator(ABC):
                     tasks=tasks,
                     model=Model(local_hf(model_name, model, config), config, None),
                     limit=limit,
-                    log_dir=(FOUROVERSIX_CACHE_PATH / "inspect_ai_logs").as_posix(),
+                    log_dir=(save_path / "inspect_ai_logs").as_posix(),
+                    display="none",
                 )
 
                 results = []
