@@ -63,7 +63,7 @@ Then, install dependencies for each PTQ method as needed, following the instruct
 ### Quantize a Model to NVFP4
 
 ```python
-from fouroversix import AdaptiveBlockScalingRule, quantize_model
+from fouroversix import LayerQuantizationConfig, ModelQuantizationConfig, quantize_model
 from transformers import AutoModelForCausalLM
 
 # NVFP4 using 4/6 with MSE block selection
@@ -72,11 +72,8 @@ quantize_model(model)
 
 # Standard NVFP4 round-to-nearest quantization
 model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-3.2-1B")
-quantize_model(
-    model,
-    activation_scale_rule=AdaptiveBlockScalingRule.always_6,
-    weight_scale_rule=AdaptiveBlockScalingRule.always_6,
-)
+config = ModelQuantizationConfig(base_config=LayerQuantizationConfig(scale_rule="static_6"))
+quantize_model(model, config)
 ```
 
 ### Quantize a Tensor to NVFP4
@@ -85,13 +82,14 @@ Check the `quantize_to_fp4` [arguments](https://github.com/mit-han-lab/fourovers
 
 ```python
 import torch
-from fouroversix import AdaptiveBlockScalingRule, quantize_to_fp4
+from fouroversix import QuantizationConfig, quantize_to_fp4
 
 x = torch.randn(1024, 1024, dtype=torch.bfloat16, device="cuda")
 x_quantized = quantize_to_fp4(x)
 
 # Standard NVFP4 round-to-nearest quantization
-x_quantized = quantize_to_fp4(x, scale_rule=AdaptiveBlockScalingRule.always_6)
+config = QuantizationConfig(scale_rule="static_6")
+x_quantized = quantize_to_fp4(x, config)
 ```
 
 ### Multiply Two NVFP4 Tensors
@@ -100,7 +98,8 @@ x_quantized = quantize_to_fp4(x, scale_rule=AdaptiveBlockScalingRule.always_6)
 from fouroversix import fp4_matmul
 
 # a and b can be either high-precision BF16 tensors, in which case they will be
-# quantized, or low-precision FP4Tensors if you've already quantized them yourself
+# quantized, or low-precision QuantizedTensors if you've already quantized them
+# yourself.
 out = fp4_matmul(a, b)
 ```
 
@@ -111,7 +110,7 @@ out = fp4_matmul(a, b)
 python -m scripts.ptq --model-name meta-llama/Llama-3.2-1B --ptq-method rtn --task wikitext
 
 # Standard NVFP4 round-to-nearest (RTN) quantization:
-python -m scripts.ptq --model-name meta-llama/Llama-3.2-1B --ptq-method rtn --task wikitext --a-scale-rule always_6 --w-scale-rule always_6
+python -m scripts.ptq --model-name meta-llama/Llama-3.2-1B --ptq-method rtn --task wikitext --a-scale-rule static_6 --w-scale-rule static_6
 
 # AWQ with 4/6:
 python -m scripts.ptq --model-name meta-llama/Llama-3.2-1B --ptq-method awq --task wikitext
@@ -127,7 +126,7 @@ The first time you launch experiments on Modal, it may take several minutes to b
 
 This repository contains three implementations of NVFP4 quantization, each of which has various limitations:
 
-- [CUDA](/src/fouroversix/csrc): Currently disabled, will be fixed soon.
+- [CUDA](/src/fouroversix/csrc): Supports most but not all operations needed for efficient NVFP4 training. More operations will be added soon. Requires a Blackwell GPU.
 - [Triton](/src/fouroversix/quantize/triton_kernel.py): Supports all operations needed for efficient NVFP4 training, including stochastic rounding, the random Hadamard transform, transposed inputs, and 2D block scaling. Requires a Blackwell GPU.
 - [PyTorch](/src/fouroversix/quantize/reference.py): A reference implementation written in PyTorch that can run on any GPU. May have some educational value. Should not be used in real-world use cases.
 
@@ -135,7 +134,7 @@ When used with 4/6, these implementations have subtle numerical differences whic
 For more details, see [here](https://github.com/mit-han-lab/fouroversix/blob/6bb13a8fc3b690154d11a1d6477bb6c2d09799e8/tests/test_correctness.py#L124-L132).
 
 Our `quantize_to_fp4` function will automatically select one of these backends based on your GPU and the quantization parameters you select.
-If you would like to force selection of a specific backend, you may specify it by setting `backend=QuantizeBackend.cuda` in `quantize_to_fp4`, or `quantize_backend=QuantizeBackend.cuda` in `quantize_model`.
+If you would like to force selection of a specific backend, you may specify it by setting `backend=QuantizeBackend.cuda` in the quantization config passed to `quantize_to_fp4`, or `quantize_backend=QuantizeBackend.cuda` in the layer and model configs passed to `quantize_model`.
 
 ## Contributing
 
