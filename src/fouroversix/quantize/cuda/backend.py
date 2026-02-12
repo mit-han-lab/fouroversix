@@ -2,7 +2,7 @@ import torch
 from fouroversix.quantize.backend import QuantizeBackendBase
 from fouroversix.quantize.config import QuantizationConfig
 from fouroversix.quantize.quantized_tensor import QuantizedTensor
-from fouroversix.utils import SM_100, SM_110, SM_120, DataType, RoundStyle
+from fouroversix.utils import BLACKWELL_SM_IDS, DataType, RoundStyle
 
 
 class CUDAQuantizeBackend(QuantizeBackendBase):
@@ -16,9 +16,10 @@ class CUDAQuantizeBackend(QuantizeBackendBase):
     def is_available(cls) -> bool:
         """Return True if the CUDA backend is available on the current machine."""
 
-        if not torch.cuda.is_available() or torch.cuda.get_device_capability()[
-            0
-        ] not in [SM_100, SM_110, SM_120]:
+        if (
+            not torch.cuda.is_available()
+            or torch.cuda.get_device_capability()[0] not in BLACKWELL_SM_IDS
+        ):
             return False
 
         try:

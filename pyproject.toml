@@ -98,6 +98,7 @@ select = [
     "ANN001",  # Allow missing annotations in Triton kernels
     "N803",  # Allow uppercase arguments to Triton kernels
     "N806",  # Allow uppercase variables in Triton kernels
+    "PLR1714", "SIM109",  # Allow multiple equality comparisons in Triton kernels
 ]
 "tests/**/test_*.py" = [
     "S101",  # Allow assert statements in tests

@@ -6,6 +6,8 @@ SM_100 = 10
 SM_110 = 11
 SM_120 = 12
 
+BLACKWELL_SM_IDS = {SM_100, SM_110, SM_120}
+
 
 class DataType(str, Enum):
     """Data types."""

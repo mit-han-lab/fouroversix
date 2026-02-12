@@ -1,6 +1,6 @@
 import torch
 from fouroversix.quantize.utils import to_blocked
-from fouroversix.utils import DataType, RoundStyle, ScaleRule
+from fouroversix.utils import BLACKWELL_SM_IDS, DataType, RoundStyle, ScaleRule
 
 from .backend import QuantizeBackendBase
 from .config import QuantizationConfig
@@ -20,7 +20,18 @@ class TransformerEngineQuantizeBackend(QuantizeBackendBase):
         machine.
         """
 
-        return torch.cuda.is_available()
+        if (
+            not torch.cuda.is_available()
+            or torch.cuda.get_device_capability()[0] not in BLACKWELL_SM_IDS
+        ):
+            return False
+
+        try:
+            import transformer_engine  # noqa: F401
+        except ModuleNotFoundError:
+            return False
+
+        return True
 
     @classmethod
     def is_supported(cls, x: torch.Tensor, config: QuantizationConfig) -> bool:
@@ -29,7 +40,7 @@ class TransformerEngineQuantizeBackend(QuantizeBackendBase):
         quantization configuration.
         """
 
-        if not cls.is_supported(x, config):
+        if not super().is_supported(x, config):
             return False
 
         if config.dtype != DataType.nvfp4 or config.scale_rule != ScaleRule.static_6:

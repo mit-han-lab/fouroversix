@@ -208,7 +208,7 @@ def block_scaled_fp4_quantization_kernel(
 
 
 @triton.jit
-def nvfp4_fouroversix_quantization_kernel(
+def nvfp4_fouroversix_quantization_kernel(  # noqa: C901, PLR0912, PLR0915
     x_block,
     x_amax_ptr,
     BLOCK_SIZE_M: tl.constexpr,
@@ -445,39 +445,27 @@ def nvfp4_fouroversix_quantization_kernel(
     diff_6 = x_dequantized_6 - x_scale_blocks
     diff_4 = x_dequantized_4 - x_scale_blocks
 
-    if BLOCK_SCALE_2D:
-        diff_6 = diff_6.reshape(8, 16, 4, 16).permute(0, 2, 1, 3).reshape(8, 4, 256)
-        diff_4 = diff_4.reshape(8, 16, 4, 16).permute(0, 2, 1, 3).reshape(8, 4, 256)
-
     if SCALE_RULE == SCALE_RULE_ABS_MAX:
-        six_error = tl.max(
-            tl.abs(diff_6),
-            axis=-1,
-        )
-        four_error = tl.max(
-            tl.abs(diff_4),
-            axis=-1,
-        )
+        six_error = tl.max(tl.abs(diff_6), axis=-1)
+        four_error = tl.max(tl.abs(diff_4), axis=-1)
     elif SCALE_RULE == SCALE_RULE_MAE:
-        six_error = tl.sum(
-            tl.abs(diff_6),
-            axis=-1,
-        )
-        four_error = tl.sum(
-            tl.abs(diff_4),
-            axis=-1,
-        )
+        six_error = tl.sum(tl.abs(diff_6), axis=-1)
+        four_error = tl.sum(tl.abs(diff_4), axis=-1)
     elif SCALE_RULE == SCALE_RULE_MSE:
-        six_error = tl.sum(
-            diff_6 * diff_6,
-            axis=-1,
-        )
-        four_error = tl.sum(
-            diff_4 * diff_4,
-            axis=-1,
-        )
+        six_error = tl.sum(diff_6 * diff_6, axis=-1)
+        four_error = tl.sum(diff_4 * diff_4, axis=-1)
 
     if BLOCK_SCALE_2D:
+        six_error = six_error.reshape(8, 16, 4).permute(0, 2, 1)
+        four_error = four_error.reshape(8, 16, 4).permute(0, 2, 1)
+
+        if SCALE_RULE == SCALE_RULE_ABS_MAX:
+            six_error = tl.max(six_error, axis=-1)
+            four_error = tl.max(four_error, axis=-1)
+        elif SCALE_RULE == SCALE_RULE_MAE or SCALE_RULE == SCALE_RULE_MSE:
+            six_error = tl.sum(six_error, axis=-1)
+            four_error = tl.sum(four_error, axis=-1)
+
         six_error = (
             six_error.expand_dims(0)
             .broadcast_to(16, 8, 4)
@@ -537,10 +525,7 @@ def fp4_quantization_kernel(
 
     x_block = x_block.to(tl.float32)
 
-    if (
-        SCALE_RULE == SCALE_RULE_STATIC_6  # noqa: PLR1714
-        or SCALE_RULE == SCALE_RULE_STATIC_4
-    ):
+    if SCALE_RULE == SCALE_RULE_STATIC_6 or SCALE_RULE == SCALE_RULE_STATIC_4:
         x_e2m1, x_scales = block_scaled_fp4_quantization_kernel(
             x_block,
             x_amax_ptr,
