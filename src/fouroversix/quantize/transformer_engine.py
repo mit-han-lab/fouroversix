@@ -1,3 +1,5 @@
+import functools
+
 import torch
 from fouroversix.quantize.utils import to_blocked
 from fouroversix.utils import BLACKWELL_SM_IDS, DataType, RoundStyle, ScaleRule
@@ -14,6 +16,7 @@ class TransformerEngineQuantizeBackend(QuantizeBackendBase):
     """
 
     @classmethod
+    @functools.lru_cache
     def is_available(cls) -> bool:
         """
         Return True if the Transformer Engine backend is available on the current

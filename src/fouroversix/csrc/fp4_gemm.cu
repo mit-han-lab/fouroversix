@@ -28,6 +28,7 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <torch/all.h>
+#include <c10/cuda/CUDAGuard.h>
 
 #include "element_traits.hpp"
 
@@ -49,6 +50,8 @@ namespace fouroversix
               typename ArchTag = cutlass::arch::Sm100>
     torch::Tensor gemm_fp4fp4_accum_fp32(torch::Tensor const &A, torch::Tensor const &B, torch::Tensor const &A_sf, torch::Tensor const &B_sf, torch::Tensor const &alpha)
     {
+        at::cuda::CUDAGuard device_guard(A.device());
+
         // C/D matrix configuration
         using ElementC = void;                        // Element type for C matrix operand
         using LayoutCTag = cutlass::layout::RowMajor; // Layout type for C matrix operand

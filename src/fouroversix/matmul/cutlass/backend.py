@@ -1,3 +1,5 @@
+import functools
+
 import torch
 from fouroversix.matmul.backend import MatmulBackendBase
 from fouroversix.quantize import QuantizedTensor
@@ -11,6 +13,7 @@ class CUTLASSMatmulBackend(MatmulBackendBase):
     """
 
     @classmethod
+    @functools.lru_cache
     def is_available(cls) -> bool:
         """Return True if the CUTLASS backend is available on the current machine."""
 
@@ -26,6 +29,24 @@ class CUTLASSMatmulBackend(MatmulBackendBase):
             return False
 
         return True
+
+    @classmethod
+    def is_supported(
+        cls,
+        input: QuantizedTensor,
+        other: QuantizedTensor,
+        *,
+        out_dtype: DataType,
+    ) -> bool:
+        """
+        Return True if the CUTLASS backend supports the given inputs and output data
+        type.
+        """
+
+        if not super().is_supported(input, other, out_dtype=out_dtype):
+            return False
+
+        return input.device.type == "cuda"
 
     @classmethod
     def fp4_matmul(

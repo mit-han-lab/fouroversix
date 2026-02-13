@@ -1,3 +1,5 @@
+import functools
+
 import torch
 from fouroversix.quantize.backend import QuantizeBackendBase
 from fouroversix.quantize.config import QuantizationConfig
@@ -13,6 +15,7 @@ class CUDAQuantizeBackend(QuantizeBackendBase):
     """
 
     @classmethod
+    @functools.lru_cache
     def is_available(cls) -> bool:
         """Return True if the CUDA backend is available on the current machine."""
 

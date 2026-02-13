@@ -97,17 +97,19 @@ def fp4_matmul(
 
     if backend is None:
         for backend_candidate in [MatmulBackend.cutlass, MatmulBackend.pytorch]:
-            if (
-                AVAILABLE_BACKENDS[backend_candidate] is not None
-                and AVAILABLE_BACKENDS[backend_candidate].is_available()
-            ):
+            if AVAILABLE_BACKENDS[backend_candidate] is not None and AVAILABLE_BACKENDS[
+                backend_candidate
+            ].is_supported(input, other, out_dtype=out_dtype):
                 backend = backend_candidate
                 break
         else:
-            msg = "No available backend found"
+            msg = "No backend found that supports the given parameters"
             raise ValueError(msg)
 
-    elif not AVAILABLE_BACKENDS[backend].is_available():
-        msg = f"Backend {backend} is not available"
+    elif not AVAILABLE_BACKENDS[backend].is_supported(
+        input, other, out_dtype=out_dtype,
+    ):
+        msg = f"Backend {backend} does not support the given parameters"
+        raise ValueError(msg)
 
     return AVAILABLE_BACKENDS[backend].fp4_matmul(input, other, out_dtype=out_dtype)

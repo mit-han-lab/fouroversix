@@ -1,3 +1,5 @@
+import functools
+
 import torch
 from fouroversix.quantize.backend import QuantizeBackendBase
 from fouroversix.quantize.config import QuantizationConfig
@@ -14,6 +16,7 @@ class TritonQuantizeBackend(QuantizeBackendBase):
     """
 
     @classmethod
+    @functools.lru_cache
     def is_available(cls) -> bool:
         """Return True if the Triton backend is available on the current machine."""
         return (
