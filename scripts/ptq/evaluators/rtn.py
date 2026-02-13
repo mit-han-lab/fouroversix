@@ -16,14 +16,18 @@ from .evaluator import PTQEvaluator
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from fouroversix import ModelQuantizationConfig
     from transformers import AutoModelForCausalLM
 
 
 rtn_img = get_image()
 
 with rtn_img.imports():
-    from fouroversix import ModelQuantizationConfig
-    from transformers import AutoConfig, AutoModelForCausalLM
+    from fouroversix.model import quantize_model
+    from transformers import (
+        AutoConfig,
+        AutoModelForCausalLM,
+    )
 
     try:
         from transformers import FourOverSixConfig as HFFourOverSixConfig
@@ -49,8 +53,8 @@ class RTNEvaluatorImpl(PTQEvaluator):
             save_path
             / "rtn"
             / (
-                f"{model_name}-{quantization_config.get_activation_scale_rule().value}"
-                f"-{quantization_config.get_weight_scale_rule().value}"
+                f"{model_name}-{quantization_config.base_config.get_activation_scale_rule().value}"
+                f"-{quantization_config.base_config.get_weight_scale_rule().value}"
             )
         )
 
@@ -70,13 +74,13 @@ class RTNEvaluatorImpl(PTQEvaluator):
                 quantize_model(model, quantization_config)
             else:
                 hf_quantization_config = HFFourOverSixConfig(
-                    activation_scale_rule=quantization_config.get_activation_scale_rule(),
-                    dtype=quantization_config.dtype,
-                    matmul_backend=quantization_config.matmul_backend,
-                    output_dtype=quantization_config.output_dtype,
-                    quantize_backend=quantization_config.quantize_backend,
-                    weight_scale_2d=quantization_config.weight_scale_2d,
-                    weight_scale_rule=quantization_config.get_weight_scale_rule(),
+                    activation_scale_rule=quantization_config.base_config.get_activation_scale_rule(),
+                    dtype=quantization_config.base_config.dtype,
+                    matmul_backend=quantization_config.base_config.matmul_backend,
+                    output_dtype=quantization_config.base_config.output_dtype,
+                    quantize_backend=quantization_config.base_config.quantize_backend,
+                    weight_scale_2d=quantization_config.base_config.weight_scale_2d,
+                    weight_scale_rule=quantization_config.base_config.get_weight_scale_rule(),
                 )
 
                 model = AutoModelForCausalLM.from_pretrained(
