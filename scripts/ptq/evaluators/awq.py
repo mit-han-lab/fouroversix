@@ -92,8 +92,8 @@ class AWQEvaluator(RTNEvaluatorImpl):
             save_path
             / "awq"
             / (
-                f"{model_name}-{quantization_config.base_config.get_activation_scale_rule().value}"
-                f"-{quantization_config.base_config.get_weight_scale_rule().value}"
+                f"{model_name}-{quantization_config.get_activation_scale_rule().value}"
+                f"-{quantization_config.get_weight_scale_rule().value}"
             )
         )
 

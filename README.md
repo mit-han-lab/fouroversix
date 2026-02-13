@@ -63,7 +63,7 @@ Then, install dependencies for each PTQ method as needed, following the instruct
 ### Quantize a Model to NVFP4
 
 ```python
-from fouroversix import LayerQuantizationConfig, ModelQuantizationConfig, quantize_model
+from fouroversix import ModelQuantizationConfig, quantize_model
 from transformers import AutoModelForCausalLM
 
 # NVFP4 using 4/6 with MSE block selection
@@ -72,7 +72,7 @@ quantize_model(model)
 
 # Standard NVFP4 round-to-nearest quantization
 model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-3.2-1B")
-config = ModelQuantizationConfig(base_config=LayerQuantizationConfig(scale_rule="static_6"))
+config = ModelQuantizationConfig(scale_rule="static_6")
 quantize_model(model, config)
 ```
 
