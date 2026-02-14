@@ -16,6 +16,11 @@ class QuantizedModule:
     _registry: ClassVar[dict[type[nn.Module], type[nn.Module]]] = {}
 
     @classmethod
+    def is_quantized_module_type(cls, module_type: type[nn.Module]) -> bool:
+        """Return True if the given module type is a quantized module."""
+        return module_type in cls._registry.values()
+
+    @classmethod
     def get_cls(
         cls,
         high_precision_cls: type[nn.Module],
