@@ -9,14 +9,12 @@ import modal
 import torch
 from fouroversix import (
     DataType,
-    LayerQuantizationConfig,
     MatmulBackend,
     ModelQuantizationConfig,
     QuantizeBackend,
     ScaleRule,
 )
 
-from ...resources import FOUROVERSIX_CACHE_PATH
 from ..utils import EvaluationFramework
 
 if TYPE_CHECKING:
@@ -87,21 +85,19 @@ class PTQEvaluator(ABC):
         with inference_context:
             model_config = AutoConfig.from_pretrained(model_name)
             quantization_config = ModelQuantizationConfig(
-                base_config=LayerQuantizationConfig(
-                    activation_scale_rule=activation_scale_rule,
-                    dtype=dtype,
-                    matmul_backend=matmul_backend,
-                    output_dtype=DataType(
-                        (
-                            str(model_config.dtype).replace("torch.", "")
-                            if model_config.dtype is not None
-                            else "bfloat16"
-                        ),
+                activation_scale_rule=activation_scale_rule,
+                dtype=dtype,
+                matmul_backend=matmul_backend,
+                output_dtype=DataType(
+                    (
+                        str(model_config.dtype).replace("torch.", "")
+                        if model_config.dtype is not None
+                        else "bfloat16"
                     ),
-                    quantize_backend=quantize_backend,
-                    weight_scale_2d=weight_scale_2d,
-                    weight_scale_rule=weight_scale_rule,
                 ),
+                quantize_backend=quantize_backend,
+                weight_scale_2d=weight_scale_2d,
+                weight_scale_rule=weight_scale_rule,
             )
 
             model = self.quantize_model(
@@ -169,7 +165,8 @@ class PTQEvaluator(ABC):
                     tasks=tasks,
                     model=Model(local_hf(model_name, model, config), config, None),
                     limit=limit,
-                    log_dir=(FOUROVERSIX_CACHE_PATH / "inspect_ai_logs").as_posix(),
+                    log_dir=(save_path / "inspect_ai_logs").as_posix(),
+                    display="none",
                 )
 
                 results = []

@@ -4,7 +4,6 @@ from fouroversix.quantize.backend import QuantizeBackendBase
 from fouroversix.quantize.config import QuantizationConfig
 from fouroversix.quantize.quantized_tensor import QuantizedTensor
 from fouroversix.quantize.utils import get_rht_matrix
-from fouroversix.utils import DataType
 
 from .reference import quantize_to_fp4
 

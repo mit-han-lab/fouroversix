@@ -28,6 +28,7 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <torch/all.h>
+#include <c10/cuda/CUDAGuard.h>
 
 #include "element_traits.hpp"
 
@@ -41,6 +42,8 @@ namespace fouroversix
     // Adapted from example 72b
     torch::Tensor gemm_mxfp4mxfp4_accum_fp32_out_bf16_tnt_sm120(torch::Tensor const &A, torch::Tensor const &B, torch::Tensor const &A_sf, torch::Tensor const &B_sf, torch::Tensor const &alpha)
     {
+        at::cuda::CUDAGuard device_guard(A.device());
+
         using ElementA = cutlass::mx_float4_t<cutlass::float_e2m1_t>;
         using ElementB = cutlass::mx_float4_t<cutlass::float_e2m1_t>;
         using ElementD = cutlass::bfloat16_t;
@@ -158,6 +161,8 @@ namespace fouroversix
     // Adapted from example 72b
     torch::Tensor gemm_nvfp4nvfp4_accum_fp32_out_bf16_tnt_sm120(torch::Tensor const &A, torch::Tensor const &B, torch::Tensor const &A_sf, torch::Tensor const &B_sf, torch::Tensor const &alpha)
     {
+        at::cuda::CUDAGuard device_guard(A.device());
+
         using ElementA = cutlass::nv_float4_t<cutlass::float_e2m1_t>;
         using ElementB = cutlass::nv_float4_t<cutlass::float_e2m1_t>;
         using ElementD = cutlass::bfloat16_t;
@@ -275,6 +280,8 @@ namespace fouroversix
     // Adapted from example 72b
     torch::Tensor gemm_nvfp4nvfp4_accum_fp32_out_fp16_tnt_sm120(torch::Tensor const &A, torch::Tensor const &B, torch::Tensor const &A_sf, torch::Tensor const &B_sf, torch::Tensor const &alpha)
     {
+        at::cuda::CUDAGuard device_guard(A.device());
+
         using ElementA = cutlass::nv_float4_t<cutlass::float_e2m1_t>;
         using ElementB = cutlass::nv_float4_t<cutlass::float_e2m1_t>;
         using ElementD = cutlass::half_t;

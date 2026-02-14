@@ -115,27 +115,63 @@ class LayerQuantizationConfig:
 
 
 @dataclass
-class ModelQuantizationConfig:
+class ModelQuantizationConfig(LayerQuantizationConfig):
     """
     Configuration for quantizing a model with Four Over Six.
 
     Args:
-        base_config (LayerQuantizationConfig): The base quantization configuration to
-            use for all layers that do not have a specific configuration. If not
-            provided, a default configuration will be used.
+        activation_scale_rule (ScaleRule | None): The scaling rule to use for activation
+            tensors. If not provided, `scale_rule` will be used.
+        dtype (DataType): The quantization data type to use for the layer. Defaults to
+            `DataType.nvfp4`.
+        gradient_scale_rule (ScaleRule | None): The scaling rule to use for gradient
+            tensors. If not provided, `scale_rule` will be used.
+        keep_master_weights (bool): Whether to keep the master weights. Defaults to
+            `False`.
+        matmul_backend (MatmulBackend | None): The backend to use for matrix
+            multiplications. If not provided, a backend will be selected automatically
+            based on the available GPU and the specified options.
+        output_dtype (DataType): The data type to use for the layer's output. Defaults
+            to `DataType.bfloat16`.
+        quantize_backend (QuantizeBackend | None): The backend to use for quantization.
+            If not provided, a backend will be selected automatically based on the
+            available GPU and the specified options.
+        scale_rule (ScaleRule): The fallback scaling rule which will be used if any of
+            the other scaling rules are not specified.
+        weight_scale_2d (bool): Whether to use 2D block scaling for weights. Should be
+            set to `True` if the layer is used for training.
+        weight_scale_rule (ScaleRule | None): The scaling rule to use for weights. If
+            not provided, `scale_rule` will be used.
+
         exclude_layers (list[str]): A list of layer names that should not be quantized.
-        layer_configs (dict[str, LayerQuantizationConfig | None]): A mapping of layer
+        layer_config_overrides (dict[str, LayerQuantizationConfig]): A mapping of layer
             names to quantization configurations to use for each layer. If a layer is
-            not specified, `base_config` will be used.
+            not specified, the attributes from this class will be used.
 
     """
 
-    base_config: LayerQuantizationConfig = field(
-        default_factory=LayerQuantizationConfig,
-    )
     exclude_layers: list[str] = field(default_factory=lambda: ["lm_head"])
-    layer_configs: dict[str, LayerQuantizationConfig] = field(default_factory=dict)
+    layer_config_overrides: dict[str, LayerQuantizationConfig] = field(
+        default_factory=dict,
+    )
+
+    def __post_init__(self) -> None:
+        """Convert layer config overrides to LayerQuantizationConfig instances."""
+
+        super().__post_init__()
+
+        if self.layer_config_overrides is not None:
+            for layer_name, layer_config in self.layer_config_overrides.items():
+                if isinstance(layer_config, dict):
+                    self.layer_config_overrides[layer_name] = LayerQuantizationConfig(
+                        **layer_config,
+                    )
 
     def get_layer_config(self, layer_name: str) -> LayerQuantizationConfig:
         """Return the quantization configuration for a given layer."""
-        return self.layer_configs.get(layer_name, self.base_config)
+
+        return (
+            self.layer_config_overrides.get(layer_name, self)
+            if self.layer_config_overrides is not None
+            else self
+        )

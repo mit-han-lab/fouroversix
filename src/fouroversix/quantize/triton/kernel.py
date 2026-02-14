@@ -3,7 +3,7 @@ from __future__ import annotations
 import torch
 import triton
 import triton.language as tl
-from fouroversix.utils import DataType, RoundStyle, ScaleRule
+from fouroversix.utils import SM_120, DataType, RoundStyle, ScaleRule
 from triton.tools.tensor_descriptor import TensorDescriptor
 
 E2M1_MAX_VALUE = tl.constexpr(6)
@@ -23,6 +23,8 @@ SCALE_RULE_STATIC_4 = tl.constexpr(ScaleRule.static_4.value)
 SCALE_RULE_STATIC_6 = tl.constexpr(ScaleRule.static_6.value)
 SCALE_RULE_MAE = tl.constexpr(ScaleRule.mae.value)
 SCALE_RULE_MSE = tl.constexpr(ScaleRule.mse.value)
+
+DEVICE_IS_SM120 = tl.constexpr(torch.cuda.get_device_capability()[0] == SM_120)
 
 
 @triton.jit
@@ -61,6 +63,33 @@ def rht_kernel(
     ).reshape(BLOCK_SIZE_M, BLOCK_SIZE_N)
 
     y_desc.store([m_block_offset, n_block_offset], y_block)
+
+
+@triton.jit
+def add_fake_rbits_kernel(
+    x_block,
+    BLOCK_SIZE_M: tl.constexpr,
+    BLOCK_SIZE_N: tl.constexpr,
+    SEED: tl.constexpr,
+) -> tl.tensor:
+    rbits = (
+        tl.rand(
+            SEED,
+            tl.arange(0, BLOCK_SIZE_M)[:, None] * BLOCK_SIZE_N
+            + tl.arange(0, BLOCK_SIZE_N)[None, :],
+        )
+        - 0.5
+    )
+
+    return tl.where(
+        tl.abs(x_block) < 2,
+        x_block + rbits / 2,
+        tl.where(
+            tl.abs(x_block) < 4,
+            x_block + rbits,
+            x_block + rbits * 2,
+        ),
+    )
 
 
 @triton.jit
@@ -156,7 +185,24 @@ def block_scaled_fp4_quantization_kernel(
             .split()
         )
 
-    if ROUND_STYLE == ROUND_STYLE_NEAREST:
+    if DEVICE_IS_SM120 and ROUND_STYLE == ROUND_STYLE_STOCHASTIC:
+        x_block_scaled_b1 = add_fake_rbits_kernel(
+            x_block_scaled_b1,
+            BLOCK_SIZE_M,
+            BLOCK_SIZE_N // 2,
+            0,
+        )
+        x_block_scaled_b2 = add_fake_rbits_kernel(
+            x_block_scaled_b2,
+            BLOCK_SIZE_M,
+            BLOCK_SIZE_N // 2,
+            1,
+        )
+
+    if ROUND_STYLE == ROUND_STYLE_NEAREST or (
+        DEVICE_IS_SM120 and ROUND_STYLE == ROUND_STYLE_STOCHASTIC
+    ):
+
         x_e2m1 = tl.inline_asm_elementwise(
             asm="""
                 {
@@ -272,7 +318,35 @@ def nvfp4_fouroversix_quantization_kernel(  # noqa: C901, PLR0912, PLR0915
         .split()
     )
 
-    if ROUND_STYLE == ROUND_STYLE_NEAREST:
+    if DEVICE_IS_SM120 and ROUND_STYLE == ROUND_STYLE_STOCHASTIC:
+        x_block_scaled_6_b1 = add_fake_rbits_kernel(
+            x_block_scaled_6_b1,
+            BLOCK_SIZE_M,
+            BLOCK_SIZE_N // 2,
+            0,
+        )
+        x_block_scaled_6_b2 = add_fake_rbits_kernel(
+            x_block_scaled_6_b2,
+            BLOCK_SIZE_M,
+            BLOCK_SIZE_N // 2,
+            1,
+        )
+        x_block_scaled_4_b1 = add_fake_rbits_kernel(
+            x_block_scaled_4_b1,
+            BLOCK_SIZE_M,
+            BLOCK_SIZE_N // 2,
+            2,
+        )
+        x_block_scaled_4_b2 = add_fake_rbits_kernel(
+            x_block_scaled_4_b2,
+            BLOCK_SIZE_M,
+            BLOCK_SIZE_N // 2,
+            3,
+        )
+
+    if ROUND_STYLE == ROUND_STYLE_NEAREST or (
+        DEVICE_IS_SM120 and ROUND_STYLE == ROUND_STYLE_STOCHASTIC
+    ):
         (x_e2m1_6, x_e2m1_4, x_fp16x2_6, x_fp16x2_4) = tl.inline_asm_elementwise(
             asm="""
                 {

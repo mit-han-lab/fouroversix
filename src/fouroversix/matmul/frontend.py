@@ -103,7 +103,7 @@ def fp4_matmul(
                 backend = backend_candidate
                 break
         else:
-            msg = "No available backend found"
+            msg = "No backend found that supports the given parameters"
             raise ValueError(msg)
 
     elif not AVAILABLE_BACKENDS[backend].is_supported(
@@ -111,9 +111,7 @@ def fp4_matmul(
         other,
         out_dtype=out_dtype,
     ):
-        msg = (
-            f"Backend {backend} does not support the given inputs and output data type"
-        )
+        msg = f"Backend {backend} does not support the given parameters"
         raise ValueError(msg)
 
     return AVAILABLE_BACKENDS[backend].fp4_matmul(input, other, out_dtype=out_dtype)

@@ -156,7 +156,6 @@ class FourOverSixLinear(nn.Linear):
                         self.out_features,
                         self.in_features // 2,
                         dtype=torch.uint8,
-                        device=self.weight.device,
                     ),
                     requires_grad=False,
                 ),
@@ -169,22 +168,18 @@ class FourOverSixLinear(nn.Linear):
                         * self.in_features
                         // self.config.dtype.block_size(),
                         dtype=self.config.dtype.scale_dtype(),
-                        device=self.weight.device,
                     ),
                     requires_grad=False,
                 ),
             )
             self.register_buffer(
                 "quantized_weight_amax",
-                nn.Parameter(
-                    torch.zeros(1, dtype=torch.float32, device=self.weight.device),
-                    requires_grad=False,
-                ),
+                nn.Parameter(torch.zeros(1, dtype=torch.float32), requires_grad=False),
             )
             self.register_buffer(
                 "quantized_weight_metadata",
                 nn.Parameter(
-                    torch.zeros(2 + 2, dtype=torch.int32, device=self.weight.device),
+                    torch.zeros(2 + 2, dtype=torch.int32),
                     requires_grad=False,
                 ),
             )
