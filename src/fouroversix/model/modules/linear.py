@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 from fouroversix.matmul import fp4_matmul
-from fouroversix.model.config import LayerQuantizationConfig
-from fouroversix.model.quantize import QuantizedLayer
+from fouroversix.model.config import ModuleQuantizationConfig
+from fouroversix.model.quantize import QuantizedModule
 from fouroversix.quantize import (
     QuantizationConfig,
     QuantizedTensor,
@@ -17,7 +17,7 @@ class FourOverSixLinearFunction(torch.autograd.Function):
     @staticmethod
     def forward(
         ctx: torch.autograd.function.FunctionCtx,
-        config: LayerQuantizationConfig,
+        config: ModuleQuantizationConfig,
         input: torch.Tensor,
         weight: torch.Tensor | QuantizedTensor,
         bias: torch.Tensor = None,
@@ -113,7 +113,7 @@ class FourOverSixLinearFunction(torch.autograd.Function):
         )
 
 
-@QuantizedLayer.register(nn.Linear)
+@QuantizedModule.register(nn.Linear)
 class FourOverSixLinear(nn.Linear):
     """
     Drop-in replacement for `nn.Linear` that quantizes weights, activations, and
@@ -123,7 +123,7 @@ class FourOverSixLinear(nn.Linear):
     def __init__(
         self,
         module: nn.Linear,
-        config: LayerQuantizationConfig,
+        config: ModuleQuantizationConfig,
     ) -> None:
         """
         Initialize the FourOverSixLinear layer.
@@ -131,7 +131,7 @@ class FourOverSixLinear(nn.Linear):
         Args:
             module (nn.Linear): The high-precision module that this quantized layer will
                 replace.
-            config (LayerQuantizationConfig): The quantization configuration to use for
+            config (ModuleQuantizationConfig): The quantization configuration to use for
                 the layer.
 
         """

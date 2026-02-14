@@ -1,11 +1,11 @@
-from .config import LayerQuantizationConfig, ModelQuantizationConfig
-from .layers import FourOverSixLinear
-from .quantize import QuantizedLayer, quantize_model
+from .config import ModelQuantizationConfig, ModuleQuantizationConfig
+from .modules import FourOverSixLinear
+from .quantize import QuantizedModule, quantize_model
 
 __all__ = [
     "FourOverSixLinear",
-    "LayerQuantizationConfig",
     "ModelQuantizationConfig",
-    "QuantizedLayer",
+    "ModuleQuantizationConfig",
+    "QuantizedModule",
     "quantize_model",
 ]
