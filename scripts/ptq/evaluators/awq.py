@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from fouroversix import FourOverSixLinear, ModelQuantizationConfig
-from fouroversix.model.quantize import QuantizedLayer
+from fouroversix.model.quantize import QuantizedModule
 
 from ...resources import (
     FOUROVERSIX_CACHE_PATH,
@@ -83,9 +83,9 @@ class AWQEvaluator(RTNEvaluatorImpl):
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
         # Replace FourOverSixLinear with FourOverSixLinearForAWQ
-        QuantizedLayer.register(
+        QuantizedModule.register(
             nn.Linear,
-            replace_existing_layers=True,
+            replace_existing_modules=True,
         )(FourOverSixLinearForAWQ)
 
         save_path = (

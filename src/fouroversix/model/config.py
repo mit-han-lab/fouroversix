@@ -6,14 +6,14 @@ from fouroversix.utils import DataType, MatmulBackend, QuantizeBackend, ScaleRul
 
 
 @dataclass
-class LayerQuantizationConfig:
+class ModuleQuantizationConfig:
     """
-    Configuration for quantizing layers with Four Over Six.
+    Configuration for quantizing modules with Four Over Six.
 
     Args:
         activation_scale_rule (ScaleRule | None): The scaling rule to use for activation
             tensors. If not provided, `scale_rule` will be used.
-        dtype (DataType): The quantization data type to use for the layer. Defaults to
+        dtype (DataType): The quantization data type to use for the module. Defaults to
             `DataType.nvfp4`.
         gradient_scale_rule (ScaleRule | None): The scaling rule to use for gradient
             tensors. If not provided, `scale_rule` will be used.
@@ -22,7 +22,7 @@ class LayerQuantizationConfig:
         matmul_backend (MatmulBackend | None): The backend to use for matrix
             multiplications. If not provided, a backend will be selected automatically
             based on the available GPU and the specified options.
-        output_dtype (DataType): The data type to use for the layer's output. Defaults
+        output_dtype (DataType): The data type to use for the module's output. Defaults
             to `DataType.bfloat16`.
         quantize_backend (QuantizeBackend | None): The backend to use for quantization.
             If not provided, a backend will be selected automatically based on the
@@ -30,7 +30,7 @@ class LayerQuantizationConfig:
         scale_rule (ScaleRule): The fallback scaling rule which will be used if any of
             the other scaling rules are not specified.
         weight_scale_2d (bool): Whether to use 2D block scaling for weights. Should be
-            set to `True` if the layer is used for training.
+            set to `True` if the module is used for training.
         weight_scale_rule (ScaleRule | None): The scaling rule to use for weights. If
             not provided, `scale_rule` will be used.
 
@@ -115,14 +115,14 @@ class LayerQuantizationConfig:
 
 
 @dataclass
-class ModelQuantizationConfig(LayerQuantizationConfig):
+class ModelQuantizationConfig(ModuleQuantizationConfig):
     """
     Configuration for quantizing a model with Four Over Six.
 
     Args:
         activation_scale_rule (ScaleRule | None): The scaling rule to use for activation
             tensors. If not provided, `scale_rule` will be used.
-        dtype (DataType): The quantization data type to use for the layer. Defaults to
+        dtype (DataType): The quantization data type to use for the module. Defaults to
             `DataType.nvfp4`.
         gradient_scale_rule (ScaleRule | None): The scaling rule to use for gradient
             tensors. If not provided, `scale_rule` will be used.
@@ -131,7 +131,7 @@ class ModelQuantizationConfig(LayerQuantizationConfig):
         matmul_backend (MatmulBackend | None): The backend to use for matrix
             multiplications. If not provided, a backend will be selected automatically
             based on the available GPU and the specified options.
-        output_dtype (DataType): The data type to use for the layer's output. Defaults
+        output_dtype (DataType): The data type to use for the module's output. Defaults
             to `DataType.bfloat16`.
         quantize_backend (QuantizeBackend | None): The backend to use for quantization.
             If not provided, a backend will be selected automatically based on the
@@ -139,39 +139,39 @@ class ModelQuantizationConfig(LayerQuantizationConfig):
         scale_rule (ScaleRule): The fallback scaling rule which will be used if any of
             the other scaling rules are not specified.
         weight_scale_2d (bool): Whether to use 2D block scaling for weights. Should be
-            set to `True` if the layer is used for training.
+            set to `True` if the module is used for training.
         weight_scale_rule (ScaleRule | None): The scaling rule to use for weights. If
             not provided, `scale_rule` will be used.
 
-        exclude_layers (list[str]): A list of layer names that should not be quantized.
-        layer_config_overrides (dict[str, LayerQuantizationConfig]): A mapping of layer
-            names to quantization configurations to use for each layer. If a layer is
-            not specified, the attributes from this class will be used.
+        module_config_overrides (dict[str, ModuleQuantizationConfig]): A mapping of
+            module names to quantization configurations to use for each module. If a
+            module is not specified, the attributes from this class will be used.
+        modules_to_not_convert (list[str]): A list of module names that should not be
+            quantized.
 
     """
 
-    exclude_layers: list[str] = field(default_factory=lambda: ["lm_head"])
-    layer_config_overrides: dict[str, LayerQuantizationConfig] = field(
+    module_config_overrides: dict[str, ModuleQuantizationConfig] = field(
         default_factory=dict,
     )
+    modules_to_not_convert: list[str] = field(default_factory=lambda: ["lm_head"])
 
     def __post_init__(self) -> None:
-        """Convert layer config overrides to LayerQuantizationConfig instances."""
+        """Convert module config overrides to ModuleQuantizationConfig instances."""
 
         super().__post_init__()
 
-        if self.layer_config_overrides is not None:
-            for layer_name, layer_config in self.layer_config_overrides.items():
-                if isinstance(layer_config, dict):
-                    self.layer_config_overrides[layer_name] = LayerQuantizationConfig(
-                        **layer_config,
+        if self.module_config_overrides is not None:
+            for module_name, module_config in self.module_config_overrides.items():
+                if isinstance(module_config, dict):
+                    self.module_config_overrides[module_name] = (
+                        ModuleQuantizationConfig(**module_config)
                     )
 
-    def get_layer_config(self, layer_name: str) -> LayerQuantizationConfig:
-        """Return the quantization configuration for a given layer."""
-
+    def get_module_config(self, module_name: str) -> ModuleQuantizationConfig:
+        """Return the quantization configuration for a given module."""
         return (
-            self.layer_config_overrides.get(layer_name, self)
-            if self.layer_config_overrides is not None
+            self.module_config_overrides.get(module_name, self)
+            if self.module_config_overrides is not None
             else self
         )

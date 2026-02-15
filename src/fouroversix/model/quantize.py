@@ -10,17 +10,22 @@ if TYPE_CHECKING:
     from .config import ModelQuantizationConfig
 
 
-class QuantizedLayer:
-    """Base class for all quantized layers."""
+class QuantizedModule:
+    """Base class for all quantized modules."""
 
     _registry: ClassVar[dict[type[nn.Module], type[nn.Module]]] = {}
+
+    @classmethod
+    def is_quantized_module_type(cls, module_type: type[nn.Module]) -> bool:
+        """Return True if the given module type is a quantized module."""
+        return module_type in cls._registry.values()
 
     @classmethod
     def get_cls(
         cls,
         high_precision_cls: type[nn.Module],
     ) -> type[nn.Module] | None:
-        """Get the quantized layer for a given high-precision layer."""
+        """Get the quantized module for a given high-precision module."""
         return cls._registry.get(high_precision_cls)
 
     @classmethod
@@ -28,23 +33,23 @@ class QuantizedLayer:
         cls,
         high_precision_cls: type[nn.Module],
         *,
-        replace_existing_layers: bool = False,
+        replace_existing_modules: bool = False,
     ) -> Callable[[type[nn.Module]], type[nn.Module]]:
-        """Register a new type of quantized layer."""
+        """Register a new type of quantized module."""
 
-        if high_precision_cls in cls._registry and not replace_existing_layers:
-            msg = f"High-precision layer {high_precision_cls} is already registered."
+        if high_precision_cls in cls._registry and not replace_existing_modules:
+            msg = f"High-precision module {high_precision_cls} is already registered."
             raise ValueError(msg)
 
         modules_to_delete = []
 
         for module_cls in cls._registry:
             if issubclass(high_precision_cls, module_cls):
-                if replace_existing_layers:
+                if replace_existing_modules:
                     modules_to_delete.append(module_cls)
                 else:
                     msg = (
-                        f"High-precision layer {high_precision_cls} is a subclass of "
+                        f"High-precision module {high_precision_cls} is a subclass of "
                         f"{module_cls}, which is already registered."
                     )
                     raise TypeError(msg)
@@ -66,18 +71,22 @@ def quantize_model(
     config: ModelQuantizationConfig,
     **kwargs: dict[str, Any],
 ) -> None:
-    for name, module in model.named_modules():
+    for module_name, module in model.named_modules():
         if (
-            name == ""
-            or name in config.exclude_layers
+            module_name == ""
+            or module_name in config.modules_to_not_convert
             or not isinstance(module, nn.Module)
         ):
             continue
 
-        layer_cls = QuantizedLayer.get_cls(type(module))
+        module_cls = QuantizedModule.get_cls(type(module))
 
-        if layer_cls is None:
+        if module_cls is None:
             continue
 
-        layer = layer_cls(module, config.get_layer_config(name), **kwargs)
-        model.set_submodule(name, layer)
+        quantized_module = module_cls(
+            module,
+            config.get_module_config(module_name),
+            **kwargs,
+        )
+        model.set_submodule(module_name, quantized_module)
