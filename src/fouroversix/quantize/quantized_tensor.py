@@ -53,6 +53,32 @@ def unpack_packed_fp4(
     ).reshape(x.shape[0], x.shape[1] * 2)
 
 
+def unpack_packed_if4(
+    x: torch.Tensor,
+    scale_factors: torch.Tensor,
+    to_dtype: torch.dtype = torch.float8_e4m3fn,
+) -> torch.Tensor:
+    if to_dtype == torch.float8_e4m3fn:
+        convert_function = convert_e2m1_to_fp8_e4m3
+    else:
+        msg = f"Unsupported dtype: {to_dtype}"
+        raise ValueError(msg)
+
+    high = (x >> 4) & 0xF
+    low = x & 0xF
+
+    x_unpacked = torch.stack(
+        [low, high],
+        dim=-1,
+    ).reshape(x.shape[0], x.shape[1] * 2 // 16, 16)
+
+    return torch.where(
+        (scale_factors.view(torch.uint8) >= 128).unsqueeze(2),
+        ((x_unpacked.to(torch.int8) << 4) >> 4).to(torch.bfloat16) * (6 / 7),
+        convert_function(x_unpacked).to(torch.bfloat16),
+    ).reshape(x.shape[0], x.shape[1] * 2)
+
+
 @dataclass
 class QuantizedTensor:
     """A quantized tensor."""
@@ -183,7 +209,10 @@ class QuantizedTensor:
         """Return a high-precision tensor with the dequantized values."""
 
         if self.values_are_packed:
-            values = unpack_packed_fp4(self.values).to(dtype)
+            if self.dtype == DataType.if4:
+                values = unpack_packed_if4(self.values, self.scale_factors).to(dtype)
+            else:
+                values = unpack_packed_fp4(self.values).to(dtype)
         else:
             values = self.values.to(dtype)
 
@@ -194,6 +223,14 @@ class QuantizedTensor:
                     self.padded_shape[0],
                     self.padded_shape[1] // self.dtype.block_size(),
                 ),
+            )
+        elif self.dtype == DataType.if4:
+            scales = torch.where(
+                self.scale_factors.view(torch.uint8) >= 128,
+                (self.scale_factors.view(torch.uint8) - 128).view(
+                    torch.float8_e4m3fn,
+                ),
+                self.scale_factors,
             )
         else:
             scales = self.scale_factors

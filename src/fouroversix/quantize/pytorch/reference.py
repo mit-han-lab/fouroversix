@@ -21,9 +21,7 @@ def fake_quantize_to_int4(
         msg = "Stochastic rounding is not supported yet for int4 quantization"
         raise NotImplementedError(msg)
 
-    return (x * (INT4_MAX_VALUE / SCALED_INT4_MAX_VALUE)).round() * (
-        SCALED_INT4_MAX_VALUE / INT4_MAX_VALUE
-    )
+    return x.clamp(min=-7, max=7).round()
 
 
 def fake_quantize_to_e2m1(
@@ -48,6 +46,10 @@ def fake_quantize_to_e2m1(
     return x.sign() * (
         step1 * mask1 + step2 * (~mask1) * mask2 + step3 * (~mask1) * (~mask2)
     )
+
+
+def quantize_bf16_to_unpacked_int4(x: torch.Tensor) -> torch.Tensor:
+    return x.clamp(min=-7, max=7).to(torch.int8).view(torch.uint8) & 0xF
 
 
 def quantize_bf16_to_unpacked_fp4(x: torch.Tensor) -> torch.Tensor:
@@ -305,8 +307,7 @@ def select_fouroversix(
 
 def select_intfloat(
     x_scale_blocks: torch.Tensor,
-    x_block_scaled_fp: torch.Tensor,
-    x_block_scaled_int: torch.Tensor,
+    x_block_scaled: torch.Tensor,
     scales: torch.Tensor,
     x_amax: torch.Tensor,
     *,
@@ -314,11 +315,11 @@ def select_intfloat(
     round_style: RoundStyle = RoundStyle.nearest,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     x_fake_quantized_fp = fake_quantize_to_e2m1(
-        x_block_scaled_fp,
+        x_block_scaled,
         round_style=round_style,
     )
     x_fake_quantized_int = fake_quantize_to_int4(
-        x_block_scaled_int,
+        x_block_scaled * (7 / 6),
         round_style=round_style,
     )
 
@@ -332,21 +333,30 @@ def select_intfloat(
         x_fake_quantized_int
         * scales.unsqueeze(1).to(x_amax.dtype)
         * x_amax
-        / (SCALED_INT4_MAX_VALUE * E4M3_MAX_VALUE)
+        * (6 / 7)
+        / (E2M1_MAX_VALUE * E4M3_MAX_VALUE)
     )
 
     if scale_rule == ScaleRule.mse:
         x_error_fp = ((x_dequantized_fp - x_scale_blocks) ** 2).sum(axis=-1)
         x_error_int = ((x_dequantized_int - x_scale_blocks) ** 2).sum(axis=-1)
 
-    select_int = (x_error_int < x_error_fp).unsqueeze(1)
+    select_int = x_error_int < x_error_fp
     x_fake_quantized = torch.where(
-        select_int,
+        select_int.unsqueeze(1),
         x_fake_quantized_int.reshape(x_scale_blocks.shape[0], -1),
         x_fake_quantized_fp.reshape(x_scale_blocks.shape[0], -1),
     )
 
-    return x_fake_quantized, scales
+    # If int is selected, keep track of this by setting the sign bit of the scale
+    # factor
+    scales_with_if4_indicator = torch.where(
+        select_int,
+        (scales.view(torch.uint8) + 128).view(torch.float8_e4m3fn),
+        scales,
+    )
+
+    return x_fake_quantized, scales_with_if4_indicator
 
 
 def quantize_to_fp4(  # noqa: C901, PLR0912
@@ -401,19 +411,14 @@ def quantize_to_fp4(  # noqa: C901, PLR0912
             scale_rule=scale_rule,
         )
     elif fp4_format == DataType.if4:
-        x_block_scaled_fp, scales = quantize_to_nvfp4(
+        x_block_scaled, scales = quantize_to_nvfp4(
             x_scale_blocks,
             x_amax,
             scale_rule=ScaleRule.static_6,
         )
-        x_block_scaled_int, _ = quantize_to_nvint4(
-            x_scale_blocks,
-            x_amax,
-        )
         x_fake_quantized, scales = select_intfloat(
             x_scale_blocks,
-            x_block_scaled_fp,
-            x_block_scaled_int,
+            x_block_scaled,
             scales,
             x_amax,
             scale_rule=scale_rule,
@@ -483,9 +488,20 @@ def quantize_to_fp4(  # noqa: C901, PLR0912
         )
 
     if pack_values:
-        x_quantized = pack_unpacked_fp4(
-            quantize_bf16_to_unpacked_fp4(x_fake_quantized.bfloat16().reshape_as(x)),
-        )
+        if fp4_format == DataType.if4:
+            x_quantized = pack_unpacked_fp4(
+                torch.where(
+                    scales.unsqueeze(1).view(torch.uint8) >= 128,
+                    quantize_bf16_to_unpacked_int4(x_fake_quantized.bfloat16()),
+                    quantize_bf16_to_unpacked_fp4(x_fake_quantized.bfloat16()),
+                ).reshape_as(x),
+            )
+        else:
+            x_quantized = pack_unpacked_fp4(
+                quantize_bf16_to_unpacked_fp4(
+                    x_fake_quantized.bfloat16().reshape_as(x),
+                ),
+            )
     else:
         x_quantized = x_fake_quantized.bfloat16().reshape_as(x)
 

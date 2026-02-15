@@ -4,6 +4,7 @@ from fouroversix.quantize.backend import QuantizeBackendBase
 from fouroversix.quantize.config import QuantizationConfig
 from fouroversix.quantize.quantized_tensor import QuantizedTensor
 from fouroversix.quantize.utils import get_rht_matrix
+from fouroversix.utils import DataType
 
 from .reference import quantize_to_fp4
 
@@ -100,7 +101,7 @@ class PyTorchQuantizeBackend(QuantizeBackendBase):
                 scale_rule=config.scale_rule,
                 block_scale_2d=config.block_scale_2d,
                 transpose=config.transpose,
-                pack_values=config.dtype != DataType.if4,
+                pack_values=True,
                 use_blackwell_scale_layout=config.dtype != DataType.if4,
             )
 
@@ -111,6 +112,6 @@ class PyTorchQuantizeBackend(QuantizeBackendBase):
             config.dtype,
             input_shape,
             config.scale_rule,
-            values_are_packed=config.dtype != DataType.if4,
+            values_are_packed=True,
             scale_factors_are_in_blackwell_layout=config.dtype != DataType.if4,
         )
