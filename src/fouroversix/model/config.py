@@ -150,6 +150,9 @@ class ModelQuantizationConfig(LayerQuantizationConfig):
 
     """
 
+    base_config: LayerQuantizationConfig = field(
+        default_factory=LayerQuantizationConfig,
+    )
     exclude_layers: list[str] = field(default_factory=lambda: ["lm_head"])
     layer_config_overrides: dict[str, LayerQuantizationConfig] = field(
         default_factory=dict,
