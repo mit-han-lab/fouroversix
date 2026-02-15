@@ -71,6 +71,7 @@ class MatmulBackend(str, Enum):
     """
 
     cutlass = "cutlass"
+    triton = "triton"
     pytorch = "pytorch"
 
 

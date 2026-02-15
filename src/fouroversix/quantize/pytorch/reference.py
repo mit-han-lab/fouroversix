@@ -513,9 +513,6 @@ def quantize_to_fp4(  # noqa: C901, PLR0912
             ),
         )
     else:
-        reshaped_scales = scales.reshape(
-            x.shape[0],
-            x.shape[1] // fp4_format.block_size(),
-        )
+        reshaped_scales = scales.flatten()
 
     return x_quantized, reshaped_scales, x_amax

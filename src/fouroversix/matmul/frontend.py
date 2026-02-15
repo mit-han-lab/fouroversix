@@ -3,10 +3,12 @@ from fouroversix.quantize import QuantizationConfig, QuantizedTensor, quantize_t
 from fouroversix.utils import MatmulBackend
 
 from .cutlass import CUTLASSMatmulBackend
+from .triton import TritonMatmulBackend
 from .pytorch import PyTorchMatmulBackend
 
 AVAILABLE_BACKENDS = {
     MatmulBackend.cutlass: CUTLASSMatmulBackend,
+    MatmulBackend.triton: TritonMatmulBackend,
     MatmulBackend.pytorch: PyTorchMatmulBackend,
 }
 
@@ -96,7 +98,11 @@ def fp4_matmul(
         other = quantize_to_fp4(other, other_config)
 
     if backend is None:
-        for backend_candidate in [MatmulBackend.cutlass, MatmulBackend.pytorch]:
+        for backend_candidate in [
+            MatmulBackend.cutlass,
+            MatmulBackend.triton,
+            MatmulBackend.pytorch,
+        ]:
             if AVAILABLE_BACKENDS[backend_candidate] is not None and AVAILABLE_BACKENDS[
                 backend_candidate
             ].is_supported(input, other, out_dtype=out_dtype):

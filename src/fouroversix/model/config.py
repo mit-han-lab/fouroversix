@@ -108,6 +108,7 @@ class ModuleQuantizationConfig:
         """Return the quantization configuration for the weight tensors."""
         return QuantizationConfig(
             backend=self.quantize_backend,
+            block_scale_2d=self.weight_scale_2d,
             dtype=self.dtype,
             scale_rule=self.get_weight_scale_rule(),
             **kwargs,
