@@ -3,9 +3,9 @@ from importlib.metadata import version
 from .matmul import fp4_matmul
 from .model import (
     FourOverSixLinear,
-    LayerQuantizationConfig,
     ModelQuantizationConfig,
-    QuantizedLayer,
+    ModuleQuantizationConfig,
+    QuantizedModule,
     quantize_model,
 )
 from .quantize import QuantizationConfig, QuantizedTensor, quantize_to_fp4
@@ -16,12 +16,12 @@ __version__ = version("fouroversix")
 __all__ = [
     "DataType",
     "FourOverSixLinear",
-    "LayerQuantizationConfig",
     "MatmulBackend",
     "ModelQuantizationConfig",
+    "ModuleQuantizationConfig",
     "QuantizationConfig",
     "QuantizeBackend",
-    "QuantizedLayer",
+    "QuantizedModule",
     "QuantizedTensor",
     "RoundStyle",
     "ScaleRule",

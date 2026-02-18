@@ -1,8 +1,10 @@
+from typing import Any
+
 import torch
 import torch.nn as nn
 from fouroversix.matmul import fp4_matmul
-from fouroversix.model.config import LayerQuantizationConfig
-from fouroversix.model.quantize import QuantizedLayer
+from fouroversix.model.config import ModuleQuantizationConfig
+from fouroversix.model.quantize import QuantizedModule
 from fouroversix.quantize import (
     QuantizationConfig,
     QuantizedTensor,
@@ -17,7 +19,7 @@ class FourOverSixLinearFunction(torch.autograd.Function):
     @staticmethod
     def forward(
         ctx: torch.autograd.function.FunctionCtx,
-        config: LayerQuantizationConfig,
+        config: ModuleQuantizationConfig,
         input: torch.Tensor,
         weight: torch.Tensor | QuantizedTensor,
         bias: torch.Tensor = None,
@@ -113,7 +115,7 @@ class FourOverSixLinearFunction(torch.autograd.Function):
         )
 
 
-@QuantizedLayer.register(nn.Linear)
+@QuantizedModule.register(nn.Linear)
 class FourOverSixLinear(nn.Linear):
     """
     Drop-in replacement for `nn.Linear` that quantizes weights, activations, and
@@ -123,7 +125,7 @@ class FourOverSixLinear(nn.Linear):
     def __init__(
         self,
         module: nn.Linear,
-        config: LayerQuantizationConfig,
+        config: ModuleQuantizationConfig,
     ) -> None:
         """
         Initialize the FourOverSixLinear layer.
@@ -131,7 +133,7 @@ class FourOverSixLinear(nn.Linear):
         Args:
             module (nn.Linear): The high-precision module that this quantized layer will
                 replace.
-            config (LayerQuantizationConfig): The quantization configuration to use for
+            config (ModuleQuantizationConfig): The quantization configuration to use for
                 the layer.
 
         """
@@ -184,15 +186,33 @@ class FourOverSixLinear(nn.Linear):
                 ),
             )
 
-        self.apply_ptq()
+    @property
+    def high_precision_parameter_names(self) -> tuple[str, ...]:
+        return ("weight",)
 
-    def apply_ptq(self) -> None:
-        """Apply post-training quantization to this layer."""
+    def get_quantized_parameters(self, weight: torch.Tensor) -> dict[str, Any]:
+        weight_config = QuantizationConfig(
+            backend=self.config.quantize_backend,
+            block_scale_2d=self.config.weight_scale_2d,
+            dtype=self.config.dtype,
+            scale_rule=self.config.get_weight_scale_rule(),
+        )
 
-        if self.weight.device.type == "meta":
-            return
+        quantized_weight = quantize_to_fp4(weight, weight_config)
 
-        self.quantized_weight()
+        return {
+            "quantized_weight_values": quantized_weight.values,
+            "quantized_weight_scale_factors": quantized_weight.scale_factors,
+            "quantized_weight_amax": quantized_weight.amax,
+            "quantized_weight_metadata": torch.tensor(
+                [
+                    quantized_weight.original_shape[0],
+                    quantized_weight.original_shape[1],
+                    quantized_weight.padded_shape[0],
+                    quantized_weight.padded_shape[1],
+                ],
+            ),
+        }
 
     def quantized_weight(self) -> QuantizedTensor:
         """
@@ -203,38 +223,8 @@ class FourOverSixLinear(nn.Linear):
         """
 
         if not hasattr(self, "_quantized_weight"):
-            if hasattr(self, "weight"):
-                weight_config = QuantizationConfig(
-                    backend=self.config.quantize_backend,
-                    block_scale_2d=self.config.weight_scale_2d,
-                    dtype=self.config.dtype,
-                    scale_rule=self.config.get_weight_scale_rule(),
-                )
-
-                quantized_weight = quantize_to_fp4(self.weight, weight_config)
-
-                if self.config.keep_master_weights:
-                    return quantized_weight
-
-                self.quantized_weight_values.data = quantized_weight.values
-                self.quantized_weight_scale_factors.data = (
-                    quantized_weight.scale_factors
-                )
-                self.quantized_weight_amax.data = quantized_weight.amax
-                self.quantized_weight_metadata.data = torch.tensor(
-                    [
-                        quantized_weight.original_shape[0],
-                        quantized_weight.original_shape[1],
-                        quantized_weight.padded_shape[0],
-                        quantized_weight.padded_shape[1],
-                    ],
-                )
-
-                self.quantized_weight_original_shape = quantized_weight.original_shape
-                self.quantized_weight_padded_shape = quantized_weight.padded_shape
-
-                del self.weight
-                self._quantized_weight = quantized_weight
+            if self.config.keep_master_weights:
+                return quantize_to_fp4(self.weight, self.config.get_weight_config())
             else:
                 original_shape = tuple(self.quantized_weight_metadata.data[:2].tolist())
                 padded_shape = tuple(self.quantized_weight_metadata.data[2:].tolist())
