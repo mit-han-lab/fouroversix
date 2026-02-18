@@ -23,9 +23,7 @@ def dequantize_if4_kernel(
         BLOCK_SIZE_N // Q_BLOCK_SIZE,
         Q_BLOCK_SIZE,
     )
-    int_values = (
-        ((unpacked_values.to(tl.int8) << 4) >> 4).cast(tl.bfloat16).cast(tl.float8e5)
-    )
+    int_values = ((unpacked_values.to(tl.int8) << 4) >> 4).cast(tl.float32)
 
     fp_values_f16x2 = tl.inline_asm_elementwise(
         asm="""
@@ -51,11 +49,11 @@ def dequantize_if4_kernel(
         tl.join(fp_values_f16_lo, fp_values_f16_hi)
         .reshape(BLOCK_SIZE_M, BLOCK_SIZE_N // Q_BLOCK_SIZE, Q_BLOCK_SIZE)
         .cast(tl.float16, bitcast=True)
-        .cast(tl.float8e5)
+        .cast(tl.float32)
     )
 
     real_values = tl.where(
-        (scale_factors.cast(tl.uint8, bitcast=True) >= 128).expand_dims(2),
+        (scale_factors < 0.0).expand_dims(2),
         int_values,
         fp_values,
     )
@@ -74,7 +72,7 @@ def dequantize_if4_kernel(
             }
         )
         for block_size_m, block_size_n, block_size_k, group_size_m in itertools.product(
-            [64, 128], [64, 128], [64, 128], [2, 4, 6]
+            [64, 128], [64, 128], [16, 32, 64, 128], [2, 4, 6]
         )
         if not [block_size_m, block_size_n, block_size_k].count(128) > 1
     ],
@@ -180,21 +178,13 @@ def matmul_kernel(
         )
 
         a_sf = tl.where(
-            a_sf.cast(tl.uint8, bitcast=True) >= 128,
-            (a_sf.cast(tl.uint8, bitcast=True) - 128)
-            .cast(tl.float8e4nv, bitcast=True)
-            .cast(tl.float32)
-            * 6
-            / 7,
+            a_sf < 0.0,
+            -a_sf.cast(tl.float32) * 6 / 7,
             a_sf,
         )
         b_sf = tl.where(
-            b_sf.cast(tl.uint8, bitcast=True) >= 128,
-            (b_sf.cast(tl.uint8, bitcast=True) - 128)
-            .cast(tl.float8e4nv, bitcast=True)
-            .cast(tl.float32)
-            * 6
-            / 7,
+            b_sf < 0.0,
+            -b_sf.cast(tl.float32) * 6 / 7,
             b_sf,
         )
 
@@ -203,7 +193,7 @@ def matmul_kernel(
                 BLOCK_SIZE_M,
                 BLOCK_SIZE_K // Q_BLOCK_SIZE,
                 Q_BLOCK_SIZE,
-            ).to(tl.float32)
+            )
             * a_sf.expand_dims(2).to(tl.float32)
         ).reshape(BLOCK_SIZE_M, BLOCK_SIZE_K)
         b_real_values = (
@@ -211,7 +201,7 @@ def matmul_kernel(
                 BLOCK_SIZE_N,
                 BLOCK_SIZE_K // Q_BLOCK_SIZE,
                 Q_BLOCK_SIZE,
-            ).to(tl.float32)
+            )
             * b_sf.expand_dims(2).to(tl.float32)
         ).reshape(BLOCK_SIZE_N, BLOCK_SIZE_K)
         accumulator += tl.dot(a_real_values, b_real_values.T) * alpha
