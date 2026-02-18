@@ -1,3 +1,4 @@
+import itertools
 import torch
 import triton
 import triton.language as tl
@@ -6,9 +7,6 @@ from fouroversix.quantize import QuantizedTensor
 from fouroversix.utils import DataType
 
 Q_BLOCK_SIZE = tl.constexpr(16)
-BLOCK_SIZE_M = 64
-BLOCK_SIZE_N = 64
-BLOCK_SIZE_K = 64
 
 
 @triton.jit
@@ -65,6 +63,23 @@ def dequantize_if4_kernel(
     return real_values.reshape(BLOCK_SIZE_M, BLOCK_SIZE_N)
 
 
+@triton.autotune(
+    configs=[
+        triton.Config(
+            {
+                "BLOCK_SIZE_M": block_size_m,
+                "BLOCK_SIZE_N": block_size_n,
+                "BLOCK_SIZE_K": block_size_k,
+                "GROUP_SIZE_M": group_size_m,
+            }
+        )
+        for block_size_m, block_size_n, block_size_k, group_size_m in itertools.product(
+            [64, 128], [64, 128], [64, 128], [2, 4, 6]
+        )
+        if not [block_size_m, block_size_n, block_size_k].count(128) > 1
+    ],
+    key=["M", "N", "K"],
+)
 @triton.jit
 def matmul_kernel(
     a_values_ptr,
@@ -90,9 +105,17 @@ def matmul_kernel(
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
+    GROUP_SIZE_M: tl.constexpr,
 ):
-    pid_m = tl.program_id(0)
-    pid_n = tl.program_id(1)
+    pid = tl.program_id(0)
+    num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
+    num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
+    num_pid_in_group = GROUP_SIZE_M * num_pid_n
+    group_id = pid // num_pid_in_group
+    first_pid_m = group_id * GROUP_SIZE_M
+    group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
+    pid_m = first_pid_m + ((pid % num_pid_in_group) % group_size_m)
+    pid_n = (pid % num_pid_in_group) // group_size_m
 
     offs_am = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M
     offs_bn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N
@@ -256,7 +279,9 @@ class TritonMatmulBackend(MatmulBackendBase):
             dtype=out_dtype.torch_dtype(),
         )
 
-        grid = lambda _: (M // BLOCK_SIZE_M, N // BLOCK_SIZE_N)  # noqa: E731
+        grid = lambda meta: (
+            triton.cdiv(M, meta["BLOCK_SIZE_M"]) * triton.cdiv(N, meta["BLOCK_SIZE_N"]),
+        )  # noqa: E731
 
         matmul_kernel[grid](
             input.values,
@@ -279,9 +304,6 @@ class TritonMatmulBackend(MatmulBackendBase):
             other_scale_factors.stride(1),
             output.stride(0),
             output.stride(1),
-            BLOCK_SIZE_M,
-            BLOCK_SIZE_N,
-            BLOCK_SIZE_K,
         )
 
         return output

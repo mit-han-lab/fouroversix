@@ -36,7 +36,7 @@ def run_speedtest(
 
     print(f"Testing with {m}x{k} @ {k}x{n}")
 
-    for backend in [MatmulBackend.cutlass, MatmulBackend.pytorch]:
+    for backend in [MatmulBackend.cutlass, MatmulBackend.triton, MatmulBackend.pytorch]:
         backend_cls = AVAILABLE_BACKENDS[backend]
         print(f"{backend.value}: ", end="")
 
