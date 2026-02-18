@@ -177,7 +177,14 @@ class FourOverSixLinear(nn.Linear):
                 ),
             )
 
+    @property
+    def high_precision_parameter_names(self) -> tuple[str, ...]:
+        """Return the names of the high-precision parameters."""
+        return ("weight",)
+
     def get_quantized_parameters(self, weight: torch.Tensor) -> dict[str, Any]:
+        """Get the quantized parameters for the layer."""
+
         weight_config = self.config.get_weight_config()
         quantized_weight = quantize_to_fp4(weight, weight_config)
 
@@ -206,19 +213,19 @@ class FourOverSixLinear(nn.Linear):
         if not hasattr(self, "_quantized_weight"):
             if self.config.keep_master_weights:
                 return quantize_to_fp4(self.weight, self.config.get_weight_config())
-            else:
-                original_shape = tuple(self.quantized_weight_metadata.data[:2].tolist())
-                padded_shape = tuple(self.quantized_weight_metadata.data[2:].tolist())
 
-                self._quantized_weight = QuantizedTensor(
-                    self.quantized_weight_values.data,
-                    self.quantized_weight_scale_factors.data,
-                    self.quantized_weight_amax.data,
-                    self.config.dtype,
-                    original_shape,
-                    self.config.get_weight_scale_rule(),
-                    padded_shape,
-                )
+            original_shape = tuple(self.quantized_weight_metadata.data[:2].tolist())
+            padded_shape = tuple(self.quantized_weight_metadata.data[2:].tolist())
+
+            self._quantized_weight = QuantizedTensor(
+                self.quantized_weight_values.data,
+                self.quantized_weight_scale_factors.data,
+                self.quantized_weight_amax.data,
+                self.config.dtype,
+                original_shape,
+                self.config.get_weight_scale_rule(),
+                padded_shape,
+            )
 
         return self._quantized_weight
 
