@@ -16,15 +16,6 @@ def dequantize_if4_kernel(
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
 ) -> None:
-    high = (values >> 4) & 0xF
-    low = values & 0xF
-    unpacked_values = tl.join(low, high).reshape(
-        BLOCK_SIZE_M,
-        BLOCK_SIZE_N // Q_BLOCK_SIZE,
-        Q_BLOCK_SIZE,
-    )
-    int_values = ((unpacked_values.to(tl.int8) << 4) >> 4).cast(tl.float32)
-
     (fp_values_1, fp_values_2) = tl.inline_asm_elementwise(
         asm="""
         {
@@ -64,6 +55,57 @@ def dequantize_if4_kernel(
 
     fp_values = tl.join(fp_values_1, fp_values_2).reshape(
         BLOCK_SIZE_M, BLOCK_SIZE_N // Q_BLOCK_SIZE, Q_BLOCK_SIZE
+    )
+
+    (int_values_1, int_values_2) = tl.inline_asm_elementwise(
+        asm="""
+        {
+        .reg .b8 byte0, byte1, byte2, byte3;
+
+        mov.b32 {byte0, byte1, byte2, byte3}, $8;
+        .reg .b32 tmp0, tmp1, tmp2, tmp3;
+
+        cvt.u32.u8 tmp0, byte0;
+        cvt.u32.u8 tmp1, byte1;
+        cvt.u32.u8 tmp2, byte2;
+        cvt.u32.u8 tmp3, byte3;
+
+        bfe.s32 $0, tmp0, 0, 4;
+        cvt.rn.f32.s32 $0, $0;
+
+        bfe.s32 $4, tmp0, 4, 4;
+        cvt.rn.f32.s32 $4, $4;
+
+        bfe.s32 $1, tmp1, 0, 4;
+        cvt.rn.f32.s32 $1, $1;
+
+        bfe.s32 $5, tmp1, 4, 4;
+        cvt.rn.f32.s32 $5, $5;
+
+        bfe.s32 $2, tmp2, 0, 4;
+        cvt.rn.f32.s32 $2, $2;
+
+        bfe.s32 $6, tmp2, 4, 4;
+        cvt.rn.f32.s32 $6, $6;
+
+        bfe.s32 $3, tmp3, 0, 4;
+        cvt.rn.f32.s32 $3, $3;
+
+        bfe.s32 $7, tmp3, 4, 4;
+        cvt.rn.f32.s32 $7, $7;
+        }
+        """,
+        constraints="=r,=r,=r,=r,=r,=r,=r,=r,r",
+        args=[values],
+        dtype=(tl.float32, tl.float32),
+        is_pure=True,
+        pack=4,
+    )
+
+    int_values = tl.join(int_values_1, int_values_2).reshape(
+        BLOCK_SIZE_M,
+        BLOCK_SIZE_N // Q_BLOCK_SIZE,
+        Q_BLOCK_SIZE,
     )
 
     real_values = tl.where(
