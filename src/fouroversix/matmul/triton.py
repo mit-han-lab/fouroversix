@@ -25,31 +25,45 @@ def dequantize_if4_kernel(
     )
     int_values = ((unpacked_values.to(tl.int8) << 4) >> 4).cast(tl.float32)
 
-    fp_values_f16x2 = tl.inline_asm_elementwise(
+    (fp_values_1, fp_values_2) = tl.inline_asm_elementwise(
         asm="""
         {
         .reg .b8 byte0, byte1, byte2, byte3;
-        mov.b32 {byte0, byte1, byte2, byte3}, $4;
-        cvt.rn.f16x2.e2m1x2 $0, byte0;
-        cvt.rn.f16x2.e2m1x2 $1, byte1;
-        cvt.rn.f16x2.e2m1x2 $2, byte2;
-        cvt.rn.f16x2.e2m1x2 $3, byte3;
+        .reg .b16 tmp0, tmp1;
+        .reg .b32 result;
+
+        mov.b32 {byte0, byte1, byte2, byte3}, $8;
+
+        cvt.rn.f16x2.e2m1x2 result, byte0;
+        mov.b32 {tmp0, tmp1}, result;
+        cvt.f32.f16 $0, tmp0;
+        cvt.f32.f16 $4, tmp1;
+
+        cvt.rn.f16x2.e2m1x2 result, byte1;
+        mov.b32 {tmp0, tmp1}, result;
+        cvt.f32.f16 $1, tmp0;
+        cvt.f32.f16 $5, tmp1;
+
+        cvt.rn.f16x2.e2m1x2 result, byte2;
+        mov.b32 {tmp0, tmp1}, result;
+        cvt.f32.f16 $2, tmp0;
+        cvt.f32.f16 $6, tmp1;
+
+        cvt.rn.f16x2.e2m1x2 result, byte3;
+        mov.b32 {tmp0, tmp1}, result;
+        cvt.f32.f16 $3, tmp0;
+        cvt.f32.f16 $7, tmp1;
         }
         """,
-        constraints="=r,=r,=r,=r,r",
+        constraints="=r,=r,=r,=r,=r,=r,=r,=r,r",
         args=[values],
-        dtype=tl.uint32,
+        dtype=(tl.float32, tl.float32),
         is_pure=True,
         pack=4,
     )
 
-    fp_values_f16_lo = (fp_values_f16x2 & 0xFFFF).cast(tl.uint16)
-    fp_values_f16_hi = (fp_values_f16x2 >> 16).cast(tl.uint16)
-    fp_values = (
-        tl.join(fp_values_f16_lo, fp_values_f16_hi)
-        .reshape(BLOCK_SIZE_M, BLOCK_SIZE_N // Q_BLOCK_SIZE, Q_BLOCK_SIZE)
-        .cast(tl.float16, bitcast=True)
-        .cast(tl.float32)
+    fp_values = tl.join(fp_values_1, fp_values_2).reshape(
+        BLOCK_SIZE_M, BLOCK_SIZE_N // Q_BLOCK_SIZE, Q_BLOCK_SIZE
     )
 
     real_values = tl.where(
