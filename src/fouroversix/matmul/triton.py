@@ -117,23 +117,6 @@ def dequantize_if4_kernel(
     return real_values.reshape(BLOCK_SIZE_M, BLOCK_SIZE_N)
 
 
-@triton.autotune(
-    configs=[
-        triton.Config(
-            {
-                "BLOCK_SIZE_M": block_size_m,
-                "BLOCK_SIZE_N": block_size_n,
-                "BLOCK_SIZE_K": block_size_k,
-                "GROUP_SIZE_M": group_size_m,
-            }
-        )
-        for block_size_m, block_size_n, block_size_k, group_size_m in itertools.product(
-            [64, 128], [64, 128], [16, 32, 64, 128], [2, 4, 6]
-        )
-        if not [block_size_m, block_size_n, block_size_k].count(128) > 1
-    ],
-    key=["M", "N", "K"],
-)
 @triton.jit
 def matmul_kernel(
     a_values_ptr,
@@ -250,17 +233,21 @@ def matmul_kernel(
                 BLOCK_SIZE_K // Q_BLOCK_SIZE,
                 Q_BLOCK_SIZE,
             )
-            * a_sf.expand_dims(2).to(tl.float32)
+            * a_sf.expand_dims(2)
         ).reshape(BLOCK_SIZE_M, BLOCK_SIZE_K)
+
         b_real_values = (
             b_real_values.reshape(
                 BLOCK_SIZE_N,
                 BLOCK_SIZE_K // Q_BLOCK_SIZE,
                 Q_BLOCK_SIZE,
             )
-            * b_sf.expand_dims(2).to(tl.float32)
+            * b_sf.expand_dims(2)
         ).reshape(BLOCK_SIZE_N, BLOCK_SIZE_K)
-        accumulator += tl.dot(a_real_values, b_real_values.T) * alpha
+
+        accumulator += tl.dot(
+            a_real_values.to(tl.float16), b_real_values.to(tl.float16).T
+        )
 
         a_value_ptrs += BLOCK_SIZE_K // 2 * stride_ak_values
         a_sf_ptrs += BLOCK_SIZE_K // Q_BLOCK_SIZE * stride_ak_sf
@@ -271,7 +258,7 @@ def matmul_kernel(
     offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
     c_ptrs = c_ptr + offs_cm[:, None] * stride_cm + offs_cn[None, :] * stride_cn
     c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
-    tl.store(c_ptrs, accumulator.cast(tl.bfloat16), mask=c_mask)
+    tl.store(c_ptrs, (accumulator * alpha).cast(tl.bfloat16), mask=c_mask)
 
 
 class TritonMatmulBackend(MatmulBackendBase):
@@ -350,6 +337,10 @@ class TritonMatmulBackend(MatmulBackendBase):
             other_scale_factors.stride(1),
             output.stride(0),
             output.stride(1),
+            BLOCK_SIZE_M=64,
+            BLOCK_SIZE_N=64,
+            BLOCK_SIZE_K=32,
+            GROUP_SIZE_M=6,
         )
 
         return output
