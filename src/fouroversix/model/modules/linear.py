@@ -190,7 +190,7 @@ class FourOverSixLinear(nn.Linear):
     def high_precision_parameter_names(self) -> tuple[str, ...]:
         return ("weight",)
 
-    def get_quantized_parameters(self, weight: torch.Tensor) -> dict[str, Any]:
+    def get_quantized_parameters(self, weight: torch.Tensor, bias: torch.Tensor = None) -> dict[str, Any]:
         weight_config = QuantizationConfig(
             backend=self.config.quantize_backend,
             block_scale_2d=self.config.weight_scale_2d,
@@ -212,6 +212,7 @@ class FourOverSixLinear(nn.Linear):
                     quantized_weight.padded_shape[1],
                 ],
             ),
+            **({"bias": bias} if bias is not None else {}),
         }
 
     def quantized_weight(self) -> QuantizedTensor:

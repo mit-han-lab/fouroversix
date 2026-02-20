@@ -14,6 +14,7 @@ class QuantizedModule:
     """Base class for all quantized modules."""
 
     _registry: ClassVar[dict[type[nn.Module], type[nn.Module]]] = {}
+    _should_replace_existing_modules: ClassVar[dict[type[nn.Module], bool]] = {}
 
     @classmethod
     def is_quantized_module_type(cls, module_type: type[nn.Module]) -> bool:
@@ -33,11 +34,12 @@ class QuantizedModule:
         cls,
         high_precision_cls: type[nn.Module],
         *,
-        replace_existing_modules: bool = False,
+        replace_existing_modules_in_registry: bool = False,
+        replace_existing_modules_in_model: bool = True,
     ) -> Callable[[type[nn.Module]], type[nn.Module]]:
         """Register a new type of quantized module."""
 
-        if high_precision_cls in cls._registry and not replace_existing_modules:
+        if high_precision_cls in cls._registry and not replace_existing_modules_in_registry:
             msg = f"High-precision module {high_precision_cls} is already registered."
             raise ValueError(msg)
 
@@ -45,7 +47,7 @@ class QuantizedModule:
 
         for module_cls in cls._registry:
             if issubclass(high_precision_cls, module_cls):
-                if replace_existing_modules:
+                if replace_existing_modules_in_registry:
                     modules_to_delete.append(module_cls)
                 else:
                     msg = (
@@ -61,6 +63,7 @@ class QuantizedModule:
             wrapped_cls: type[nn.Module],
         ) -> type[nn.Module]:
             cls._registry[high_precision_cls] = wrapped_cls
+            cls._should_replace_existing_modules[high_precision_cls] = replace_existing_modules_in_model
             return wrapped_cls
 
         return inner_wrapper
@@ -81,7 +84,12 @@ def quantize_model(
 
         module_cls = QuantizedModule.get_cls(type(module))
 
-        if module_cls is None:
+        if type(module) not in QuantizedModule._should_replace_existing_modules:
+            continue
+        
+        should_replace = QuantizedModule._should_replace_existing_modules[type(module)]
+
+        if module_cls is None and should_replace:
             continue
 
         quantized_module = module_cls(
