@@ -81,7 +81,8 @@ class RTNEvaluatorImpl(PTQEvaluator):
             weight_scale_rule=quantization_config.get_weight_scale_rule(),
         )
 
-        delattr(model_config, "quantization_config")
+        if hasattr(model_config,  "quantization_config"):
+            delattr(model_config, "quantization_config")
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
             device_map=device,

@@ -9,9 +9,7 @@ from fouroversix.quantize import (
     QuantizedTensor,
     quantize_to_fp4,
 )
-from fouroversix.utils import DataType
 from torch import nn
-from transformers import GptOssConfig
 from transformers.models.gpt_oss.modeling_gpt_oss import GptOssMLP, GptOssTopKRouter, GptOssExperts
 
 
@@ -34,7 +32,6 @@ class FourOverSixGptOssMLP(nn.Module):
                 the layer.
         """
 
-        print("initializing mlp")
         super().__init__()
 
         self.config = config
@@ -51,7 +48,7 @@ class FourOverSixGptOssMLP(nn.Module):
         self.router.bias = module.router.bias
 
         self.experts = FourOverSixGptOssExperts(
-            GptOssExperts(gpt_oss_config),
+            module.experts,
             quantization_config=self.config,
         )
 
@@ -66,7 +63,7 @@ class FourOverSixGptOssMLP(nn.Module):
 
     @property
     def high_precision_parameter_names(self) -> tuple[str, ...]:
-        return self.experts.high_precision_parameter_names
+        return tuple()
 
     def get_quantized_parameters(
         self,
@@ -85,16 +82,21 @@ class FourOverSixGptOssExperts(nn.Module):
     def __init__(
         self,
         module: GptOssExperts,
-        # config: GptOssConfig,
         quantization_config: ModuleQuantizationConfig | None = None,
     ) -> None:
 
-        print("initializing experts")
         super().__init__()
 
         self.num_experts = module.num_experts
         self.intermediate_size = module.intermediate_size
         self.hidden_size = module.hidden_size
+
+        self.down_proj_bias = module.down_proj_bias
+        self.gate_up_proj_bias = module.gate_up_proj_bias
+
+        # Store original weights so they can be quantized and then deleted
+        self.down_proj = module.down_proj
+        self.gate_up_proj = module.gate_up_proj
 
         self.config = quantization_config
 
@@ -105,28 +107,27 @@ class FourOverSixGptOssExperts(nn.Module):
                 nn.Parameter(
                     torch.zeros(
                         self.num_experts,
-                        self.intermediate_size // 2,
-                        self.hidden_size,
+                        self.intermediate_size,
+                        self.hidden_size // 2,
                         dtype=torch.uint8,
                     ),
                     requires_grad=False,
                 ),
             )
-            # gate_up_proj: [hidden_size, intermediate_size * 2] -> quantized: [hidden_size, intermediate_size]
+
             self.register_buffer(
                 "quantized_gate_up_proj_values",
                 nn.Parameter(
                     torch.zeros(
                         self.num_experts,
                         self.intermediate_size * 2,
-                        self.hidden_size,
+                        self.hidden_size // 2,
                         dtype=torch.uint8,
                     ),
                     requires_grad=False,
                 ),
             )
-            # Scale factors: flattened per expert
-            # down_proj: [hidden_size * intermediate_size // block_size()]
+
             self.register_buffer(
                 "quantized_down_proj_scale_factors",
                 nn.Parameter(
@@ -138,7 +139,6 @@ class FourOverSixGptOssExperts(nn.Module):
                     requires_grad=False,
                 ),
             )
-            # gate_up_proj: [hidden_size * (intermediate_size * 2) // block_size()]
             self.register_buffer(
                 "quantized_gate_up_proj_scale_factors",
                 nn.Parameter(
@@ -150,7 +150,7 @@ class FourOverSixGptOssExperts(nn.Module):
                     requires_grad=False,
                 ),
             )
-            # Amax buffers (one per expert per weight type)
+
             self.register_buffer(
                 "quantized_down_proj_amax",
                 nn.Parameter(
@@ -165,7 +165,7 @@ class FourOverSixGptOssExperts(nn.Module):
                     requires_grad=False,
                 ),
             )
-            # Metadata buffers (one per expert per weight type): [original_h, original_w, padded_h, padded_w]
+
             self.register_buffer(
                 "quantized_down_proj_metadata",
                 nn.Parameter(
@@ -186,12 +186,13 @@ class FourOverSixGptOssExperts(nn.Module):
 
     @property
     def high_precision_parameter_names(self) -> tuple[str, ...]:
-        return tuple()
+        return ("down_proj", "gate_up_proj")
 
     def get_quantized_parameters(
         self, 
-        **kwargs,
-    ) -> None:
+        parameter_name: str,
+        parameter: torch.Tensor,
+    ) -> dict[str, Any]:
         """
         Prepare this layer for post-training quantization by quantizing the weight,
         storing the quantized weight, and deleting the original weight. This should not
@@ -199,130 +200,40 @@ class FourOverSixGptOssExperts(nn.Module):
         high-precision weight.
         """
 
-        print("get quantized parameters experts")
-        for k in kwargs.keys():
-            print(f"{k}: {kwargs[k]}")
-
-        quantized_down_proj = []
-        quantized_gate_up_proj = []
-        for e in range(down_proj.storage.data.shape[0]):
-            down_tensor = QuantizedTensor(
-                values=down_proj.storage.data[e].permute(1, 0),
-                scale_factors=down_proj_precision_config.weight_scale.storage.data[
-                    e
-                ]
-                .permute(1, 0)
-                .view(torch.float8_e8m0fnu),
-                amax=torch.ones(
-                    (down_proj.storage.data[e].shape[1]),
-                    device=down_proj.storage.data.device,
-                    dtype=torch.float32,
-                ),
-                dtype=DataType.mxfp4,
-                original_shape=(
-                    down_proj.storage.data.shape[2],
-                    down_proj.storage.data.shape[1] * 2,
-                ),
-                scale_rule=self.config.get_weight_scale_rule(),
-            )
-            quantized_down_proj.append(down_tensor)
-
-        for e in range(gate_up_proj.storage.data.shape[0]):
-            gate_up_tensor = QuantizedTensor(
-                values=gate_up_proj.storage.data[e].permute(1, 0),
-                scale_factors=gate_up_proj_precision_config.weight_scale.storage.data[
-                    e
-                ]
-                .permute(1, 0)
-                .view(torch.float8_e8m0fnu),
-                amax=torch.ones(
-                    (gate_up_proj.storage.data[e].shape[1],),
-                    device=gate_up_proj.storage.data.device,
-                    dtype=torch.float32,
-                ),
-                dtype=DataType.mxfp4,
-                original_shape=(
-                    gate_up_proj.storage.data.shape[2],
-                    gate_up_proj.storage.data.shape[1] * 2,
-                ),
-                scale_rule=self.config.get_weight_scale_rule(),
-            )
-            quantized_gate_up_proj.append(gate_up_tensor)
+        if "bias" in parameter_name:
+            return {parameter_name: parameter}
         
-        # already quantized
-        if self.config.dtype != DataType.mxfp4:
+        weight_config = QuantizationConfig(
+            backend=self.config.quantize_backend,
+            dtype=self.config.dtype,
+            scale_rule=self.config.get_weight_scale_rule(),
+        )
 
-            weight_config = QuantizationConfig(
-                backend=self.config.quantize_backend,
-                dtype=self.config.dtype,
-                scale_rule=self.config.get_weight_scale_rule(),
-            )
+        print(f"getting parameter: {parameter_name}, {parameter.shape}")
+        quantized_proj = []
+        for e in range(parameter.shape[0]):
+            q = quantize_to_fp4(parameter[e], weight_config)
+            quantized_proj.append(q)
 
-            old_quantized_down_proj = quantized_down_proj
-            new_down_quantized_proj = []
-            for e in range(len(old_quantized_down_proj)):
-                q = quantize_to_fp4(old_quantized_down_proj[e].dequantize(), weight_config)
-                new_down_quantized_proj.append(q)
-                # self.quantized_down_proj_values.data[e] = q.values
-                # self.quantized_down_proj_scale_factors.data[e] = q.scale_factors
-                # self.quantized_down_proj_amax.data[e] = q.amax
-                # self.quantized_down_proj_metadata.data[e] = torch.tensor([
-                #     q.original_shape[0], q.original_shape[1],
-                #     q.padded_shape[0],   q.padded_shape[1],
-                # ], dtype=torch.int32)
-            quantized_down_proj = new_down_quantized_proj
-            del old_quantized_down_proj
-
-            # Clear GPU cache after down_proj quantization
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-
-            old_quantized_gate_up_proj = quantized_gate_up_proj
-            new_gate_up_quantized_proj = []
-            for e in range(len(old_quantized_gate_up_proj)):
-                q = quantize_to_fp4(old_quantized_gate_up_proj[e].dequantize(), weight_config)
-                new_gate_up_quantized_proj.append(q)
-                # self.quantized_gate_up_proj_values.data[e] = q.values
-                # self.quantized_gate_up_proj_scale_factors.data[e] = q.scale_factors
-                # self.quantized_gate_up_proj_amax.data[e] = q.amax
-                # self.quantized_gate_up_proj_metadata.data[e] = torch.tensor([
-                #     q.original_shape[0], q.original_shape[1],
-                #     q.padded_shape[0],   q.padded_shape[1],
-                # ], dtype=torch.int32)
-            quantized_gate_up_proj = new_gate_up_quantized_proj
-            del old_quantized_gate_up_proj
-
-            # Clear GPU cache after gate_up_proj quantization
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+        if "down" in parameter_name:
+            prefix = "down"
+        elif "gate_up" in parameter_name:
+            prefix = "gate_up"
 
         return {
-            "quantized_down_proj_values": torch.stack([down_tensor.values for down_tensor in quantized_down_proj], dim=0),
-            "quantized_down_proj_scale_factors": torch.stack([down_tensor.scale_factors for down_tensor in quantized_down_proj], dim=0).view(torch.float8_e8m0fnu),
-            "quantized_down_proj_amax": torch.stack([down_tensor.amax for down_tensor in quantized_down_proj], dim=0),
-            "quantized_down_proj_metadata": torch.tensor(
+            f"quantized_{prefix}_proj_values": torch.stack([tensor.values for tensor in quantized_proj], dim=0),
+            f"quantized_{prefix}_proj_scale_factors": torch.stack([tensor.scale_factors for tensor in quantized_proj], dim=0),
+            f"quantized_{prefix}_proj_amax": torch.stack([tensor.amax for tensor in quantized_proj], dim=0),
+            f"quantized_{prefix}_proj_metadata": torch.stack(
                 [
-                    self.num_experts,
-                    quantized_down_proj[0].original_shape[0],
-                    quantized_down_proj[0].original_shape[1],
-                    self.num_experts,
-                    quantized_down_proj[0].padded_shape[0],
-                    quantized_down_proj[0].padded_shape[1],
-                ],
-            ),
-
-            "quantized_gate_up_proj_values": torch.stack([gate_up_tensor.values for gate_up_tensor in quantized_gate_up_proj], dim=0),
-            "quantized_gate_up_proj_scale_factors": torch.stack([gate_up_tensor.scale_factors for gate_up_tensor in quantized_gate_up_proj], dim=0).view(torch.float8_e8m0fnu),
-            "quantized_gate_up_proj_amax": torch.stack([gate_up_tensor.amax for gate_up_tensor in quantized_gate_up_proj], dim=0),
-            "quantized_gate_up_proj_metadata": torch.tensor(
-                [
-                    self.num_experts,
-                    quantized_gate_up_proj[0].original_shape[0],
-                    quantized_gate_up_proj[0].original_shape[1],
-                    self.num_experts,
-                    quantized_gate_up_proj[0].padded_shape[0],
-                    quantized_gate_up_proj[0].padded_shape[1],
-                ],
+                    torch.tensor([
+                        tensor.original_shape[0],
+                        tensor.original_shape[1],
+                        tensor.padded_shape[0],
+                        tensor.padded_shape[1],
+                    ])
+                    for tensor in quantized_proj
+                ]
             ),
         }
 
@@ -334,6 +245,8 @@ class FourOverSixGptOssExperts(nn.Module):
         routing_weights: torch.Tensor = None,
     ) -> torch.Tensor:
         """Forward pass for the FP4 experts layer."""
+
+        down_proj, gate_up_proj = self.quantized_weights()
 
         batch_size = hidden_states.shape[0]
         hidden_states = hidden_states.reshape(
@@ -370,7 +283,7 @@ class FourOverSixGptOssExperts(nn.Module):
 
             gate_up = fp4_matmul(
                 current_state,
-                self.gate_up_proj[expert_idx],
+                gate_up_proj[expert_idx],
                 input_config=fprop_activation_config,
                 out_dtype=self.config.output_dtype,
             )
@@ -389,7 +302,7 @@ class FourOverSixGptOssExperts(nn.Module):
             # Down projection
             out = fp4_matmul(
                 gated_output,
-                self.down_proj[expert_idx],
+                down_proj[expert_idx],
                 input_config=fprop_activation_config,
                 out_dtype=self.config.output_dtype,
             )
@@ -414,7 +327,7 @@ class FourOverSixGptOssExperts(nn.Module):
         if not hasattr(self, "_quantized_weights"):
             if self.config.keep_master_weights:
                 # does this mean we need to save the weights? but we don't have high precisio weights
-                return quantize_to_fp4(self.weight, self.config.get_weight_config())
+                return (quantize_to_fp4(self.down_proj, self.config.get_weight_config()), quantize_to_fp4(self.gate_up_proj, self.config.get_weight_config()))
             
             down = []
             gate_up = []
@@ -437,21 +350,4 @@ class FourOverSixGptOssExperts(nn.Module):
                 ))
             self._quantized_weights = (down, gate_up)
         return self._quantized_weights
-
-    # def quantized_weight(
-    #     self,
-    #     weight: list[torch.Tensor] | list[QuantizedTensor],
-    # ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    #     """Compute the quantized weights. Handles 3D MoE weights [E, K, N] by expert."""
-
-    #     quantized_weight = []
-    #     for e in range(len(weight)):
-    #         config = QuantizationConfig(
-    #             backend=self.config.quantize_backend,
-    #             dtype=self.config.dtype,
-    #             scale_rule=self.config.get_weight_scale_rule(),
-    #         )
-    #         quantized_tensor = quantize_to_fp4(weight[e], config)
-    #         quantized_weight.append(quantized_tensor)
-
-    #     return quantized_weight
+        
