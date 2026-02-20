@@ -1,6 +1,6 @@
 import torch
 from fouroversix.quantize import QuantizationConfig, QuantizedTensor, quantize_to_fp4
-from fouroversix.utils import MatmulBackend
+from fouroversix.utils import DataType, MatmulBackend
 
 from .cutlass import CUTLASSMatmulBackend
 from .pytorch import PyTorchMatmulBackend
@@ -18,7 +18,7 @@ def fp4_matmul(
     backend: MatmulBackend | None = None,
     input_config: QuantizationConfig | None = None,
     other_config: QuantizationConfig | None = None,
-    out_dtype: torch.dtype = torch.bfloat16,
+    out_dtype: DataType = DataType.bfloat16,
 ) -> torch.Tensor:
     """
     Perform a matrix multiplication (`a @ b.T`) between two quantized tensors.
@@ -75,8 +75,8 @@ def fp4_matmul(
         other_config (QuantizationConfig | None): If `other` is provided in high
             precision, this configuration will be passed to the `quantize_to_fp4` call
             done prior to the matrix multiplication.
-        out_dtype (torch.dtype): The data type of the output tensor. Defaults to
-            `torch.bfloat16`.
+        out_dtype (DataType): The data type of the output tensor. Defaults to
+            `DataType.bfloat16`.
 
     Returns:
         The output tensor.
