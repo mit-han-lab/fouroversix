@@ -187,8 +187,8 @@ class FourOverSixLinear(nn.Linear):
             )
 
     @property
-    def high_precision_parameter_names(self) -> tuple[str, ...]:
-        """Return the names of the high-precision parameters."""
+    def parameters_to_quantize(self) -> tuple[str, ...]:
+        """Return the names of the parameters to quantize."""
         return ("weight",)
 
     def get_quantized_parameters(

@@ -10,6 +10,7 @@ from fouroversix.quantize import (
     quantize_to_fp4,
 )
 from torch import nn
+from transformers import GptOssConfig
 from transformers.models.gpt_oss.modeling_gpt_oss import GptOssMLP, GptOssTopKRouter, GptOssExperts
 
 
@@ -62,7 +63,7 @@ class FourOverSixGptOssMLP(nn.Module):
         return hidden_states, router_scores
 
     @property
-    def high_precision_parameter_names(self) -> tuple[str, ...]:
+    def parameters_to_quantize(self) -> tuple[str, ...]:
         return tuple()
 
     def get_quantized_parameters(
@@ -185,7 +186,7 @@ class FourOverSixGptOssExperts(nn.Module):
         self.limit = 7.0
 
     @property
-    def high_precision_parameter_names(self) -> tuple[str, ...]:
+    def parameters_to_quantize(self) -> tuple[str, ...]:
         return ("down_proj", "gate_up_proj")
 
     def get_quantized_parameters(
