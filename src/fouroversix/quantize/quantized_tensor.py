@@ -126,7 +126,7 @@ class QuantizedTensor:
         self.padded_shape = padded_shape
         self.values_are_packed = values_are_packed
         self.scale_factors_are_in_blackwell_layout = (
-            scale_factors_are_in_blackwell_layout and dtype != DataType.if4
+            scale_factors_are_in_blackwell_layout
         )
 
         if self.padded_shape is None:
@@ -230,18 +230,19 @@ class QuantizedTensor:
                     self.padded_shape[1] // self.dtype.block_size(),
                 ),
             )
-        elif self.dtype == DataType.if4:
+        else:
+            scales = self.scale_factors
+
+        if self.dtype == DataType.if4:
             scales = torch.where(
-                self.scale_factors.view(torch.uint8) >= 128,
-                (self.scale_factors.view(torch.uint8) - 128).view(
+                scales.view(torch.uint8) >= 128,
+                (scales.view(torch.uint8) - 128).view(
                     torch.float8_e4m3fn,
                 ),
-                self.scale_factors,
+                scales,
             ).reshape(
                 self.padded_shape[0], self.padded_shape[1] // self.dtype.block_size()
             )
-        else:
-            scales = self.scale_factors
 
         result = values * scales.to(dtype).repeat_interleave(
             self.dtype.block_size(),

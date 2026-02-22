@@ -4,6 +4,7 @@ import torch
 import triton
 import triton.language as tl
 from fouroversix.utils import SM_120, DataType, RoundStyle, ScaleRule
+from fouroversix.quantize.quantized_tensor import from_blocked
 from triton.tools.tensor_descriptor import TensorDescriptor
 
 E2M1_MAX_VALUE = tl.constexpr(6)
@@ -12,6 +13,7 @@ E4M3_MAX_VALUE = tl.constexpr(448)
 E4M3_MAX_FOUROVERSIX = tl.constexpr(256)
 SCALE_MEGABLOCK_SIZE = tl.constexpr(512)
 
+DATA_TYPE_IF4 = tl.constexpr(DataType.if4.value)
 DATA_TYPE_MXFP4 = tl.constexpr(DataType.mxfp4.value)
 DATA_TYPE_NVFP4 = tl.constexpr(DataType.nvfp4.value)
 
@@ -570,6 +572,178 @@ def nvfp4_fouroversix_quantization_kernel(  # noqa: C901, PLR0912, PLR0915
 
 
 @triton.jit
+def if4_quantization_kernel(
+    x_block,
+    x_amax_ptr,
+    BLOCK_SIZE_M: tl.constexpr,
+    BLOCK_SIZE_N: tl.constexpr,
+    ROUND_STYLE: tl.constexpr,
+    BLOCK_SCALE_2D: tl.constexpr,
+    SCALE_RULE: tl.constexpr,
+    RBITS: tl.constexpr,
+) -> None:
+    x_amax = tl.load(x_amax_ptr)
+    x_scale_blocks = x_block.reshape(128, 4, 16)
+
+    if x_amax == 0:
+        x_scales_hp = tl.full((128, 4), 0, dtype=tl.float32)
+    else:
+        encode_scale = tl.div_rn(E2M1_MAX_VALUE * E4M3_MAX_VALUE, x_amax)
+        x_scales_hp = (
+            tl.div_rn(tl.max(x_scale_blocks.abs(), axis=-1), E2M1_MAX_VALUE)
+            * encode_scale
+        )
+
+    if BLOCK_SCALE_2D:
+        x_scales_hp = (
+            tl.max(
+                x_scales_hp.reshape(8, 16, 4).permute(0, 2, 1),
+                axis=-1,
+            )
+            .expand_dims(0)
+            .broadcast_to(16, 8, 4)
+            .permute(1, 0, 2)
+            .reshape(128, 4)
+        )
+
+    x_scales = x_scales_hp.to(tl.float8e4nv)
+
+    decode_scale = tl.div_rn(
+        1,
+        tl.div_rn(E2M1_MAX_VALUE * E4M3_MAX_VALUE, x_amax),
+    )
+
+    x_block_scaled = tl.where(
+        x_scales.expand_dims(2).to(x_amax.dtype) != 0,
+        x_scale_blocks
+        * tl.div_rn(1, decode_scale * x_scales.to(x_amax.dtype).expand_dims(2)),
+        0,
+    )
+
+    (x_block_scaled_b1, x_block_scaled_b2) = x_block_scaled.reshape(
+        BLOCK_SIZE_M, BLOCK_SIZE_N // 2, 2
+    ).split()
+
+    if ROUND_STYLE == ROUND_STYLE_NEAREST:
+        x_fp, x_fp_dequantized_fp16x2 = tl.inline_asm_elementwise(
+            asm="""
+                {
+                .reg .b8 byte0, byte1, byte2, byte3;
+                cvt.rn.satfinite.e2m1x2.f32 byte0, $9, $5;
+                cvt.rn.f16x2.e2m1x2 $1, byte0;
+                cvt.rn.satfinite.e2m1x2.f32 byte1, $10, $6;
+                cvt.rn.f16x2.e2m1x2 $2, byte1;
+                cvt.rn.satfinite.e2m1x2.f32 byte2, $11, $7;
+                cvt.rn.f16x2.e2m1x2 $3, byte2;
+                cvt.rn.satfinite.e2m1x2.f32 byte3, $12, $8;
+                cvt.rn.f16x2.e2m1x2 $4, byte3;
+                mov.b32 $0, {byte0, byte1, byte2, byte3};
+                }
+                """,
+            constraints="=r,=r,=r,=r,=r,r,r,r,r,r,r,r,r",
+            args=[x_block_scaled_b1, x_block_scaled_b2],
+            dtype=(tl.uint8, tl.uint32),
+            is_pure=True,
+            pack=4,
+        )
+
+        x_int_hp = tl.extra.cuda.libdevice.rint(
+            tl.clamp(x_block_scaled * (7 / 6), -7, 7)
+        )
+        (x_int_b1, x_int_b2) = (
+            (x_int_hp.to(tl.int8).to(tl.uint8, bitcast=True) & 0xF)
+            .reshape(BLOCK_SIZE_M, BLOCK_SIZE_N // 2, 2)
+            .split()
+        )
+
+        x_int = (x_int_b2 << 4) | x_int_b1
+        x_int_dequantized = tl.div_rn(
+            x_int_hp * (6 / 7) * x_scales.to(x_amax.dtype).expand_dims(2) * x_amax,
+            E2M1_MAX_VALUE * E4M3_MAX_VALUE,
+        )
+
+        x_fp_dequantized_fp16x2_lo = (
+            (x_fp_dequantized_fp16x2 & 0xFFFF)
+            .cast(tl.uint16)
+            .cast(tl.float16, bitcast=True)
+            .cast(x_amax.dtype)
+        )
+        x_fp_dequantized_fp16x2_hi = (
+            (x_fp_dequantized_fp16x2 >> 16)
+            .cast(tl.uint16)
+            .cast(tl.float16, bitcast=True)
+            .cast(x_amax.dtype)
+        )
+
+        x_fp_dequantized = tl.div_rn(
+            tl.join(x_fp_dequantized_fp16x2_lo, x_fp_dequantized_fp16x2_hi).reshape(
+                128,
+                4,
+                16,
+            )
+            * x_scales.to(x_amax.dtype).expand_dims(2)
+            * x_amax,
+            E2M1_MAX_VALUE * E4M3_MAX_VALUE,
+        )
+
+        diff_fp = x_fp_dequantized - x_scale_blocks
+        diff_int = x_int_dequantized - x_scale_blocks
+
+        if SCALE_RULE == SCALE_RULE_ABS_MAX:
+            fp_error = tl.max(tl.abs(diff_fp), axis=-1)
+            int_error = tl.max(tl.abs(diff_int), axis=-1)
+        elif SCALE_RULE == SCALE_RULE_MAE:
+            fp_error = tl.sum(tl.abs(diff_fp), axis=-1)
+            int_error = tl.sum(tl.abs(diff_int), axis=-1)
+        elif SCALE_RULE == SCALE_RULE_MSE:
+            fp_error = tl.sum(diff_fp * diff_fp, axis=-1)
+            int_error = tl.sum(diff_int * diff_int, axis=-1)
+
+        if BLOCK_SCALE_2D:
+            fp_error = fp_error.reshape(8, 16, 4).permute(0, 2, 1)
+            int_error = int_error.reshape(8, 16, 4).permute(0, 2, 1)
+
+            if SCALE_RULE == SCALE_RULE_ABS_MAX:
+                fp_error = tl.max(fp_error, axis=-1)
+                int_error = tl.max(int_error, axis=-1)
+            elif SCALE_RULE == SCALE_RULE_MAE or SCALE_RULE == SCALE_RULE_MSE:
+                fp_error = tl.sum(fp_error, axis=-1)
+                int_error = tl.sum(int_error, axis=-1)
+
+            fp_error = (
+                fp_error.expand_dims(0)
+                .broadcast_to(16, 8, 4)
+                .permute(1, 0, 2)
+                .reshape(128, 4)
+            )
+            int_error = (
+                int_error.expand_dims(0)
+                .broadcast_to(16, 8, 4)
+                .permute(1, 0, 2)
+                .reshape(128, 4)
+            )
+
+        x_values = tl.where(
+            (int_error < fp_error).expand_dims(2),
+            x_int.reshape(128, 4, 8),
+            x_fp.reshape(128, 4, 8),
+        ).reshape(128, 32)
+
+    x_scales = (
+        tl.where(
+            int_error < fp_error,
+            x_scales.to(tl.uint8, bitcast=True) + 128,
+            x_scales.to(tl.uint8, bitcast=True),
+        )
+        .reshape(4, 32, 4)
+        .permute(1, 0, 2)
+        .ravel()
+    )
+
+    return x_values, x_scales
+
+
+@triton.jit
 def fp4_quantization_kernel(
     x_desc,
     x_amax_ptr,
@@ -606,6 +780,17 @@ def fp4_quantization_kernel(
             BLOCK_SIZE_M,
             BLOCK_SIZE_N,
             FP4_FORMAT,
+            ROUND_STYLE,
+            BLOCK_SCALE_2D,
+            SCALE_RULE,
+            RBITS,
+        )
+    elif FP4_FORMAT == DATA_TYPE_IF4:
+        x_e2m1, x_scales = if4_quantization_kernel(
+            x_block,
+            x_amax_ptr,
+            BLOCK_SIZE_M,
+            BLOCK_SIZE_N,
             ROUND_STYLE,
             BLOCK_SCALE_2D,
             SCALE_RULE,
@@ -654,7 +839,7 @@ def quantize_to_fp4(
     if x_amax is None:
         x_amax = (
             x.abs().max().float()
-            if fp4_format == DataType.nvfp4
+            if fp4_format in {DataType.nvfp4, DataType.if4}
             else torch.ones(1, device=x.device, dtype=torch.float32)
         )
 
@@ -751,5 +936,9 @@ def quantize_to_fp4(
 
     if fp4_format == DataType.mxfp4:
         x_sf = x_sf.view(torch.float8_e8m0fnu)
+    elif fp4_format == DataType.if4:
+        x_sf = from_blocked(x_sf, (padded_m, padded_n // fp4_format.block_size())).view(
+            torch.float8_e4m3fn,
+        )
 
     return x_e2m1, x_sf, x_amax

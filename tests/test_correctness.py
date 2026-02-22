@@ -35,7 +35,7 @@ NUM_RANDOM_SEEDS = 10
     ),
 )
 @pytest.mark.parametrize("block_scale_2d", ["block_scale_2d", "no_block_scale_2d"])
-@pytest.mark.parametrize("dtype", [DataType.nvfp4])
+@pytest.mark.parametrize("dtype", [DataType.if4, DataType.nvfp4])
 @pytest.mark.parametrize("rht", ["rht", "no_rht"])
 @pytest.mark.parametrize(
     "scale_rule",
@@ -129,14 +129,25 @@ def test_backend_outputs_are_consistent(  # noqa: C901, PLR0915
             print(f"{backend_b}: {quantized_b.amax}")
             pytest.fail("Backends A and B have different amax values!")
 
-        sf_a = from_blocked(
-            quantized_a.scale_factors.bfloat16(),
-            (input_shape[0], input_shape[1] // 16),
-        )
-        sf_b = from_blocked(
-            quantized_b.scale_factors.bfloat16(),
-            (input_shape[0], input_shape[1] // 16),
-        )
+        if quantized_a.scale_factors_are_in_blackwell_layout:
+            sf_a = from_blocked(
+                quantized_a.scale_factors.bfloat16(),
+                (input_shape[0], input_shape[1] // 16),
+            )
+        else:
+            sf_a = quantized_a.scale_factors.bfloat16().reshape(
+                input_shape[0], input_shape[1] // 16
+            )
+
+        if quantized_b.scale_factors_are_in_blackwell_layout:
+            sf_b = from_blocked(
+                quantized_b.scale_factors.bfloat16(),
+                (input_shape[0], input_shape[1] // 16),
+            )
+        else:
+            sf_b = quantized_b.scale_factors.bfloat16().reshape(
+                input_shape[0], input_shape[1] // 16
+            )
 
         # When computing 4/6 with the MAE and MSE scale rules, computing the errors
         # requires summing the errors in each block of 16 values. This operation

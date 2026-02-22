@@ -172,7 +172,7 @@ class FourOverSixLinear(nn.Linear):
             self.register_buffer(
                 "quantized_weight_metadata",
                 nn.Parameter(
-                    torch.zeros(2 + 2, dtype=torch.int32),
+                    torch.zeros(2 + 2 + 2, dtype=torch.int32),
                     requires_grad=False,
                 ),
             )
@@ -203,6 +203,12 @@ class FourOverSixLinear(nn.Linear):
                         quantized_weight.original_shape[1],
                         quantized_weight.padded_shape[0],
                         quantized_weight.padded_shape[1],
+                        1 if quantized_weight.values_are_packed else 0,
+                        (
+                            1
+                            if quantized_weight.scale_factors_are_in_blackwell_layout
+                            else 0
+                        ),
                     ],
                 ),
             }
@@ -222,7 +228,11 @@ class FourOverSixLinear(nn.Linear):
                 return quantize_to_fp4(self.weight, self.config.get_weight_config())
 
             original_shape = tuple(self.quantized_weight_metadata.data[:2].tolist())
-            padded_shape = tuple(self.quantized_weight_metadata.data[2:].tolist())
+            padded_shape = tuple(self.quantized_weight_metadata.data[2:4].tolist())
+            values_are_packed = self.quantized_weight_metadata.data[4].item() == 1
+            scale_factors_are_in_blackwell_layout = (
+                self.quantized_weight_metadata.data[5].item() == 1
+            )
 
             self._quantized_weight = QuantizedTensor(
                 self.quantized_weight_values.data,
@@ -232,6 +242,8 @@ class FourOverSixLinear(nn.Linear):
                 original_shape,
                 self.config.get_weight_scale_rule(),
                 padded_shape,
+                values_are_packed=values_are_packed,
+                scale_factors_are_in_blackwell_layout=scale_factors_are_in_blackwell_layout,
             )
 
         return self._quantized_weight
