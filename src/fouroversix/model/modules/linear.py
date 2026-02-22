@@ -178,29 +178,36 @@ class FourOverSixLinear(nn.Linear):
             )
 
     @property
-    def high_precision_parameter_names(self) -> tuple[str, ...]:
+    def parameters_to_quantize(self) -> tuple[str, ...]:
         """Return the names of the high-precision parameters."""
         return ("weight",)
 
-    def get_quantized_parameters(self, weight: torch.Tensor) -> dict[str, Any]:
+    def get_quantized_parameters(
+        self,
+        parameter_name: str,
+        parameter: torch.Tensor,
+    ) -> dict[str, Any]:
         """Get the quantized parameters for the layer."""
 
-        weight_config = self.config.get_weight_config()
-        quantized_weight = quantize_to_fp4(weight, weight_config)
+        if parameter_name == "weight":
+            weight_config = self.config.get_weight_config()
+            quantized_weight = quantize_to_fp4(parameter, weight_config)
 
-        return {
-            "quantized_weight_values": quantized_weight.values,
-            "quantized_weight_scale_factors": quantized_weight.scale_factors,
-            "quantized_weight_amax": quantized_weight.amax,
-            "quantized_weight_metadata": torch.tensor(
-                [
-                    quantized_weight.original_shape[0],
-                    quantized_weight.original_shape[1],
-                    quantized_weight.padded_shape[0],
-                    quantized_weight.padded_shape[1],
-                ],
-            ),
-        }
+            return {
+                "quantized_weight_values": quantized_weight.values,
+                "quantized_weight_scale_factors": quantized_weight.scale_factors,
+                "quantized_weight_amax": quantized_weight.amax,
+                "quantized_weight_metadata": torch.tensor(
+                    [
+                        quantized_weight.original_shape[0],
+                        quantized_weight.original_shape[1],
+                        quantized_weight.padded_shape[0],
+                        quantized_weight.padded_shape[1],
+                    ],
+                ),
+            }
+
+        raise ValueError(f"Unsupported high-preciison parameter: {parameter_name}")
 
     def quantized_weight(self) -> QuantizedTensor:
         """
