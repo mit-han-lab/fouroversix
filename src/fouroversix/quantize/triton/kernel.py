@@ -1,9 +1,10 @@
 from __future__ import annotations
+from re import I
 
 import torch
 import triton
 import triton.language as tl
-from fouroversix.utils import SM_120, DataType, RoundStyle, ScaleRule
+from fouroversix.utils import SM_100, SM_120, DataType, RoundStyle, ScaleRule
 from fouroversix.quantize.quantized_tensor import from_blocked
 from triton.tools.tensor_descriptor import TensorDescriptor
 
@@ -26,6 +27,9 @@ SCALE_RULE_STATIC_6 = tl.constexpr(ScaleRule.static_6.value)
 SCALE_RULE_MAE = tl.constexpr(ScaleRule.mae.value)
 SCALE_RULE_MSE = tl.constexpr(ScaleRule.mse.value)
 
+DEVICE_IS_BLACKWELL = tl.constexpr(
+    torch.cuda.get_device_capability()[0] in {SM_100, SM_120}
+)
 DEVICE_IS_SM120 = tl.constexpr(torch.cuda.get_device_capability()[0] == SM_120)
 
 
@@ -92,6 +96,122 @@ def add_fake_rbits_kernel(
             x_block + rbits * 2,
         ),
     )
+
+
+@triton.jit
+def quantize_to_packed_fp4_kernel(
+    x_block_scaled_b1,
+    x_block_scaled_b2,
+    DEQUANTIZE: tl.constexpr,
+) -> None:
+    abs_b1 = tl.abs(x_block_scaled_b1)
+    abs_b2 = tl.abs(x_block_scaled_b2)
+
+    sign_b1 = tl.where(x_block_scaled_b1 >= 0, 0, 1).to(tl.uint8)
+    sign_b2 = tl.where(x_block_scaled_b2 >= 0, 0, 1).to(tl.uint8)
+
+    value_b1 = tl.where(
+        abs_b1 <= 0.25,
+        0,
+        tl.where(
+            abs_b1 < 0.75,
+            1,
+            tl.where(
+                abs_b1 <= 1.25,
+                2,
+                tl.where(
+                    abs_b1 < 1.75,
+                    3,
+                    tl.where(
+                        abs_b1 <= 2.5,
+                        4,
+                        tl.where(abs_b1 < 3.5, 5, tl.where(abs_b1 <= 5, 6, 7)),
+                    ),
+                ),
+            ),
+        ),
+    ).to(tl.uint8)
+
+    value_b2 = tl.where(
+        abs_b2 <= 0.25,
+        0,
+        tl.where(
+            abs_b2 < 0.75,
+            1,
+            tl.where(
+                abs_b2 <= 1.25,
+                2,
+                tl.where(
+                    abs_b2 < 1.75,
+                    3,
+                    tl.where(
+                        abs_b2 <= 2.5,
+                        4,
+                        tl.where(abs_b2 < 3.5, 5, tl.where(abs_b2 <= 5, 6, 7)),
+                    ),
+                ),
+            ),
+        ),
+    ).to(tl.uint8)
+
+    result = (sign_b2 << 7) | (value_b2 << 4) | (sign_b1 << 3) | value_b1
+
+    if DEQUANTIZE:
+        dequantized_b1 = tl.where(
+            value_b1 == 0,
+            0,
+            tl.where(
+                value_b1 == 1,
+                0.5,
+                tl.where(
+                    value_b1 == 2,
+                    1,
+                    tl.where(
+                        value_b1 == 3,
+                        1.5,
+                        tl.where(
+                            value_b1 == 4,
+                            2,
+                            tl.where(
+                                value_b1 == 5,
+                                3,
+                                tl.where(value_b1 == 6, 4, 6),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ).to(tl.float32) * tl.where(x_block_scaled_b1 >= 0, 1, -1)
+
+        dequantized_b2 = tl.where(
+            value_b2 == 0,
+            0,
+            tl.where(
+                value_b2 == 1,
+                0.5,
+                tl.where(
+                    value_b2 == 2,
+                    1,
+                    tl.where(
+                        value_b2 == 3,
+                        1.5,
+                        tl.where(
+                            value_b2 == 4,
+                            2,
+                            tl.where(
+                                value_b2 == 5,
+                                3,
+                                tl.where(value_b2 == 6, 4, 6),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ).to(tl.float32) * tl.where(x_block_scaled_b2 >= 0, 1, -1)
+
+        return result, tl.join(dequantized_b1, dequantized_b2).reshape(128, 4, 16)
+    else:
+        return result
 
 
 @triton.jit
@@ -204,24 +324,28 @@ def block_scaled_fp4_quantization_kernel(
     if ROUND_STYLE == ROUND_STYLE_NEAREST or (
         DEVICE_IS_SM120 and ROUND_STYLE == ROUND_STYLE_STOCHASTIC
     ):
-
-        x_e2m1 = tl.inline_asm_elementwise(
-            asm="""
-                {
-                .reg .b8 byte0, byte1, byte2, byte3;
-                cvt.rn.satfinite.e2m1x2.f32 byte0, $5, $1;
-                cvt.rn.satfinite.e2m1x2.f32 byte1, $6, $2;
-                cvt.rn.satfinite.e2m1x2.f32 byte2, $7, $3;
-                cvt.rn.satfinite.e2m1x2.f32 byte3, $8, $4;
-                mov.b32 $0, {byte0, byte1, byte2, byte3};
-                }
-                """,
-            constraints="=r,r,r,r,r,r,r,r,r",
-            args=[x_block_scaled_b1, x_block_scaled_b2],
-            dtype=tl.uint8,
-            is_pure=True,
-            pack=4,
-        )
+        if DEVICE_IS_BLACKWELL:
+            x_e2m1 = tl.inline_asm_elementwise(
+                asm="""
+                    {
+                    .reg .b8 byte0, byte1, byte2, byte3;
+                    cvt.rn.satfinite.e2m1x2.f32 byte0, $5, $1;
+                    cvt.rn.satfinite.e2m1x2.f32 byte1, $6, $2;
+                    cvt.rn.satfinite.e2m1x2.f32 byte2, $7, $3;
+                    cvt.rn.satfinite.e2m1x2.f32 byte3, $8, $4;
+                    mov.b32 $0, {byte0, byte1, byte2, byte3};
+                    }
+                    """,
+                constraints="=r,r,r,r,r,r,r,r,r",
+                args=[x_block_scaled_b1, x_block_scaled_b2],
+                dtype=tl.uint8,
+                is_pure=True,
+                pack=4,
+            )
+        else:
+            x_e2m1 = quantize_to_packed_fp4_kernel(
+                x_block_scaled_b1, x_block_scaled_b2, False
+            )
     elif ROUND_STYLE == ROUND_STYLE_STOCHASTIC:
         if RBITS == -1:
             rbits = tl.rand(
@@ -349,8 +473,9 @@ def nvfp4_fouroversix_quantization_kernel(  # noqa: C901, PLR0912, PLR0915
     if ROUND_STYLE == ROUND_STYLE_NEAREST or (
         DEVICE_IS_SM120 and ROUND_STYLE == ROUND_STYLE_STOCHASTIC
     ):
-        (x_e2m1_6, x_e2m1_4, x_fp16x2_6, x_fp16x2_4) = tl.inline_asm_elementwise(
-            asm="""
+        if DEVICE_IS_BLACKWELL:
+            (x_e2m1_6, x_e2m1_4, x_fp16x2_6, x_fp16x2_4) = tl.inline_asm_elementwise(
+                asm="""
                 {
                 .reg .b8 byte0, byte1, byte2, byte3;
 
@@ -395,17 +520,33 @@ def nvfp4_fouroversix_quantization_kernel(  # noqa: C901, PLR0912, PLR0915
                 mov.b32 $3, {byte0, byte1, byte2, byte3};
                 }
                 """,
-            constraints="=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r",
-            args=[
+                constraints="=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r",
+                args=[
+                    x_block_scaled_6_b1,
+                    x_block_scaled_6_b2,
+                    x_block_scaled_4_b1,
+                    x_block_scaled_4_b2,
+                ],
+                dtype=(tl.uint8, tl.uint8, tl.uint32, tl.uint32),
+                is_pure=True,
+                pack=8,
+            )
+
+            NEED_TO_UNPACK_FP16X2: tl.constexpr = True
+        else:
+            x_e2m1_6, x_hp_6 = quantize_to_packed_fp4_kernel(
                 x_block_scaled_6_b1,
                 x_block_scaled_6_b2,
+                True,
+            )
+
+            x_e2m1_4, x_hp_4 = quantize_to_packed_fp4_kernel(
                 x_block_scaled_4_b1,
                 x_block_scaled_4_b2,
-            ],
-            dtype=(tl.uint8, tl.uint8, tl.uint32, tl.uint32),
-            is_pure=True,
-            pack=8,
-        )
+                True,
+            )
+
+            NEED_TO_UNPACK_FP16X2: tl.constexpr = False
     elif ROUND_STYLE == ROUND_STYLE_STOCHASTIC:
         if RBITS == -1:
             rbits = tl.rand(
@@ -480,38 +621,41 @@ def nvfp4_fouroversix_quantization_kernel(  # noqa: C901, PLR0912, PLR0915
             pack=8,
         )
 
-    x_fp16_6_lo = (
-        (x_fp16x2_6 & 0xFFFF)
-        .cast(tl.uint16)
-        .cast(tl.float16, bitcast=True)
-        .cast(x_amax.dtype)
-    )
-    x_fp16_6_hi = (
-        (x_fp16x2_6 >> 16)
-        .cast(tl.uint16)
-        .cast(tl.float16, bitcast=True)
-        .cast(x_amax.dtype)
-    )
-    x_hp_6 = tl.join(x_fp16_6_lo, x_fp16_6_hi).reshape(128, 4, 16)
+        NEED_TO_UNPACK_FP16X2: tl.constexpr = True
+
+    if NEED_TO_UNPACK_FP16X2:
+        x_fp16_6_lo = (
+            (x_fp16x2_6 & 0xFFFF)
+            .cast(tl.uint16)
+            .cast(tl.float16, bitcast=True)
+            .cast(x_amax.dtype)
+        )
+        x_fp16_6_hi = (
+            (x_fp16x2_6 >> 16)
+            .cast(tl.uint16)
+            .cast(tl.float16, bitcast=True)
+            .cast(x_amax.dtype)
+        )
+        x_hp_6 = tl.join(x_fp16_6_lo, x_fp16_6_hi).reshape(128, 4, 16)
+
+        x_fp16_4_lo = (
+            (x_fp16x2_4 & 0xFFFF)
+            .cast(tl.uint16)
+            .cast(tl.float16, bitcast=True)
+            .cast(x_amax.dtype)
+        )
+        x_fp16_4_hi = (
+            (x_fp16x2_4 >> 16)
+            .cast(tl.uint16)
+            .cast(tl.float16, bitcast=True)
+            .cast(x_amax.dtype)
+        )
+        x_hp_4 = tl.join(x_fp16_4_lo, x_fp16_4_hi).reshape(128, 4, 16)
 
     x_dequantized_6 = tl.div_rn(
         x_hp_6 * x_scales_6.to(x_amax.dtype).expand_dims(2) * x_amax,
         E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX,
     )
-
-    x_fp16_4_lo = (
-        (x_fp16x2_4 & 0xFFFF)
-        .cast(tl.uint16)
-        .cast(tl.float16, bitcast=True)
-        .cast(x_amax.dtype)
-    )
-    x_fp16_4_hi = (
-        (x_fp16x2_4 >> 16)
-        .cast(tl.uint16)
-        .cast(tl.float16, bitcast=True)
-        .cast(x_amax.dtype)
-    )
-    x_hp_4 = tl.join(x_fp16_4_lo, x_fp16_4_hi).reshape(128, 4, 16)
 
     x_dequantized_4 = tl.div_rn(
         x_hp_4 * x_scales_4.to(x_amax.dtype).expand_dims(2) * x_amax,
@@ -625,27 +769,49 @@ def if4_quantization_kernel(
     ).split()
 
     if ROUND_STYLE == ROUND_STYLE_NEAREST:
-        x_fp, x_fp_dequantized_fp16x2 = tl.inline_asm_elementwise(
-            asm="""
-                {
-                .reg .b8 byte0, byte1, byte2, byte3;
-                cvt.rn.satfinite.e2m1x2.f32 byte0, $9, $5;
-                cvt.rn.f16x2.e2m1x2 $1, byte0;
-                cvt.rn.satfinite.e2m1x2.f32 byte1, $10, $6;
-                cvt.rn.f16x2.e2m1x2 $2, byte1;
-                cvt.rn.satfinite.e2m1x2.f32 byte2, $11, $7;
-                cvt.rn.f16x2.e2m1x2 $3, byte2;
-                cvt.rn.satfinite.e2m1x2.f32 byte3, $12, $8;
-                cvt.rn.f16x2.e2m1x2 $4, byte3;
-                mov.b32 $0, {byte0, byte1, byte2, byte3};
-                }
-                """,
-            constraints="=r,=r,=r,=r,=r,r,r,r,r,r,r,r,r",
-            args=[x_block_scaled_b1, x_block_scaled_b2],
-            dtype=(tl.uint8, tl.uint32),
-            is_pure=True,
-            pack=4,
-        )
+        if DEVICE_IS_BLACKWELL:
+            x_fp, x_fp_dequantized_fp16x2 = tl.inline_asm_elementwise(
+                asm="""
+                    {
+                    .reg .b8 byte0, byte1, byte2, byte3;
+                    cvt.rn.satfinite.e2m1x2.f32 byte0, $9, $5;
+                    cvt.rn.f16x2.e2m1x2 $1, byte0;
+                    cvt.rn.satfinite.e2m1x2.f32 byte1, $10, $6;
+                    cvt.rn.f16x2.e2m1x2 $2, byte1;
+                    cvt.rn.satfinite.e2m1x2.f32 byte2, $11, $7;
+                    cvt.rn.f16x2.e2m1x2 $3, byte2;
+                    cvt.rn.satfinite.e2m1x2.f32 byte3, $12, $8;
+                    cvt.rn.f16x2.e2m1x2 $4, byte3;
+                    mov.b32 $0, {byte0, byte1, byte2, byte3};
+                    }
+                    """,
+                constraints="=r,=r,=r,=r,=r,r,r,r,r,r,r,r,r",
+                args=[x_block_scaled_b1, x_block_scaled_b2],
+                dtype=(tl.uint8, tl.uint32),
+                is_pure=True,
+                pack=4,
+            )
+
+            x_fp_dequantized_fp16x2_lo = (
+                (x_fp_dequantized_fp16x2 & 0xFFFF)
+                .cast(tl.uint16)
+                .cast(tl.float16, bitcast=True)
+                .cast(x_amax.dtype)
+            )
+            x_fp_dequantized_fp16x2_hi = (
+                (x_fp_dequantized_fp16x2 >> 16)
+                .cast(tl.uint16)
+                .cast(tl.float16, bitcast=True)
+                .cast(x_amax.dtype)
+            )
+
+            x_fp_hp = tl.join(
+                x_fp_dequantized_fp16x2_lo, x_fp_dequantized_fp16x2_hi
+            ).reshape(128, 4, 16)
+        else:
+            x_fp, x_fp_hp = quantize_to_packed_fp4_kernel(
+                x_block_scaled_b1, x_block_scaled_b2, True
+            )
 
         x_int_hp = tl.extra.cuda.libdevice.rint(
             tl.clamp(x_block_scaled * (7 / 6), -7, 7)
@@ -662,27 +828,8 @@ def if4_quantization_kernel(
             E2M1_MAX_VALUE * E4M3_MAX_VALUE,
         )
 
-        x_fp_dequantized_fp16x2_lo = (
-            (x_fp_dequantized_fp16x2 & 0xFFFF)
-            .cast(tl.uint16)
-            .cast(tl.float16, bitcast=True)
-            .cast(x_amax.dtype)
-        )
-        x_fp_dequantized_fp16x2_hi = (
-            (x_fp_dequantized_fp16x2 >> 16)
-            .cast(tl.uint16)
-            .cast(tl.float16, bitcast=True)
-            .cast(x_amax.dtype)
-        )
-
         x_fp_dequantized = tl.div_rn(
-            tl.join(x_fp_dequantized_fp16x2_lo, x_fp_dequantized_fp16x2_hi).reshape(
-                128,
-                4,
-                16,
-            )
-            * x_scales.to(x_amax.dtype).expand_dims(2)
-            * x_amax,
+            x_fp_hp * x_scales.to(x_amax.dtype).expand_dims(2) * x_amax,
             E2M1_MAX_VALUE * E4M3_MAX_VALUE,
         )
 

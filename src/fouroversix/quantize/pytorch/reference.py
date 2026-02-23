@@ -18,10 +18,11 @@ def fake_quantize_to_int4(
     round_style: RoundStyle = RoundStyle.nearest,
 ) -> torch.Tensor:
     if round_style == RoundStyle.stochastic:
-        msg = "Stochastic rounding is not supported yet for int4 quantization"
-        raise NotImplementedError(msg)
+        rbits = torch.rand_like(x) - 0.5
+    else:
+        rbits = 0
 
-    return x.clamp(min=-7, max=7).round()
+    return (x + rbits).clamp(min=-7, max=7).round()
 
 
 def fake_quantize_to_e2m1(
