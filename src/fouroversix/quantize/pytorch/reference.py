@@ -497,7 +497,7 @@ def quantize_to_fp4(  # noqa: C901, PLR0912
         if fp4_format == DataType.if4:
             x_quantized = pack_unpacked_fp4(
                 torch.where(
-                    scales.unsqueeze(1).view(torch.uint8) >= 128,
+                    scales.unsqueeze(-1).view(torch.uint8) >= 128,
                     quantize_bf16_to_unpacked_int4(x_fake_quantized.bfloat16()),
                     quantize_bf16_to_unpacked_fp4(x_fake_quantized.bfloat16()),
                 ).reshape_as(x),
