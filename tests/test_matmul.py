@@ -6,6 +6,7 @@ from fouroversix import (
     DataType,
     QuantizationConfig,
     MatmulBackend,
+    ScaleRule,
     quantize_to_fp4,
     fp4_matmul,
 )
@@ -28,7 +29,11 @@ NUM_RANDOM_SEEDS = 10
     ),
 )
 @pytest.mark.parametrize("dtype", [DataType.if4, DataType.nvfp4])
-def test_matmul(m, n, k, backend_a, backend_b, dtype):
+@pytest.mark.parametrize(
+    "scale_rule",
+    [ScaleRule.static_6, ScaleRule.static_4, ScaleRule.mse],
+)
+def test_matmul(m, n, k, backend_a, backend_b, dtype, scale_rule):
     torch.set_printoptions(precision=10)
 
     backend_a_cls = AVAILABLE_BACKENDS[backend_a]
@@ -44,7 +49,7 @@ def test_matmul(m, n, k, backend_a, backend_b, dtype):
         x = torch.randn(m, k, dtype=torch.bfloat16, device="cuda")
         y = torch.randn(n, k, dtype=torch.bfloat16, device="cuda")
 
-        config = QuantizationConfig(dtype=dtype)
+        config = QuantizationConfig(dtype=dtype, scale_rule=scale_rule)
         x_quantized = quantize_to_fp4(x, config)
         y_quantized = quantize_to_fp4(y, config)
 

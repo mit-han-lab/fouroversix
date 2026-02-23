@@ -1,3 +1,4 @@
+from fouroversix.quantize.quantized_tensor import from_blocked
 import torch
 import triton
 import triton.language as tl
@@ -5,6 +6,7 @@ from .backend import MatmulBackendBase
 from fouroversix.quantize import QuantizedTensor
 from fouroversix.utils import SM_100, SM_120, DataType
 
+DATA_TYPE_NVFP4 = tl.constexpr(DataType.nvfp4.value)
 DEVICE_IS_BLACKWELL = tl.constexpr(
     torch.cuda.get_device_capability()[0] in {SM_100, SM_120}
 )
@@ -17,6 +19,7 @@ def dequantize_if4_kernel(
     scale_factors,
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
+    RETURN_FP: tl.constexpr,
 ) -> None:
     if DEVICE_IS_BLACKWELL:
         (fp_values_1, fp_values_2) = tl.inline_asm_elementwise(
@@ -87,6 +90,7 @@ def dequantize_if4_kernel(
                 ),
             ),
         ).to(tl.float32)
+
         dequantized_value_2 = tl.where(
             value_2 == 0,
             0,
@@ -119,6 +123,9 @@ def dequantize_if4_kernel(
     fp_values = tl.join(fp_values_1, fp_values_2).reshape(
         BLOCK_SIZE_M, BLOCK_SIZE_N // Q_BLOCK_SIZE, Q_BLOCK_SIZE
     )
+
+    if RETURN_FP:
+        return fp_values.reshape(BLOCK_SIZE_M, BLOCK_SIZE_N)
 
     (int_values_1, int_values_2) = tl.inline_asm_elementwise(
         asm="""
@@ -202,10 +209,15 @@ def matmul_kernel(
     stride_bk_sf: tl.constexpr,
     stride_cm: tl.constexpr,
     stride_cn: tl.constexpr,
+    A_E2M1_MAX_VALUE: tl.constexpr,
+    B_E2M1_MAX_VALUE: tl.constexpr,
+    A_E4M3_MAX_VALUE: tl.constexpr,
+    B_E4M3_MAX_VALUE: tl.constexpr,
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
     GROUP_SIZE_M: tl.constexpr,
+    DTYPE: tl.constexpr,
     INTERMEDIATE_DTYPE: tl.constexpr,
     OUT_DTYPE: tl.constexpr,
 ):
@@ -240,7 +252,11 @@ def matmul_kernel(
         b_sf_ptr + offs_bn[:, None] * stride_bn_sf + offs_k_sf[None, :] * stride_bk_sf
     )
 
-    alpha = tl.load(a_amax_ptr) * tl.load(b_amax_ptr) / (6 * 6 * 448 * 448)
+    alpha = (
+        tl.load(a_amax_ptr)
+        * tl.load(b_amax_ptr)
+        / (A_E2M1_MAX_VALUE * B_E2M1_MAX_VALUE * A_E4M3_MAX_VALUE * B_E4M3_MAX_VALUE)
+    )
     accumulator = tl.zeros(
         (BLOCK_SIZE_M, BLOCK_SIZE_N),
         dtype=tl.float32,
@@ -273,19 +289,25 @@ def matmul_kernel(
             a_sf,
             BLOCK_SIZE_M,
             BLOCK_SIZE_K,
+            RETURN_FP=DTYPE == DATA_TYPE_NVFP4,
         )
         b_real_values = dequantize_if4_kernel(
             b_values,
             b_sf,
             BLOCK_SIZE_N,
             BLOCK_SIZE_K,
+            RETURN_FP=DTYPE == DATA_TYPE_NVFP4,
         )
 
         a_sf = tl.where(
-            a_sf < 0.0, -a_sf.to(INTERMEDIATE_DTYPE), a_sf.to(INTERMEDIATE_DTYPE)
+            a_sf < 0.0,
+            -a_sf.to(INTERMEDIATE_DTYPE),
+            a_sf.to(INTERMEDIATE_DTYPE),
         )
         b_sf = tl.where(
-            b_sf < 0.0, -b_sf.to(INTERMEDIATE_DTYPE), b_sf.to(INTERMEDIATE_DTYPE)
+            b_sf < 0.0,
+            -b_sf.to(INTERMEDIATE_DTYPE),
+            b_sf.to(INTERMEDIATE_DTYPE),
         )
 
         a_real_values = (
@@ -344,7 +366,10 @@ class TritonMatmulBackend(MatmulBackendBase):
         if not super().is_supported(input, other, out_dtype=out_dtype):
             return False
 
-        return input.dtype == DataType.if4 and input.device.type == "cuda"
+        return (
+            input.dtype in {DataType.if4, DataType.nvfp4}
+            and input.device.type == "cuda"
+        )
 
     @classmethod
     def fp4_matmul(
@@ -359,12 +384,31 @@ class TritonMatmulBackend(MatmulBackendBase):
         N = other.original_shape[0]
         K = input.original_shape[1]
 
-        input_scale_factors = input.scale_factors.reshape(
-            input.padded_shape[0], input.padded_shape[1] // input.dtype.block_size()
+        input_sf_shape = (
+            input.padded_shape[0],
+            input.padded_shape[1] // input.dtype.block_size(),
         )
-        other_scale_factors = other.scale_factors.reshape(
-            other.padded_shape[0], other.padded_shape[1] // other.dtype.block_size()
+        other_sf_shape = (
+            other.padded_shape[0],
+            other.padded_shape[1] // other.dtype.block_size(),
         )
+
+        if input.scale_factors_are_in_blackwell_layout:
+            input_scale_factors = from_blocked(
+                input.scale_factors,
+                input_sf_shape,
+            )
+        else:
+            input_scale_factors = input.scale_factors.reshape(input_sf_shape)
+
+        if other.scale_factors_are_in_blackwell_layout:
+            other_scale_factors = from_blocked(
+                other.scale_factors,
+                other_sf_shape,
+            )
+        else:
+            other_scale_factors = other.scale_factors.reshape(other_sf_shape)
+
         output = torch.empty(
             (M, N),
             device=input.values.device,
@@ -400,6 +444,11 @@ class TritonMatmulBackend(MatmulBackendBase):
             BLOCK_SIZE_N=64,
             BLOCK_SIZE_K=32,
             GROUP_SIZE_M=6,
+            A_E2M1_MAX_VALUE=input.dtype.max_allowed_e2m1_value(input.scale_rule),
+            B_E2M1_MAX_VALUE=other.dtype.max_allowed_e2m1_value(other.scale_rule),
+            A_E4M3_MAX_VALUE=input.dtype.max_allowed_e4m3_value(input.scale_rule),
+            B_E4M3_MAX_VALUE=other.dtype.max_allowed_e4m3_value(other.scale_rule),
+            DTYPE=input.dtype.value,
             INTERMEDIATE_DTYPE=tl.float16,
             OUT_DTYPE=tl.bfloat16,
         )
