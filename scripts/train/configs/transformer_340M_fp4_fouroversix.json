@@ -21,6 +21,7 @@
         {
             "repeats": 20,
             "precision": "fp4",
+            "dtype": "nvfp4",
             "scale_rule": "mse"
         },
         {

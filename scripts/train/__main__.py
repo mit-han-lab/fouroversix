@@ -98,7 +98,7 @@ def train(
         "--optimizer.lr",
         str(lr),
         "--lr_scheduler.warmup_steps",
-        "0",
+        "1000",
         "--lr_scheduler.decay_ratio",
         "0.15",
         "--lr_scheduler.decay_type",
@@ -199,7 +199,7 @@ def train_8xb200(**kwargs: dict[str, Any]) -> None:
 
 
 @click.command()
-@click.option("--batch-size", type=float, default=16)
+@click.option("--batch-size", type=float, default=8)
 @click.option("--checkpoint-interval", type=int, default=1000)
 @click.option("--checkpoint-load-step", type=int, default=-1)
 @click.option("--context-length", type=int, default=8192)
