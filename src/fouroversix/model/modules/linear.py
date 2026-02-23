@@ -68,7 +68,7 @@ class FourOverSixLinearFunction(torch.autograd.Function):
         grad_input = fp4_matmul(
             grad_output[0],
             weight,
-            backend=ctx.matmul_backend,
+            backend=ctx.config.matmul_backend,
             input_config=dgrad_grad_config,
             other_config=dgrad_weight_config,
             out_dtype=ctx.config.output_dtype,
@@ -88,7 +88,7 @@ class FourOverSixLinearFunction(torch.autograd.Function):
         grad_weight = fp4_matmul(
             grad_output[0],
             input[0],
-            backend=ctx.matmul_backend,
+            backend=ctx.config.matmul_backend,
             input_config=wgrad_grad_config,
             other_config=wgrad_activation_config,
             out_dtype=ctx.config.output_dtype,
@@ -215,7 +215,7 @@ class FourOverSixLinear(nn.Linear):
 
         raise ValueError(f"Unsupported high-preciison parameter: {parameter_name}")
 
-    def quantized_weight(self) -> QuantizedTensor:
+    def quantized_weight(self) -> torch.Tensor | QuantizedTensor:
         """
         Prepare this layer for post-training quantization by quantizing the weight,
         storing the quantized weight, and deleting the original weight. This should not
@@ -225,7 +225,7 @@ class FourOverSixLinear(nn.Linear):
 
         if not hasattr(self, "_quantized_weight"):
             if self.config.keep_master_weights:
-                return quantize_to_fp4(self.weight, self.config.get_weight_config())
+                return self.weight.data
 
             original_shape = tuple(self.quantized_weight_metadata.data[:2].tolist())
             padded_shape = tuple(self.quantized_weight_metadata.data[2:4].tolist())
