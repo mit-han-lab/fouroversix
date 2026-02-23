@@ -30,7 +30,7 @@ SCALE_RULE_MSE = tl.constexpr(ScaleRule.mse.value)
 DEVICE_IS_BLACKWELL = tl.constexpr(
     torch.cuda.get_device_capability()[0] in {SM_100, SM_120}
 )
-DEVICE_IS_SM120 = tl.constexpr(torch.cuda.get_device_capability()[0] == SM_120)
+DEVICE_SUPPORTS_CVT_RS = torch.cuda.get_device_capability()[0] == SM_100
 
 
 @triton.jit
@@ -307,7 +307,7 @@ def block_scaled_fp4_quantization_kernel(
             .split()
         )
 
-    if DEVICE_IS_SM120 and ROUND_STYLE == ROUND_STYLE_STOCHASTIC:
+    if not DEVICE_SUPPORTS_CVT_RS and ROUND_STYLE == ROUND_STYLE_STOCHASTIC:
         x_block_scaled_b1 = add_fake_rbits_kernel(
             x_block_scaled_b1,
             BLOCK_SIZE_M,
@@ -322,7 +322,7 @@ def block_scaled_fp4_quantization_kernel(
         )
 
     if ROUND_STYLE == ROUND_STYLE_NEAREST or (
-        DEVICE_IS_SM120 and ROUND_STYLE == ROUND_STYLE_STOCHASTIC
+        not DEVICE_SUPPORTS_CVT_RS and ROUND_STYLE == ROUND_STYLE_STOCHASTIC
     ):
         if DEVICE_IS_BLACKWELL:
             x_e2m1 = tl.inline_asm_elementwise(
@@ -444,7 +444,7 @@ def nvfp4_fouroversix_quantization_kernel(  # noqa: C901, PLR0912, PLR0915
         .split()
     )
 
-    if DEVICE_IS_SM120 and ROUND_STYLE == ROUND_STYLE_STOCHASTIC:
+    if not DEVICE_SUPPORTS_CVT_RS and ROUND_STYLE == ROUND_STYLE_STOCHASTIC:
         x_block_scaled_6_b1 = add_fake_rbits_kernel(
             x_block_scaled_6_b1,
             BLOCK_SIZE_M,
@@ -471,7 +471,7 @@ def nvfp4_fouroversix_quantization_kernel(  # noqa: C901, PLR0912, PLR0915
         )
 
     if ROUND_STYLE == ROUND_STYLE_NEAREST or (
-        DEVICE_IS_SM120 and ROUND_STYLE == ROUND_STYLE_STOCHASTIC
+        not DEVICE_SUPPORTS_CVT_RS and ROUND_STYLE == ROUND_STYLE_STOCHASTIC
     ):
         if DEVICE_IS_BLACKWELL:
             (x_e2m1_6, x_e2m1_4, x_fp16x2_6, x_fp16x2_4) = tl.inline_asm_elementwise(

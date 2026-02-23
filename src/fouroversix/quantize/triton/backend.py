@@ -19,10 +19,7 @@ class TritonQuantizeBackend(QuantizeBackendBase):
     @functools.lru_cache
     def is_available(cls) -> bool:
         """Return True if the Triton backend is available on the current machine."""
-        return (
-            torch.cuda.is_available()
-            and torch.cuda.get_device_capability()[0] in BLACKWELL_SM_IDS
-        )
+        return torch.cuda.is_available()
 
     @classmethod
     def is_supported(cls, x: torch.Tensor, config: QuantizationConfig) -> bool:
