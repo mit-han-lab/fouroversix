@@ -768,113 +768,134 @@ def if4_quantization_kernel(
         BLOCK_SIZE_M, BLOCK_SIZE_N // 2, 2
     ).split()
 
-    if ROUND_STYLE == ROUND_STYLE_NEAREST:
-        if DEVICE_IS_BLACKWELL:
-            x_fp, x_fp_dequantized_fp16x2 = tl.inline_asm_elementwise(
-                asm="""
-                    {
-                    .reg .b8 byte0, byte1, byte2, byte3;
-                    cvt.rn.satfinite.e2m1x2.f32 byte0, $9, $5;
-                    cvt.rn.f16x2.e2m1x2 $1, byte0;
-                    cvt.rn.satfinite.e2m1x2.f32 byte1, $10, $6;
-                    cvt.rn.f16x2.e2m1x2 $2, byte1;
-                    cvt.rn.satfinite.e2m1x2.f32 byte2, $11, $7;
-                    cvt.rn.f16x2.e2m1x2 $3, byte2;
-                    cvt.rn.satfinite.e2m1x2.f32 byte3, $12, $8;
-                    cvt.rn.f16x2.e2m1x2 $4, byte3;
-                    mov.b32 $0, {byte0, byte1, byte2, byte3};
-                    }
-                    """,
-                constraints="=r,=r,=r,=r,=r,r,r,r,r,r,r,r,r",
-                args=[x_block_scaled_b1, x_block_scaled_b2],
-                dtype=(tl.uint8, tl.uint32),
-                is_pure=True,
-                pack=4,
-            )
-
-            x_fp_dequantized_fp16x2_lo = (
-                (x_fp_dequantized_fp16x2 & 0xFFFF)
-                .cast(tl.uint16)
-                .cast(tl.float16, bitcast=True)
-                .cast(x_amax.dtype)
-            )
-            x_fp_dequantized_fp16x2_hi = (
-                (x_fp_dequantized_fp16x2 >> 16)
-                .cast(tl.uint16)
-                .cast(tl.float16, bitcast=True)
-                .cast(x_amax.dtype)
-            )
-
-            x_fp_hp = tl.join(
-                x_fp_dequantized_fp16x2_lo, x_fp_dequantized_fp16x2_hi
-            ).reshape(128, 4, 16)
-        else:
-            x_fp, x_fp_hp = quantize_to_packed_fp4_kernel(
-                x_block_scaled_b1, x_block_scaled_b2, True
-            )
-
-        x_int_hp = tl.extra.cuda.libdevice.rint(
-            tl.clamp(x_block_scaled * (7 / 6), -7, 7)
+    # Int and fp need different amounts of randomness because int gets scaled by 7/6
+    if ROUND_STYLE == ROUND_STYLE_STOCHASTIC:
+        x_block_scaled_b1 = add_fake_rbits_kernel(
+            x_block_scaled_b1,
+            BLOCK_SIZE_M,
+            BLOCK_SIZE_N // 2,
+            0,
         )
-        (x_int_b1, x_int_b2) = (
-            (x_int_hp.to(tl.int8).to(tl.uint8, bitcast=True) & 0xF)
-            .reshape(BLOCK_SIZE_M, BLOCK_SIZE_N // 2, 2)
-            .split()
+        x_block_scaled_b2 = add_fake_rbits_kernel(
+            x_block_scaled_b2,
+            BLOCK_SIZE_M,
+            BLOCK_SIZE_N // 2,
+            1,
+        )
+        x_block_scaled = x_block_scaled + (
+            tl.rand(
+                2,
+                tl.arange(0, 128)[:, None, None] * 4 * 16
+                + tl.arange(0, 4)[None, :, None] * 16
+                + tl.arange(0, 16)[None, None, :],
+            )
+            - 0.5
+        ) * (6 / 7)
+
+    if DEVICE_IS_BLACKWELL:
+        x_fp, x_fp_dequantized_fp16x2 = tl.inline_asm_elementwise(
+            asm="""
+                {
+                .reg .b8 byte0, byte1, byte2, byte3;
+                cvt.rn.satfinite.e2m1x2.f32 byte0, $9, $5;
+                cvt.rn.f16x2.e2m1x2 $1, byte0;
+                cvt.rn.satfinite.e2m1x2.f32 byte1, $10, $6;
+                cvt.rn.f16x2.e2m1x2 $2, byte1;
+                cvt.rn.satfinite.e2m1x2.f32 byte2, $11, $7;
+                cvt.rn.f16x2.e2m1x2 $3, byte2;
+                cvt.rn.satfinite.e2m1x2.f32 byte3, $12, $8;
+                cvt.rn.f16x2.e2m1x2 $4, byte3;
+                mov.b32 $0, {byte0, byte1, byte2, byte3};
+                }
+                """,
+            constraints="=r,=r,=r,=r,=r,r,r,r,r,r,r,r,r",
+            args=[x_block_scaled_b1, x_block_scaled_b2],
+            dtype=(tl.uint8, tl.uint32),
+            is_pure=True,
+            pack=4,
         )
 
-        x_int = (x_int_b2 << 4) | x_int_b1
-        x_int_dequantized = tl.div_rn(
-            x_int_hp * (6 / 7) * x_scales.to(x_amax.dtype).expand_dims(2) * x_amax,
-            E2M1_MAX_VALUE * E4M3_MAX_VALUE,
+        x_fp_dequantized_fp16x2_lo = (
+            (x_fp_dequantized_fp16x2 & 0xFFFF)
+            .cast(tl.uint16)
+            .cast(tl.float16, bitcast=True)
+            .cast(x_amax.dtype)
+        )
+        x_fp_dequantized_fp16x2_hi = (
+            (x_fp_dequantized_fp16x2 >> 16)
+            .cast(tl.uint16)
+            .cast(tl.float16, bitcast=True)
+            .cast(x_amax.dtype)
         )
 
-        x_fp_dequantized = tl.div_rn(
-            x_fp_hp * x_scales.to(x_amax.dtype).expand_dims(2) * x_amax,
-            E2M1_MAX_VALUE * E4M3_MAX_VALUE,
+        x_fp_hp = tl.join(
+            x_fp_dequantized_fp16x2_lo, x_fp_dequantized_fp16x2_hi
+        ).reshape(128, 4, 16)
+    else:
+        x_fp, x_fp_hp = quantize_to_packed_fp4_kernel(
+            x_block_scaled_b1, x_block_scaled_b2, True
         )
 
-        diff_fp = x_fp_dequantized - x_scale_blocks
-        diff_int = x_int_dequantized - x_scale_blocks
+    x_int_hp = tl.extra.cuda.libdevice.rint(tl.clamp(x_block_scaled * (7 / 6), -7, 7))
+    (x_int_b1, x_int_b2) = (
+        (x_int_hp.to(tl.int8).to(tl.uint8, bitcast=True) & 0xF)
+        .reshape(BLOCK_SIZE_M, BLOCK_SIZE_N // 2, 2)
+        .split()
+    )
+
+    x_int = (x_int_b2 << 4) | x_int_b1
+    x_int_dequantized = tl.div_rn(
+        x_int_hp * (6 / 7) * x_scales.to(x_amax.dtype).expand_dims(2) * x_amax,
+        E2M1_MAX_VALUE * E4M3_MAX_VALUE,
+    )
+
+    x_fp_dequantized = tl.div_rn(
+        x_fp_hp * x_scales.to(x_amax.dtype).expand_dims(2) * x_amax,
+        E2M1_MAX_VALUE * E4M3_MAX_VALUE,
+    )
+
+    diff_fp = x_fp_dequantized - x_scale_blocks
+    diff_int = x_int_dequantized - x_scale_blocks
+
+    if SCALE_RULE == SCALE_RULE_ABS_MAX:
+        fp_error = tl.max(tl.abs(diff_fp), axis=-1)
+        int_error = tl.max(tl.abs(diff_int), axis=-1)
+    elif SCALE_RULE == SCALE_RULE_MAE:
+        fp_error = tl.sum(tl.abs(diff_fp), axis=-1)
+        int_error = tl.sum(tl.abs(diff_int), axis=-1)
+    elif SCALE_RULE == SCALE_RULE_MSE:
+        fp_error = tl.sum(diff_fp * diff_fp, axis=-1)
+        int_error = tl.sum(diff_int * diff_int, axis=-1)
+
+    if BLOCK_SCALE_2D:
+        fp_error = fp_error.reshape(8, 16, 4).permute(0, 2, 1)
+        int_error = int_error.reshape(8, 16, 4).permute(0, 2, 1)
 
         if SCALE_RULE == SCALE_RULE_ABS_MAX:
-            fp_error = tl.max(tl.abs(diff_fp), axis=-1)
-            int_error = tl.max(tl.abs(diff_int), axis=-1)
-        elif SCALE_RULE == SCALE_RULE_MAE:
-            fp_error = tl.sum(tl.abs(diff_fp), axis=-1)
-            int_error = tl.sum(tl.abs(diff_int), axis=-1)
-        elif SCALE_RULE == SCALE_RULE_MSE:
-            fp_error = tl.sum(diff_fp * diff_fp, axis=-1)
-            int_error = tl.sum(diff_int * diff_int, axis=-1)
+            fp_error = tl.max(fp_error, axis=-1)
+            int_error = tl.max(int_error, axis=-1)
+        elif SCALE_RULE == SCALE_RULE_MAE or SCALE_RULE == SCALE_RULE_MSE:
+            fp_error = tl.sum(fp_error, axis=-1)
+            int_error = tl.sum(int_error, axis=-1)
 
-        if BLOCK_SCALE_2D:
-            fp_error = fp_error.reshape(8, 16, 4).permute(0, 2, 1)
-            int_error = int_error.reshape(8, 16, 4).permute(0, 2, 1)
+        fp_error = (
+            fp_error.expand_dims(0)
+            .broadcast_to(16, 8, 4)
+            .permute(1, 0, 2)
+            .reshape(128, 4)
+        )
+        int_error = (
+            int_error.expand_dims(0)
+            .broadcast_to(16, 8, 4)
+            .permute(1, 0, 2)
+            .reshape(128, 4)
+        )
 
-            if SCALE_RULE == SCALE_RULE_ABS_MAX:
-                fp_error = tl.max(fp_error, axis=-1)
-                int_error = tl.max(int_error, axis=-1)
-            elif SCALE_RULE == SCALE_RULE_MAE or SCALE_RULE == SCALE_RULE_MSE:
-                fp_error = tl.sum(fp_error, axis=-1)
-                int_error = tl.sum(int_error, axis=-1)
-
-            fp_error = (
-                fp_error.expand_dims(0)
-                .broadcast_to(16, 8, 4)
-                .permute(1, 0, 2)
-                .reshape(128, 4)
-            )
-            int_error = (
-                int_error.expand_dims(0)
-                .broadcast_to(16, 8, 4)
-                .permute(1, 0, 2)
-                .reshape(128, 4)
-            )
-
-        x_values = tl.where(
-            (int_error < fp_error).expand_dims(2),
-            x_int.reshape(128, 4, 8),
-            x_fp.reshape(128, 4, 8),
-        ).reshape(128, 32)
+    x_values = tl.where(
+        (int_error < fp_error).expand_dims(2),
+        x_int.reshape(128, 4, 8),
+        x_fp.reshape(128, 4, 8),
+    ).reshape(128, 32)
 
     x_scales = (
         tl.where(
