@@ -56,48 +56,38 @@ class RTNEvaluatorImpl(PTQEvaluator):
             )
         )
 
-        # if not model_save_path.exists():
-        model_config = AutoConfig.from_pretrained(model_name)
+        if not model_save_path.exists():
+            model_config = AutoConfig.from_pretrained(model_name)
 
-            # if (
-            #     hasattr(model_config, "quantization_config")
-            #     or HFFourOverSixConfig is None
-            # ):
-            #     model = AutoModelForCausalLM.from_pretrained(
-            #         model_name,
-            #         device_map=device,
-            #         trust_remote_code=trust_remote_code,
-            #     )
+            hf_quantization_config = HFFourOverSixConfig(
+                activation_scale_rule=quantization_config.get_activation_scale_rule(),
+                dtype=quantization_config.dtype,
+                matmul_backend=quantization_config.matmul_backend,
+                output_dtype=quantization_config.output_dtype,
+                quantize_backend=quantization_config.quantize_backend,
+                weight_scale_2d=quantization_config.weight_scale_2d,
+                weight_scale_rule=quantization_config.get_weight_scale_rule(),
+            )
 
-            #     quantize_model(model, quantization_config)
-            # else:
-        hf_quantization_config = HFFourOverSixConfig(
-            activation_scale_rule=quantization_config.get_activation_scale_rule(),
-            dtype=quantization_config.dtype,
-            matmul_backend=quantization_config.matmul_backend,
-            output_dtype=quantization_config.output_dtype,
-            quantize_backend=quantization_config.quantize_backend,
-            weight_scale_2d=quantization_config.weight_scale_2d,
-            weight_scale_rule=quantization_config.get_weight_scale_rule(),
-        )
+            if hasattr(model_config,  "quantization_config"):
+                hf_quantization_config.model_config_type = type(model_config)
+                delattr(model_config, "quantization_config")
 
-        if hasattr(model_config,  "quantization_config"):
-            delattr(model_config, "quantization_config")
-        model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            device_map=device,
-            config=model_config,
-            quantization_config=hf_quantization_config,
-            trust_remote_code=trust_remote_code,
-        )
+            model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                device_map=device,
+                config=model_config,
+                quantization_config=hf_quantization_config,
+                trust_remote_code=trust_remote_code,
+            )
 
-        # model.save_pretrained(model_save_path)
-        # else:
-        #     model = AutoModelForCausalLM.from_pretrained(
-        #         model_save_path,
-        #         device_map=device,
-        #         trust_remote_code=trust_remote_code,
-        #     )
+            model.save_pretrained(model_save_path)
+        else:
+            model = AutoModelForCausalLM.from_pretrained(
+                model_save_path,
+                device_map=device,
+                trust_remote_code=trust_remote_code,
+            )
 
         # Fix for Inspect AI
         model.name_or_path = model_name

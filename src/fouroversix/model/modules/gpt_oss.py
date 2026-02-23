@@ -210,7 +210,6 @@ class FourOverSixGptOssExperts(nn.Module):
             scale_rule=self.config.get_weight_scale_rule(),
         )
 
-        print(f"getting parameter: {parameter_name}, {parameter.shape}")
         quantized_proj = []
         for e in range(parameter.shape[0]):
             q = quantize_to_fp4(parameter[e], weight_config)

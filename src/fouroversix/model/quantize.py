@@ -30,6 +30,13 @@ class QuantizedModule:
         return cls._registry.get(high_precision_cls)
 
     @classmethod
+    def get_should_replace(
+        cls,
+        module_type: type[nn.Module]
+    ) -> bool:
+        return cls._should_replace_existing_modules.get(module_type, False)
+
+    @classmethod
     def register(
         cls,
         high_precision_cls: type[nn.Module],
@@ -83,13 +90,9 @@ def quantize_model(
             continue
 
         module_cls = QuantizedModule.get_cls(type(module))
+        should_replace = QuantizedModule.get_should_replace(type(module))
 
-        if type(module) not in QuantizedModule._should_replace_existing_modules:
-            continue
-        
-        should_replace = QuantizedModule._should_replace_existing_modules[type(module)]
-
-        if module_cls is None and should_replace:
+        if module_cls is None or not should_replace:
             continue
 
         quantized_module = module_cls(
