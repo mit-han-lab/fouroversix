@@ -10,7 +10,7 @@
     "hidden_size": 2048,
     "initializer_range": 0.02,
     "max_position_embeddings": 8192,
-    "model_type": "fp4_transformer",
+    "model_type": "quantized_transformer",
     "num_heads": 32,
     "num_hidden_layers": 24,
     "norm_eps": 1e-06,
@@ -21,12 +21,11 @@
     "layer_precision_configs": [
         {
             "repeats": 20,
-            "precision": "fp4",
-            "scale_rule": "always_6"
+            "dtype": "nvfp4",
+            "scale_rule": "mse"
         },
         {
-            "repeats": 4,
-            "precision": "bf16"
+            "repeats": 4
         }
     ]
 }

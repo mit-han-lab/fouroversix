@@ -17,9 +17,9 @@ class FourOverSixLinearFunction(torch.autograd.Function):
         ctx: torch.autograd.function.FunctionCtx,
         config: ModuleQuantizationConfig,
         input: torch.Tensor,
-        weight: torch.Tensor | QuantizedTensor,
+        weight: QuantizedTensor | nn.Parameter | torch.Tensor,
         bias: torch.Tensor = None,
-    ) -> tuple[torch.Tensor,]:
+    ) -> torch.Tensor:
         """
         Perform an FP4 matrix multiplication. The input is provided in high precision
         and quantized to FP4 prior to the matrix multiplication, while the weight is
@@ -29,8 +29,10 @@ class FourOverSixLinearFunction(torch.autograd.Function):
         fprop_activation_config = config.get_activation_config()
         fprop_weight_config = config.get_weight_config()
 
-        if isinstance(weight, torch.Tensor):
+        if isinstance(weight, nn.Parameter):
             ctx.save_for_backward(input, weight, bias)
+            weight = quantize_to_fp4(weight.data, fprop_weight_config)
+        elif isinstance(weight, torch.Tensor):
             weight = quantize_to_fp4(weight, fprop_weight_config)
 
         ctx.config = config
@@ -67,7 +69,7 @@ class FourOverSixLinearFunction(torch.autograd.Function):
 
         grad_input = fp4_matmul(
             grad_output[0],
-            weight,
+            weight if isinstance(weight, torch.Tensor) else weight.data,
             backend=ctx.config.matmul_backend,
             input_config=dgrad_grad_config,
             other_config=dgrad_weight_config,
@@ -215,7 +217,7 @@ class FourOverSixLinear(nn.Linear):
 
         raise ValueError(f"Unsupported high-preciison parameter: {parameter_name}")
 
-    def quantized_weight(self) -> torch.Tensor | QuantizedTensor:
+    def quantized_weight(self) -> QuantizedTensor | nn.Parameter:
         """
         Prepare this layer for post-training quantization by quantizing the weight,
         storing the quantized weight, and deleting the original weight. This should not
@@ -225,7 +227,7 @@ class FourOverSixLinear(nn.Linear):
 
         if not hasattr(self, "_quantized_weight"):
             if self.config.keep_master_weights:
-                return self.weight.data
+                return self.weight
 
             original_shape = tuple(self.quantized_weight_metadata.data[:2].tolist())
             padded_shape = tuple(self.quantized_weight_metadata.data[2:4].tolist())
