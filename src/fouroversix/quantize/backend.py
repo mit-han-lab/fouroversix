@@ -38,11 +38,14 @@ class QuantizeBackendBase(ABC):
             ScaleRule.static_6,
             ScaleRule.static_4,
         }:
-            msg = (
-                "MXFP4 quantization only supports the `static_6` and `static_4` scale "
-                "rules"
-            )
-            raise ValueError(msg)
+            return False
+
+        if config.dtype == DataType.if4 and config.scale_rule not in {
+            ScaleRule.abs_max,
+            ScaleRule.mae,
+            ScaleRule.mse,
+        }:
+            return False
 
         return True
 

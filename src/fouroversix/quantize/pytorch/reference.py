@@ -337,7 +337,13 @@ def select_intfloat(
         / (E2M1_MAX_VALUE * E4M3_MAX_VALUE)
     )
 
-    if scale_rule == ScaleRule.mse:
+    if scale_rule == ScaleRule.abs_max:
+        x_error_fp = (x_dequantized_fp - x_scale_blocks).abs().max(axis=-1).values
+        x_error_int = (x_dequantized_int - x_scale_blocks).abs().max(axis=-1).values
+    elif scale_rule == ScaleRule.mae:
+        x_error_fp = (x_dequantized_fp - x_scale_blocks).abs().sum(axis=-1)
+        x_error_int = (x_dequantized_int - x_scale_blocks).abs().sum(axis=-1)
+    elif scale_rule == ScaleRule.mse:
         x_error_fp = ((x_dequantized_fp - x_scale_blocks) ** 2).sum(axis=-1)
         x_error_int = ((x_dequantized_int - x_scale_blocks) ** 2).sum(axis=-1)
 

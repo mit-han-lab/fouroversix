@@ -31,7 +31,7 @@ class PyTorchQuantizeBackend(QuantizeBackendBase):
         configuration.
         """
 
-        return True
+        return super().is_supported(x, config)
 
     @classmethod
     def quantize_to_fp4(
