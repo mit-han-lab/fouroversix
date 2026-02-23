@@ -30,7 +30,7 @@ SCALE_RULE_MSE = tl.constexpr(ScaleRule.mse.value)
 DEVICE_IS_BLACKWELL = tl.constexpr(
     torch.cuda.get_device_capability()[0] in {SM_100, SM_120}
 )
-DEVICE_SUPPORTS_CVT_RS = torch.cuda.get_device_capability()[0] == SM_100
+DEVICE_SUPPORTS_CVT_RS = tl.constexpr(torch.cuda.get_device_capability()[0] == SM_100)
 
 
 @triton.jit
@@ -87,14 +87,16 @@ def add_fake_rbits_kernel(
         - 0.5
     )
 
-    return tl.where(
-        tl.abs(x_block) < 2,
-        x_block + rbits / 2,
+    return tl.where(x_block < 0, -1, 1) * tl.abs(
         tl.where(
-            tl.abs(x_block) < 4,
-            x_block + rbits,
-            x_block + rbits * 2,
-        ),
+            tl.abs(x_block) < 2,
+            tl.abs(x_block) + rbits / 2,
+            tl.where(
+                tl.abs(x_block) < 4,
+                tl.abs(x_block) + rbits,
+                tl.abs(x_block) + rbits * 2,
+            ),
+        )
     )
 
 

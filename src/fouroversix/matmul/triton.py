@@ -173,7 +173,7 @@ def dequantize_if4_kernel(
 
     real_values = tl.where(
         (scale_factors < 0.0).expand_dims(2),
-        int_values,
+        int_values * (6 / 7),
         fp_values,
     )
 
@@ -206,6 +206,8 @@ def matmul_kernel(
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
     GROUP_SIZE_M: tl.constexpr,
+    INTERMEDIATE_DTYPE: tl.constexpr,
+    OUT_DTYPE: tl.constexpr,
 ):
     pid = tl.program_id(0)
     num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
@@ -280,18 +282,14 @@ def matmul_kernel(
         )
 
         a_sf = tl.where(
-            a_sf < 0.0,
-            -a_sf.cast(tl.float32) * 6 / 7,
-            a_sf,
+            a_sf < 0.0, -a_sf.to(INTERMEDIATE_DTYPE), a_sf.to(INTERMEDIATE_DTYPE)
         )
         b_sf = tl.where(
-            b_sf < 0.0,
-            -b_sf.cast(tl.float32) * 6 / 7,
-            b_sf,
+            b_sf < 0.0, -b_sf.to(INTERMEDIATE_DTYPE), b_sf.to(INTERMEDIATE_DTYPE)
         )
 
         a_real_values = (
-            a_real_values.reshape(
+            a_real_values.to(INTERMEDIATE_DTYPE).reshape(
                 BLOCK_SIZE_M,
                 BLOCK_SIZE_K // Q_BLOCK_SIZE,
                 Q_BLOCK_SIZE,
@@ -300,7 +298,7 @@ def matmul_kernel(
         ).reshape(BLOCK_SIZE_M, BLOCK_SIZE_K)
 
         b_real_values = (
-            b_real_values.reshape(
+            b_real_values.to(INTERMEDIATE_DTYPE).reshape(
                 BLOCK_SIZE_N,
                 BLOCK_SIZE_K // Q_BLOCK_SIZE,
                 Q_BLOCK_SIZE,
@@ -308,9 +306,7 @@ def matmul_kernel(
             * b_sf.expand_dims(2)
         ).reshape(BLOCK_SIZE_N, BLOCK_SIZE_K)
 
-        accumulator += tl.dot(
-            a_real_values.to(tl.float16), b_real_values.to(tl.float16).T
-        )
+        accumulator += tl.dot(a_real_values, b_real_values.T)
 
         a_value_ptrs += BLOCK_SIZE_K // 2 * stride_ak_values
         a_sf_ptrs += BLOCK_SIZE_K // Q_BLOCK_SIZE * stride_ak_sf
@@ -321,7 +317,7 @@ def matmul_kernel(
     offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
     c_ptrs = c_ptr + offs_cm[:, None] * stride_cm + offs_cn[None, :] * stride_cn
     c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
-    tl.store(c_ptrs, (accumulator * alpha).cast(tl.bfloat16), mask=c_mask)
+    tl.store(c_ptrs, (accumulator * alpha).to(OUT_DTYPE), mask=c_mask)
 
 
 class TritonMatmulBackend(MatmulBackendBase):
@@ -404,6 +400,8 @@ class TritonMatmulBackend(MatmulBackendBase):
             BLOCK_SIZE_N=64,
             BLOCK_SIZE_K=32,
             GROUP_SIZE_M=6,
+            INTERMEDIATE_DTYPE=tl.float16,
+            OUT_DTYPE=tl.bfloat16,
         )
 
         return output

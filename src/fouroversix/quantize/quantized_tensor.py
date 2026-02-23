@@ -58,12 +58,6 @@ def unpack_packed_if4(
     scale_factors: torch.Tensor,
     to_dtype: torch.dtype = torch.float8_e4m3fn,
 ) -> torch.Tensor:
-    if to_dtype == torch.float8_e4m3fn:
-        convert_function = convert_e2m1_to_fp8_e4m3
-    else:
-        msg = f"Unsupported dtype: {to_dtype}"
-        raise ValueError(msg)
-
     high = (x >> 4) & 0xF
     low = x & 0xF
 
@@ -74,8 +68,8 @@ def unpack_packed_if4(
 
     return torch.where(
         (scale_factors.view(torch.uint8) >= 128).unsqueeze(2),
-        ((x_unpacked.to(torch.int8) << 4) >> 4).to(torch.bfloat16) * (6 / 7),
-        convert_function(x_unpacked).to(torch.bfloat16),
+        ((x_unpacked.to(torch.int8) << 4) >> 4).to(to_dtype) * (6 / 7),
+        convert_e2m1_to_fp8_e4m3(x_unpacked).to(to_dtype),
     ).reshape(x.shape[0], x.shape[1] * 2)
 
 
@@ -205,7 +199,12 @@ class QuantizedTensor:
         self.scale_factors = scale_factors
         self.amax = amax
 
-    def dequantize(self, dtype: torch.dtype = torch.bfloat16) -> torch.Tensor:
+    def dequantize(
+        self,
+        dtype: torch.dtype = torch.bfloat16,
+        *,
+        intermediate_dtype: torch.dtype = torch.float16,
+    ) -> torch.Tensor:
         """Return a high-precision tensor with the dequantized values."""
 
         if self.values_are_packed:
@@ -216,7 +215,8 @@ class QuantizedTensor:
                         self.padded_shape[0],
                         self.padded_shape[1] // self.dtype.block_size(),
                     ),
-                ).to(dtype)
+                    intermediate_dtype,
+                )
             else:
                 values = unpack_packed_fp4(self.values).to(dtype)
         else:
@@ -244,7 +244,7 @@ class QuantizedTensor:
                 self.padded_shape[0], self.padded_shape[1] // self.dtype.block_size()
             )
 
-        result = values * scales.to(dtype).repeat_interleave(
+        result = values * scales.to(intermediate_dtype).repeat_interleave(
             self.dtype.block_size(),
             -1,
         )
@@ -262,7 +262,7 @@ class QuantizedTensor:
         if result.shape != self.original_shape:
             result = result[: self.original_shape[0], : self.original_shape[1]]
 
-        return result
+        return result.to(dtype)
 
     @property
     def device(self) -> torch.device:
