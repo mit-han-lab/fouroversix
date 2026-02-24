@@ -202,4 +202,3 @@ class PTQEvaluator(ABC):
     ) -> dict[str, Any]:
         """Evaluate a quantized model on Modal."""
         return self.evaluate(*args, **kwargs)
-        

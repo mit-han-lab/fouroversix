@@ -32,8 +32,9 @@ class QuantizedModule:
     @classmethod
     def get_should_replace(
         cls,
-        module_type: type[nn.Module]
+        module_type: type[nn.Module],
     ) -> bool:
+        """Determine whether module should be replaced."""
         return cls._should_replace_existing_modules.get(module_type, False)
 
     @classmethod
@@ -46,7 +47,8 @@ class QuantizedModule:
     ) -> Callable[[type[nn.Module]], type[nn.Module]]:
         """Register a new type of quantized module."""
 
-        if high_precision_cls in cls._registry and not replace_existing_modules_in_registry:
+        if high_precision_cls in cls._registry and \
+        not replace_existing_modules_in_registry:
             msg = f"High-precision module {high_precision_cls} is already registered."
             raise ValueError(msg)
 
@@ -70,7 +72,8 @@ class QuantizedModule:
             wrapped_cls: type[nn.Module],
         ) -> type[nn.Module]:
             cls._registry[high_precision_cls] = wrapped_cls
-            cls._should_replace_existing_modules[high_precision_cls] = replace_existing_modules_in_model
+            cls._should_replace_existing_modules[high_precision_cls] = \
+            replace_existing_modules_in_model
             return wrapped_cls
 
         return inner_wrapper

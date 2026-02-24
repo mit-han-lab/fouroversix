@@ -1,4 +1,4 @@
 from .conversions import WeightConversions
-from .gpt_oss import GptOssWeightConverter, FourOverSixGptOssDeserialize
+from .gpt_oss import FourOverSixGptOssDeserialize, GptOssWeightConverter
 
-__all__ = ["WeightConversions", "GptOssWeightConverter", "FourOverSixGptOssDeserialize"]
+__all__ = ["FourOverSixGptOssDeserialize", "GptOssWeightConverter", "WeightConversions"]

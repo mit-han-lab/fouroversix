@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from fouroversix import quantize_model
-
 from ...resources import (
     FOUROVERSIX_CACHE_PATH,
     app,
@@ -16,18 +14,17 @@ from .evaluator import PTQEvaluator
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from fouroversix import ModelQuantizationConfig
     from transformers import AutoModelForCausalLM
 
 
 rtn_img = get_image()
 
 with rtn_img.imports():
-    from fouroversix import ModelQuantizationConfig
     from transformers import AutoConfig, AutoModelForCausalLM
 
     try:
         from transformers import FourOverSixConfig as HFFourOverSixConfig
-        from transformers.quantizers import AutoQuantizationConfig
     except ImportError:
         HFFourOverSixConfig = None
 
@@ -70,7 +67,8 @@ class RTNEvaluatorImpl(PTQEvaluator):
             )
 
             if hasattr(model_config,  "quantization_config"):
-                hf_quantization_config.model_config_type = type(model_config)
+                hf_quantization_config.pre_quantized_model_config_type = \
+                    str(type(model_config))
                 delattr(model_config, "quantization_config")
 
             model = AutoModelForCausalLM.from_pretrained(
@@ -81,7 +79,7 @@ class RTNEvaluatorImpl(PTQEvaluator):
                 trust_remote_code=trust_remote_code,
             )
 
-            model.save_pretrained(model_save_path)
+            model.save_pretrained(model_save_path, save_original_format=False)
         else:
             model = AutoModelForCausalLM.from_pretrained(
                 model_save_path,

@@ -1,29 +1,30 @@
-from typing import TYPE_CHECKING, ClassVar
-
-from transformers import WeightConverter, PretrainedConfig
-
 from collections.abc import Callable
+from typing import ClassVar
+
+from transformers import WeightConverter
+
 
 class WeightConversions:
     """Base class for weight conversions for quantized models."""
 
-    _registry: ClassVar[dict[type[PretrainedConfig], list[WeightConverter]]] = {}
+    _registry: ClassVar[dict[str, list[WeightConverter]]] = {}
 
     @classmethod
     def register(
         cls,
-        model_config_type: type(PretrainedConfig)
-    ) -> Callable[[type[PretrainedConfig]], list[WeightConverter]]:
-
-        if model_config_type in cls._registry:
-            msg = f"Model with config {model_config_type} is already registered."
+        pre_quantized_model_config_type: str,
+    ) -> Callable[[type], list[WeightConverter]]:
+        """Register a new type of weight conversion."""
+        if pre_quantized_model_config_type in cls._registry:
+            msg = f"Model with config {pre_quantized_model_config_type} is \
+            already registered."
             raise ValueError(msg)
-        
+
         def inner_wrapper(
-            wrapped_cls: type[PretrainedConfig],
+            wrapped_cls: type,
         ) -> list[WeightConverter]:
             weight_conversions = wrapped_cls.get_weight_conversions()
-            cls._registry[model_config_type] = weight_conversions
+            cls._registry[pre_quantized_model_config_type] = weight_conversions
             return weight_conversions
 
         return inner_wrapper
@@ -31,6 +32,10 @@ class WeightConversions:
     @classmethod
     def get_weight_conversions(
         cls,
-        model_config_type: type(PretrainedConfig),
+        pre_quantized_model_config_type: str,
     ) -> list[WeightConverter]:
-        return cls._registry.get(model_config_type, [])
+        """
+        Get the weight conversion for a given model type determined
+        by the model config type.
+        """
+        return cls._registry.get(pre_quantized_model_config_type, [])

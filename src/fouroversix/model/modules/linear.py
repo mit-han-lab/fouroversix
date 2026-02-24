@@ -225,7 +225,8 @@ class FourOverSixLinear(nn.Linear):
                 ),
             }
 
-        raise ValueError(f"Unsupported high-preciison parameter: {parameter_name}")
+        msg = f"Unsupported high-preciison parameter: {parameter_name}"
+        raise ValueError(msg)
 
     def quantized_weight(self) -> QuantizedTensor:
         """

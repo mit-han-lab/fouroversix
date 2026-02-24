@@ -11,7 +11,11 @@ from fouroversix.quantize import (
 )
 from torch import nn
 from transformers import GptOssConfig
-from transformers.models.gpt_oss.modeling_gpt_oss import GptOssMLP, GptOssTopKRouter, GptOssExperts
+from transformers.models.gpt_oss.modeling_gpt_oss import (
+    GptOssExperts,
+    GptOssMLP,
+    GptOssTopKRouter,
+)
 
 
 @QuantizedModule.register(GptOssMLP)
@@ -31,6 +35,7 @@ class FourOverSixGptOssMLP(nn.Module):
                 replace.
             config (ModuleQuantizationConfig): The quantization configuration to use for
                 the layer.
+
         """
 
         super().__init__()
@@ -64,16 +69,13 @@ class FourOverSixGptOssMLP(nn.Module):
 
     @property
     def parameters_to_quantize(self) -> tuple[str, ...]:
-        return tuple()
+        """Return high precision parameters to be quantized and deleted."""
+        return ()
 
     def get_quantized_parameters(
         self,
-        **kwargs,
     ) -> dict[str, Any]:
-        """
-        Get quantized parameters for the weight tensors.
-        """
-        print("get quantized parameters mlp")
+        """Get quantized parameters for the weight tensors."""
         return {}
 
 @QuantizedModule.register(GptOssExperts, replace_existing_modules_in_model=False)
@@ -102,7 +104,7 @@ class FourOverSixGptOssExperts(nn.Module):
         self.config = quantization_config
 
         if not self.config.keep_master_weights:
-            # down_proj: [intermediate_size, hidden_size] -> quantized: [hidden_size, intermediate_size // 2]
+
             self.register_buffer(
                 "quantized_down_proj_values",
                 nn.Parameter(
@@ -134,7 +136,8 @@ class FourOverSixGptOssExperts(nn.Module):
                 nn.Parameter(
                     torch.zeros(
                         self.num_experts,
-                        self.hidden_size * self.intermediate_size // self.config.dtype.block_size(),
+                        self.hidden_size * self.intermediate_size //
+                        self.config.dtype.block_size(),
                         dtype=self.config.dtype.scale_dtype(),
                     ),
                     requires_grad=False,
@@ -145,7 +148,8 @@ class FourOverSixGptOssExperts(nn.Module):
                 nn.Parameter(
                     torch.zeros(
                         self.num_experts,
-                        self.hidden_size * (self.intermediate_size * 2) // self.config.dtype.block_size(),
+                        self.hidden_size * (self.intermediate_size * 2) //
+                        self.config.dtype.block_size(),
                         dtype=self.config.dtype.scale_dtype(),
                     ),
                     requires_grad=False,
@@ -187,10 +191,11 @@ class FourOverSixGptOssExperts(nn.Module):
 
     @property
     def parameters_to_quantize(self) -> tuple[str, ...]:
+        """Return high precision parameters to be quantized and deleted."""
         return ("down_proj", "gate_up_proj")
 
     def get_quantized_parameters(
-        self, 
+        self,
         parameter_name: str,
         parameter: torch.Tensor,
     ) -> dict[str, Any]:
@@ -203,7 +208,7 @@ class FourOverSixGptOssExperts(nn.Module):
 
         if "bias" in parameter_name:
             return {parameter_name: parameter}
-        
+
         weight_config = QuantizationConfig(
             backend=self.config.quantize_backend,
             dtype=self.config.dtype,
@@ -221,9 +226,21 @@ class FourOverSixGptOssExperts(nn.Module):
             prefix = "gate_up"
 
         return {
-            f"quantized_{prefix}_proj_values": torch.stack([tensor.values for tensor in quantized_proj], dim=0),
-            f"quantized_{prefix}_proj_scale_factors": torch.stack([tensor.scale_factors for tensor in quantized_proj], dim=0),
-            f"quantized_{prefix}_proj_amax": torch.stack([tensor.amax for tensor in quantized_proj], dim=0),
+            f"quantized_{prefix}_proj_values":
+                torch.stack(
+                    [tensor.values for tensor in quantized_proj],
+                    dim=0,
+                ),
+            f"quantized_{prefix}_proj_scale_factors":
+                torch.stack(
+                    [tensor.scale_factors for tensor in quantized_proj],
+                    dim=0,
+                ),
+            f"quantized_{prefix}_proj_amax":
+                torch.stack(
+                    [tensor.amax for tensor in quantized_proj],
+                    dim=0,
+                ),
             f"quantized_{prefix}_proj_metadata": torch.stack(
                 [
                     torch.tensor([
@@ -233,7 +250,7 @@ class FourOverSixGptOssExperts(nn.Module):
                         tensor.padded_shape[1],
                     ])
                     for tensor in quantized_proj
-                ]
+                ],
             ),
         }
 
@@ -324,11 +341,15 @@ class FourOverSixGptOssExperts(nn.Module):
         return next_states.view(batch_size, -1, self.hidden_size)
 
     def quantized_weights(self) -> tuple[list[QuantizedTensor], list[QuantizedTensor]]:
+        """Return quantized parameters as QuantizedTensor."""
+
         if not hasattr(self, "_quantized_weights"):
             if self.config.keep_master_weights:
-                # does this mean we need to save the weights? but we don't have high precisio weights
-                return (quantize_to_fp4(self.down_proj, self.config.get_weight_config()), quantize_to_fp4(self.gate_up_proj, self.config.get_weight_config()))
-            
+                return (
+                    quantize_to_fp4(self.down_proj, self.config.get_weight_config()),
+                    quantize_to_fp4(self.gate_up_proj, self.config.get_weight_config()),
+                )
+
             down = []
             gate_up = []
             for e in range(self.num_experts):
@@ -337,7 +358,9 @@ class FourOverSixGptOssExperts(nn.Module):
                     scale_factors=self.quantized_down_proj_scale_factors.data[e],
                     amax=self.quantized_down_proj_amax.data[e],
                     dtype=self.config.dtype,
-                    original_shape=tuple(self.quantized_down_proj_metadata.data[e, :2].tolist()),
+                    original_shape=tuple(
+                        self.quantized_down_proj_metadata.data[e, :2].tolist(),
+                    ),
                     scale_rule=self.config.get_weight_scale_rule(),
                 ))
                 gate_up.append(QuantizedTensor(
@@ -345,9 +368,10 @@ class FourOverSixGptOssExperts(nn.Module):
                     scale_factors=self.quantized_gate_up_proj_scale_factors.data[e],
                     amax=self.quantized_gate_up_proj_amax.data[e],
                     dtype=self.config.dtype,
-                    original_shape=tuple(self.quantized_gate_up_proj_metadata.data[e, :2].tolist()),
+                    original_shape=tuple(
+                        self.quantized_gate_up_proj_metadata.data[e, :2].tolist(),
+                    ),
                     scale_rule=self.config.get_weight_scale_rule(),
                 ))
             self._quantized_weights = (down, gate_up)
         return self._quantized_weights
-        
