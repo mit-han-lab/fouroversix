@@ -188,7 +188,7 @@ class FourOverSixLinear(nn.Linear):
 
     @property
     def parameters_to_quantize(self) -> tuple[str, ...]:
-        """Return the names of the parameters to quantize."""
+        """Return high precision parameters to be quantized and deleted."""
         return ("weight",)
 
     def get_quantized_parameters(

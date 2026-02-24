@@ -300,16 +300,12 @@ class FourOverSixGptOssExperts(nn.Module):
                 out_dtype=self.config.output_dtype,
             )
             gate_up += self.gate_up_proj_bias[expert_idx]
-            del current_state
 
             gate, up = gate_up[..., ::2], gate_up[..., 1::2]
-            del gate_up
             gate = gate.clamp(min=None, max=self.limit)
             up = up.clamp(min=-self.limit, max=self.limit)
             glu = gate * torch.sigmoid(gate * self.alpha)
-            del gate
             gated_output = (up + 1) * glu
-            del up, glu
 
             # Down projection
             out = fp4_matmul(
@@ -318,20 +314,13 @@ class FourOverSixGptOssExperts(nn.Module):
                 input_config=fprop_activation_config,
                 out_dtype=self.config.output_dtype,
             )
-            del gated_output
             out += self.down_proj_bias[expert_idx]
             weighted_output = out * routing_weights[token_idx, top_k_pos, None]
-            del out
             next_states.index_add_(
                 0,
                 token_idx,
                 weighted_output.to(hidden_states.dtype),
             )
-            del weighted_output
-
-        del expert_mask, expert_hit
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
 
         return next_states.view(batch_size, -1, self.hidden_size)
 
@@ -369,4 +358,5 @@ class FourOverSixGptOssExperts(nn.Module):
                     scale_rule=self.config.get_weight_scale_rule(),
                 ))
             self._quantized_weights = (down, gate_up)
+
         return self._quantized_weights
