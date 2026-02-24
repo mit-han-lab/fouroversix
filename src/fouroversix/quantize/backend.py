@@ -30,7 +30,7 @@ class QuantizeBackendBase(ABC):
         if x.ndim != 2:  # noqa: PLR2004
             return False
 
-        return config.scale_rule in config.dtype.allowed_scale_rules()
+        return config.scale_rule in config.dtype.supported_scale_rules
 
     @classmethod
     @abstractmethod

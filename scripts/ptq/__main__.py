@@ -1,4 +1,3 @@
-import warnings
 from typing import Any
 
 import click
@@ -52,7 +51,7 @@ def cli(
     **kwargs: dict[str, Any],
 ) -> None:
     activation_scale_rule = kwargs.get("activation_scale_rule")
-    dtype = kwargs.get("dtype")
+    dtype: DataType = kwargs.get("dtype")
     weight_scale_rule = kwargs.get("weight_scale_rule")
 
     model_names = kwargs.pop("model_name")
@@ -60,31 +59,21 @@ def cli(
     tasks = kwargs.pop("task")
     use_modal = kwargs.pop("modal")
 
-    # Expand shortcuts
-    if model_names[0] == "llamaqwen":
-        model_names = [
-            "meta-llama/Llama-3.2-1B",
-            "meta-llama/Llama-3.1-8B",
-            "meta-llama/Llama-3.1-70B",
-            "Qwen/Qwen3-1.7B",
-            "Qwen/Qwen3-8B",
-            "Qwen/Qwen3-32B",
-        ]
-
     if isinstance(tasks, tuple):
         tasks = list(tasks)
 
-    if dtype == DataType.mxfp4 and (
-        not activation_scale_rule.is_static() or not weight_scale_rule.is_static()
+    if (
+        activation_scale_rule not in dtype.supported_scale_rules
+        or weight_scale_rule not in dtype.supported_scale_rules
     ):
         msg = (
-            "MXFP4 quantization only supports static scale rules. Setting "
-            "activation_scale_rule and weight_scale_rule to static_6..."
+            f"Either your activation scale rule ({activation_scale_rule}) or weight "
+            f"scale rule ({weight_scale_rule}) is incompatible with your dtype "
+            f"({dtype}). Please select another dtype (e.g. --dtype nvfp4) or another "
+            f"scale rule (e.g. --a-scale-rule/--w-scale-rule) out of the ones "
+            f"supported by {dtype}: {dtype.supported_scale_rules}"
         )
-        warnings.warn(msg, stacklevel=1)
-
-        kwargs["activation_scale_rule"] = ScaleRule.static_6
-        kwargs["weight_scale_rule"] = ScaleRule.static_6
+        raise ValueError(msg)
 
     if use_modal:
         with modal.enable_output(), app.run(detach=detach):

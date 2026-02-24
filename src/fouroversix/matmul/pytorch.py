@@ -32,7 +32,7 @@ class PyTorchMatmulBackend(MatmulBackendBase):
         out = torch.matmul(
             input.dequantize(dtype=torch.float32),
             other.dequantize(dtype=torch.float32).T,
-        ).to(out_dtype.torch_dtype())
+        ).to(out_dtype.torch_dtype)
 
         if out.shape != out_shape:
             out = out[: out_shape[0], : out_shape[1]]

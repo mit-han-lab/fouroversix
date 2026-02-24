@@ -61,11 +61,11 @@ class TritonMatmulBackend(MatmulBackendBase):
 
         input_sf_shape = (
             input.padded_shape[0],
-            input.padded_shape[1] // input.dtype.block_size(),
+            input.padded_shape[1] // input.dtype.block_size,
         )
         other_sf_shape = (
             other.padded_shape[0],
-            other.padded_shape[1] // other.dtype.block_size(),
+            other.padded_shape[1] // other.dtype.block_size,
         )
 
         if input.scale_factors_are_in_blackwell_layout:
@@ -87,7 +87,7 @@ class TritonMatmulBackend(MatmulBackendBase):
         output = torch.empty(
             (m, n),
             device=input.values.device,
-            dtype=out_dtype.torch_dtype(),
+            dtype=out_dtype.torch_dtype,
         )
 
         grid = lambda meta: (  # noqa: E731
@@ -119,10 +119,10 @@ class TritonMatmulBackend(MatmulBackendBase):
             BLOCK_SIZE_N=64,
             BLOCK_SIZE_K=32,
             GROUP_SIZE_M=6,
-            A_E2M1_MAX_VALUE=input.dtype.max_allowed_e2m1_value(input.scale_rule),
-            B_E2M1_MAX_VALUE=other.dtype.max_allowed_e2m1_value(other.scale_rule),
-            A_E4M3_MAX_VALUE=input.dtype.max_allowed_e4m3_value(input.scale_rule),
-            B_E4M3_MAX_VALUE=other.dtype.max_allowed_e4m3_value(other.scale_rule),
+            A_E2M1_MAX_VALUE=input.dtype.get_maximum_quantized_value(input.scale_rule),
+            B_E2M1_MAX_VALUE=other.dtype.get_maximum_quantized_value(other.scale_rule),
+            A_E4M3_MAX_VALUE=input.dtype.get_maximum_scale_factor(input.scale_rule),
+            B_E4M3_MAX_VALUE=other.dtype.get_maximum_scale_factor(other.scale_rule),
             DTYPE=input.dtype.value,
             INTERMEDIATE_DTYPE=tl.float16,
             OUT_DTYPE=tl.bfloat16,

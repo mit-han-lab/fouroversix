@@ -152,8 +152,8 @@ class FourOverSixLinear(nn.Linear):
                     torch.zeros(
                         self.out_features
                         * self.in_features
-                        // self.config.dtype.block_size(),
-                        dtype=self.config.dtype.scale_dtype(),
+                        // self.config.dtype.block_size,
+                        dtype=self.config.dtype.scale_dtype,
                     ),
                     requires_grad=False,
                 ),

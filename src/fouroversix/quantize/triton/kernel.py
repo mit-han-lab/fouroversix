@@ -893,7 +893,7 @@ def quantize_to_fp4(
         M, N = x.shape
 
     block_size_m = 128
-    block_size_n = 4 * fp4_format.block_size()
+    block_size_n = 4 * fp4_format.block_size
     scale_dtype = torch.float8_e4m3fn if fp4_format == DataType.nvfp4 else torch.uint8
 
     if x_amax is None:
@@ -908,7 +908,7 @@ def quantize_to_fp4(
 
     x_e2m1 = torch.empty((padded_m, padded_n // 2), device=x.device, dtype=torch.uint8)
     x_sf = torch.empty(
-        padded_m * padded_n // fp4_format.block_size(),
+        padded_m * padded_n // fp4_format.block_size,
         device=x.device,
         dtype=scale_dtype,
     )
@@ -997,7 +997,7 @@ def quantize_to_fp4(
     if fp4_format == DataType.mxfp4:
         x_sf = x_sf.view(torch.float8_e8m0fnu)
     elif fp4_format == DataType.if4:
-        x_sf = from_blocked(x_sf, (padded_m, padded_n // fp4_format.block_size())).view(
+        x_sf = from_blocked(x_sf, (padded_m, padded_n // fp4_format.block_size)).view(
             torch.float8_e4m3fn,
         )
 

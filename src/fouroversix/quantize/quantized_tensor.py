@@ -129,7 +129,7 @@ class QuantizedTensor:
             # The scale factor layout requires 4 blocks along the K dimension for both
             # MXFP4 and NVFP4. See:
             # https://docs.nvidia.com/cutlass/latest/media/docs/cpp/blackwell_functionality.html#scale-factor-layouts
-            cols_div = 4 * dtype.block_size()
+            cols_div = 4 * dtype.block_size
 
             self.padded_shape = (
                 original_shape[0]
@@ -143,7 +143,7 @@ class QuantizedTensor:
                 self.padded_shape[0] * self.padded_shape[1] // packing_factor
             )
             expected_scale_factors = (
-                expected_packed_elements * packing_factor // dtype.block_size()
+                expected_packed_elements * packing_factor // dtype.block_size
             )
 
             if values.numel() != expected_packed_elements:
@@ -169,7 +169,7 @@ class QuantizedTensor:
                     (
                         0,
                         (
-                            self.padded_shape[1] // dtype.block_size()
+                            self.padded_shape[1] // dtype.block_size
                             - scale_factors.shape[1]
                         ),
                         0,
@@ -213,7 +213,7 @@ class QuantizedTensor:
                     self.values,
                     self.scale_factors.reshape(
                         self.padded_shape[0],
-                        self.padded_shape[1] // self.dtype.block_size(),
+                        self.padded_shape[1] // self.dtype.block_size,
                     ),
                     intermediate_dtype,
                 )
@@ -227,7 +227,7 @@ class QuantizedTensor:
                 self.scale_factors,
                 (
                     self.padded_shape[0],
-                    self.padded_shape[1] // self.dtype.block_size(),
+                    self.padded_shape[1] // self.dtype.block_size,
                 ),
             )
         else:
@@ -242,11 +242,11 @@ class QuantizedTensor:
                 scales,
             ).reshape(
                 self.padded_shape[0],
-                self.padded_shape[1] // self.dtype.block_size(),
+                self.padded_shape[1] // self.dtype.block_size,
             )
 
         result = values * scales.to(intermediate_dtype).repeat_interleave(
-            self.dtype.block_size(),
+            self.dtype.block_size,
             -1,
         )
 
@@ -255,8 +255,8 @@ class QuantizedTensor:
                 result.to(torch.float32)
                 * self.amax
                 / (
-                    self.dtype.max_allowed_e2m1_value(self.scale_rule)
-                    * self.dtype.max_allowed_e4m3_value(self.scale_rule)
+                    self.dtype.get_maximum_quantized_value(self.scale_rule)
+                    * self.dtype.get_maximum_scale_factor(self.scale_rule)
                 )
             ).to(dtype)
 

@@ -53,7 +53,7 @@ class FourOverSixLinearWithSmoothing(FourOverSixLinear):
             *input.shape[:-1],
             self.weight.shape[0],
             device=input.device,
-            dtype=self.config.output_dtype.torch_dtype(),
+            dtype=self.config.output_dtype.torch_dtype,
         )
 
         fprop_activation_config = self.config.get_activation_config()

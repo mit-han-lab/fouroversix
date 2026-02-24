@@ -108,8 +108,8 @@ def quantize_to_nvint4(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     encode_scale = (
         torch.tensor(
-            DataType.if4.max_allowed_e2m1_value(ScaleRule.static_6)
-            * DataType.if4.max_allowed_e4m3_value(ScaleRule.static_6),
+            DataType.if4.get_maximum_quantized_value(ScaleRule.static_6)
+            * DataType.if4.get_maximum_scale_factor(ScaleRule.static_6),
             dtype=x_amax.dtype,
             device=x_amax.device,
         )
@@ -118,7 +118,7 @@ def quantize_to_nvint4(
     x_scales_hp = (
         x_scale_blocks.abs().max(axis=-1).values
         / torch.tensor(
-            DataType.if4.max_allowed_e2m1_value(ScaleRule.static_6),
+            DataType.if4.get_maximum_quantized_value(ScaleRule.static_6),
             dtype=x_amax.dtype,
             device=x_amax.device,
         )
@@ -128,8 +128,8 @@ def quantize_to_nvint4(
 
     decode_scale = 1 / (
         torch.tensor(
-            DataType.if4.max_allowed_e2m1_value(ScaleRule.static_6)
-            * DataType.if4.max_allowed_e4m3_value(ScaleRule.static_6),
+            DataType.if4.get_maximum_quantized_value(ScaleRule.static_6)
+            * DataType.if4.get_maximum_scale_factor(ScaleRule.static_6),
             dtype=x_amax.dtype,
             device=x_amax.device,
         )
@@ -158,7 +158,7 @@ def quantize_to_mxfp4(
 
     x_scales_hp = x_scale_blocks.abs().max(
         axis=-1,
-    ).values / DataType.mxfp4.max_allowed_e2m1_value(scale_rule)
+    ).values / DataType.mxfp4.get_maximum_quantized_value(scale_rule)
 
     x_scales_e8m0_u32 = x_scales_hp.view(torch.int32)
 
@@ -196,8 +196,8 @@ def quantize_to_nvfp4(
     else:
         encode_scale = (
             torch.tensor(
-                DataType.nvfp4.max_allowed_e2m1_value(scale_rule)
-                * DataType.nvfp4.max_allowed_e4m3_value(scale_rule),
+                DataType.nvfp4.get_maximum_quantized_value(scale_rule)
+                * DataType.nvfp4.get_maximum_scale_factor(scale_rule),
                 dtype=x_amax.dtype,
                 device=x_amax.device,
             )
@@ -206,7 +206,7 @@ def quantize_to_nvfp4(
         x_scales_hp = (
             x_scale_blocks.abs().max(axis=-1).values
             / torch.tensor(
-                DataType.nvfp4.max_allowed_e2m1_value(scale_rule),
+                DataType.nvfp4.get_maximum_quantized_value(scale_rule),
                 dtype=x_amax.dtype,
                 device=x_amax.device,
             )
@@ -220,8 +220,8 @@ def quantize_to_nvfp4(
 
     decode_scale = 1 / (
         torch.tensor(
-            DataType.nvfp4.max_allowed_e2m1_value(scale_rule)
-            * DataType.nvfp4.max_allowed_e4m3_value(scale_rule),
+            DataType.nvfp4.get_maximum_quantized_value(scale_rule)
+            * DataType.nvfp4.get_maximum_scale_factor(scale_rule),
             dtype=x_amax.dtype,
             device=x_amax.device,
         )
@@ -390,21 +390,21 @@ def quantize_to_fp4(  # noqa: C901, PLR0912
 
     if block_scale_2d:
         assert x.ndim == 2  # noqa: PLR2004
-        assert x.shape[1] % fp4_format.block_size() == 0
+        assert x.shape[1] % fp4_format.block_size == 0
 
         x_scale_blocks = (
             x.reshape(
                 -1,
-                fp4_format.block_size(),
-                x.shape[1] // fp4_format.block_size(),
-                fp4_format.block_size(),
+                fp4_format.block_size,
+                x.shape[1] // fp4_format.block_size,
+                fp4_format.block_size,
             )
             .permute(0, 2, 1, 3)
-            .reshape(-1, fp4_format.block_size() ** 2)
+            .reshape(-1, fp4_format.block_size**2)
             .float()
         )
     else:
-        x_scale_blocks = x.reshape(-1, fp4_format.block_size()).float()
+        x_scale_blocks = x.reshape(-1, fp4_format.block_size).float()
 
     x_fake_quantized = None
 
@@ -471,21 +471,21 @@ def quantize_to_fp4(  # noqa: C901, PLR0912
     if block_scale_2d:
         x_fake_quantized = x_fake_quantized.reshape(
             -1,
-            x.shape[1] // fp4_format.block_size(),
-            fp4_format.block_size(),
-            fp4_format.block_size(),
+            x.shape[1] // fp4_format.block_size,
+            fp4_format.block_size,
+            fp4_format.block_size,
         ).permute(0, 2, 1, 3)
 
         scales = (
             scales.reshape(
                 1,
-                x.shape[0] // fp4_format.block_size(),
-                x.shape[1] // fp4_format.block_size(),
+                x.shape[0] // fp4_format.block_size,
+                x.shape[1] // fp4_format.block_size,
             )
             .broadcast_to(
-                fp4_format.block_size(),
-                x.shape[0] // fp4_format.block_size(),
-                x.shape[1] // fp4_format.block_size(),
+                fp4_format.block_size,
+                x.shape[0] // fp4_format.block_size,
+                x.shape[1] // fp4_format.block_size,
             )
             .permute(1, 0, 2)
         )
@@ -512,7 +512,7 @@ def quantize_to_fp4(  # noqa: C901, PLR0912
         reshaped_scales = to_blocked(
             scales.reshape(
                 x.shape[0],
-                x.shape[1] // fp4_format.block_size(),
+                x.shape[1] // fp4_format.block_size,
             ),
         )
     else:

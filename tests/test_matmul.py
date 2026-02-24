@@ -44,6 +44,9 @@ def test_matmul(
 ) -> None:
     torch.set_printoptions(precision=10)
 
+    if scale_rule not in dtype.supported_scale_rules:
+        pytest.skip(f"Scale rule {scale_rule} is not supported for dtype {dtype}")
+
     backend_a_cls = AVAILABLE_BACKENDS[backend_a]
     backend_b_cls = AVAILABLE_BACKENDS[backend_b]
 

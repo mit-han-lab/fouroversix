@@ -19,23 +19,7 @@ class DataType(str, Enum):
     nvfp4 = "nvfp4"
     if4 = "if4"
 
-    def allowed_scale_rules(self) -> set["ScaleRule"]:
-        """Return the scale rules that are allowed for this data type."""
-
-        if self == DataType.if4:
-            return {
-                scale_rule for scale_rule in ScaleRule if not scale_rule.is_static()
-            }
-
-        if self == DataType.mxfp4:
-            return {scale_rule for scale_rule in ScaleRule if scale_rule.is_static()}
-
-        if self == DataType.nvfp4:
-            return set(ScaleRule)
-
-        msg = "Invalid data type"
-        raise ValueError(msg)
-
+    @property
     def block_size(self) -> int | None:
         """Return the block size if this a block-scaled format, or `None` otherwise."""
 
@@ -45,17 +29,18 @@ class DataType(str, Enum):
             DataType.if4: 16,
         }.get(self)
 
-    def max_allowed_e2m1_value(self, scale_rule: "ScaleRule") -> int:
+    def get_maximum_quantized_value(self, scale_rule: "ScaleRule") -> int:
         """Return the maximum allowed E2M1 value for the rule."""
         return 4 if scale_rule == ScaleRule.static_4 else 6
 
-    def max_allowed_e4m3_value(self, scale_rule: "ScaleRule") -> int:
+    def get_maximum_scale_factor(self, scale_rule: "ScaleRule") -> int:
         """Return the maximum allowed E4M3 value for the rule."""
         if self == DataType.if4:
             return 448
 
         return 448 if scale_rule in {ScaleRule.static_6, ScaleRule.static_4} else 256
 
+    @property
     def scale_dtype(self) -> torch.dtype | None:
         """Return the scale dtype if this a block-scaled format, or `None` otherwise."""
 
@@ -65,6 +50,22 @@ class DataType(str, Enum):
             DataType.if4: torch.float8_e4m3fn,
         }.get(self)
 
+    @property
+    def supported_scale_rules(self) -> set["ScaleRule"]:
+        """Return the scale rules that are allowed for this data type."""
+
+        if self == DataType.if4:
+            return {scale_rule for scale_rule in ScaleRule if not scale_rule.is_static}
+
+        if self == DataType.mxfp4:
+            return {scale_rule for scale_rule in ScaleRule if scale_rule.is_static}
+
+        if self == DataType.nvfp4:
+            return set(ScaleRule)
+
+        return set()
+
+    @property
     def torch_dtype(self) -> torch.dtype | None:
         """
         Return the corresponding torch.dtype if one is available, or `None`
@@ -142,6 +143,7 @@ class ScaleRule(str, Enum):
     static_4 = "static_4"
     static_6 = "static_6"
 
+    @property
     def cuda_id(self) -> int:
         """ID for the rule in the CUDA implementation."""
 
@@ -153,6 +155,7 @@ class ScaleRule(str, Enum):
             ScaleRule.static_6: 0,
         }[self]
 
+    @property
     def is_static(self) -> bool:
         """Return True if the rule is static, False otherwise."""
         return self in {ScaleRule.static_4, ScaleRule.static_6}
