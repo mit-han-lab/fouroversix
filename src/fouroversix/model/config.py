@@ -2,7 +2,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from fouroversix.quantize import QuantizationConfig
-from fouroversix.utils import DataType, MatmulBackend, QuantizeBackend, ScaleRule
+from fouroversix.utils import (
+    DataType,
+    MatmulBackend,
+    QuantizeBackend,
+    RoundStyle,
+    ScaleRule,
+)
 
 
 @dataclass
@@ -11,10 +17,14 @@ class ModuleQuantizationConfig:
     Configuration for quantizing modules with Four Over Six.
 
     Args:
+        activation_round_style (RoundStyle | None): The rounding style to use for
+            activation tensors. Defaults to `RoundStyle.nearest`.
         activation_scale_rule (ScaleRule | None): The scaling rule to use for activation
             tensors. If not provided, `scale_rule` will be used.
         dtype (DataType): The quantization data type to use for the module. Defaults to
             `DataType.nvfp4`.
+        gradient_round_style (RoundStyle | None): The rounding style to use for gradient
+            tensors. Defaults to `RoundStyle.stochastic`.
         gradient_scale_rule (ScaleRule | None): The scaling rule to use for gradient
             tensors. If not provided, `scale_rule` will be used.
         keep_master_weights (bool): Whether to keep the master weights. Defaults to
@@ -29,6 +39,8 @@ class ModuleQuantizationConfig:
             available GPU and the specified options.
         scale_rule (ScaleRule): The fallback scaling rule which will be used if any of
             the other scaling rules are not specified.
+        weight_round_style (RoundStyle | None): The rounding style to use for weight
+            tensors. Defaults to `RoundStyle.nearest`.
         weight_scale_2d (bool): Whether to use 2D block scaling for weights. Should be
             set to `True` if the module is used for training.
         weight_scale_rule (ScaleRule | None): The scaling rule to use for weights. If
@@ -36,25 +48,34 @@ class ModuleQuantizationConfig:
 
     """
 
+    activation_round_style: RoundStyle = RoundStyle.nearest
     activation_scale_rule: ScaleRule | None = None
     dtype: DataType = DataType.nvfp4
+    gradient_round_style: RoundStyle = RoundStyle.stochastic
     gradient_scale_rule: ScaleRule | None = None
     keep_master_weights: bool = False
     matmul_backend: MatmulBackend | None = None
     output_dtype: DataType = DataType.bfloat16
     quantize_backend: QuantizeBackend | None = None
     scale_rule: ScaleRule = ScaleRule.mse
+    weight_round_style: RoundStyle = RoundStyle.nearest
     weight_scale_2d: bool = False
     weight_scale_rule: ScaleRule | None = None
 
     def __post_init__(self) -> None:
         """Convert string values to enums."""
 
+        if isinstance(self.activation_round_style, str):
+            self.activation_round_style = RoundStyle(self.activation_round_style)
+
         if isinstance(self.activation_scale_rule, str):
             self.activation_scale_rule = ScaleRule(self.activation_scale_rule)
 
         if isinstance(self.dtype, str):
             self.dtype = DataType(self.dtype)
+
+        if isinstance(self.gradient_round_style, str):
+            self.gradient_round_style = RoundStyle(self.gradient_round_style)
 
         if isinstance(self.gradient_scale_rule, str):
             self.gradient_scale_rule = ScaleRule(self.gradient_scale_rule)
@@ -70,6 +91,9 @@ class ModuleQuantizationConfig:
 
         if isinstance(self.scale_rule, str):
             self.scale_rule = ScaleRule(self.scale_rule)
+
+        if isinstance(self.weight_round_style, str):
+            self.weight_round_style = RoundStyle(self.weight_round_style)
 
         if isinstance(self.weight_scale_rule, str):
             self.weight_scale_rule = ScaleRule(self.weight_scale_rule)
@@ -91,6 +115,7 @@ class ModuleQuantizationConfig:
         return QuantizationConfig(
             backend=self.quantize_backend,
             dtype=self.dtype,
+            round_style=self.activation_round_style,
             scale_rule=self.get_activation_scale_rule(),
             **kwargs,
         )
@@ -100,6 +125,7 @@ class ModuleQuantizationConfig:
         return QuantizationConfig(
             backend=self.quantize_backend,
             dtype=self.dtype,
+            round_style=self.gradient_round_style,
             scale_rule=self.get_gradient_scale_rule(),
             **kwargs,
         )
@@ -110,6 +136,7 @@ class ModuleQuantizationConfig:
             backend=self.quantize_backend,
             block_scale_2d=self.weight_scale_2d,
             dtype=self.dtype,
+            round_style=self.weight_round_style,
             scale_rule=self.get_weight_scale_rule(),
             **kwargs,
         )

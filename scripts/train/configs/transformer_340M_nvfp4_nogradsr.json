@@ -20,9 +20,9 @@
     "layer_precision_configs": [
         {
             "repeats": 20,
-            "dtype": "if4",
-            "gradient_round_style": "nearest",
-            "scale_rule": "mse"
+            "dtype": "nvfp4",
+	    "gradient_round_style": "nearest",
+            "scale_rule": "static_6"
         },
         {
             "repeats": 4
