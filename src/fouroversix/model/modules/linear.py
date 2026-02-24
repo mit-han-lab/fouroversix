@@ -198,9 +198,6 @@ class FourOverSixLinear(nn.Linear):
     ) -> dict[str, Any]:
         """Get the quantized parameters for the layer."""
 
-        if parameter_name == "bias":
-            return {"bias": parameter}
-
         if parameter_name == "weight":
             config = QuantizationConfig(
                 backend=self.config.quantize_backend,
