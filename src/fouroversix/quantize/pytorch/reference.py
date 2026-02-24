@@ -17,11 +17,7 @@ def fake_quantize_to_int4(
     *,
     round_style: RoundStyle = RoundStyle.nearest,
 ) -> torch.Tensor:
-    if round_style == RoundStyle.stochastic:
-        rbits = torch.rand_like(x) - 0.5
-    else:
-        rbits = 0
-
+    rbits = torch.rand_like(x) - 0.5 if round_style == RoundStyle.stochastic else 0
     return (x + rbits).clamp(min=-7, max=7).round()
 
 
@@ -498,7 +494,7 @@ def quantize_to_fp4(  # noqa: C901, PLR0912
         if fp4_format == DataType.if4:
             x_quantized = pack_unpacked_fp4(
                 torch.where(
-                    scales.unsqueeze(-1).view(torch.uint8) >= 128,
+                    scales.unsqueeze(-1).view(torch.uint8) >= 128,  # noqa: PLR2004
                     quantize_bf16_to_unpacked_int4(x_fake_quantized.bfloat16()),
                     quantize_bf16_to_unpacked_fp4(x_fake_quantized.bfloat16()),
                 ).reshape_as(x),

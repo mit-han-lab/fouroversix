@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 
 import torch
-from fouroversix.utils import DataType, ScaleRule
 
 from .config import QuantizationConfig
 from .quantized_tensor import QuantizedTensor
@@ -31,23 +30,7 @@ class QuantizeBackendBase(ABC):
         if x.ndim != 2:  # noqa: PLR2004
             return False
 
-        if config.dtype not in {DataType.mxfp4, DataType.nvfp4, DataType.if4}:
-            return False
-
-        if config.dtype == DataType.mxfp4 and config.scale_rule not in {
-            ScaleRule.static_6,
-            ScaleRule.static_4,
-        }:
-            return False
-
-        if config.dtype == DataType.if4 and config.scale_rule not in {
-            ScaleRule.abs_max,
-            ScaleRule.mae,
-            ScaleRule.mse,
-        }:
-            return False
-
-        return True
+        return config.scale_rule in config.dtype.allowed_scale_rules()
 
     @classmethod
     @abstractmethod

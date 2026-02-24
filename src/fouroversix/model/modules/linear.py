@@ -6,7 +6,6 @@ from fouroversix.matmul import fp4_matmul
 from fouroversix.model.config import ModuleQuantizationConfig
 from fouroversix.model.quantize import QuantizedModule
 from fouroversix.quantize import QuantizedTensor, quantize_to_fp4
-from fouroversix.utils import RoundStyle
 
 
 class FourOverSixLinearFunction(torch.autograd.Function):
@@ -207,7 +206,8 @@ class FourOverSixLinear(nn.Linear):
                 ),
             }
 
-        raise ValueError(f"Unsupported high-preciison parameter: {parameter_name}")
+        msg = f"Unsupported high-precision parameter: {parameter_name}"
+        raise ValueError(msg)
 
     def quantized_weight(self) -> QuantizedTensor | nn.Parameter:
         """

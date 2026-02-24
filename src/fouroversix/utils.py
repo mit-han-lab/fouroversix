@@ -19,6 +19,23 @@ class DataType(str, Enum):
     nvfp4 = "nvfp4"
     if4 = "if4"
 
+    def allowed_scale_rules(self) -> set["ScaleRule"]:
+        """Return the scale rules that are allowed for this data type."""
+
+        if self == DataType.if4:
+            return {
+                scale_rule for scale_rule in ScaleRule if not scale_rule.is_static()
+            }
+
+        if self == DataType.mxfp4:
+            return {scale_rule for scale_rule in ScaleRule if scale_rule.is_static()}
+
+        if self == DataType.nvfp4:
+            return set(ScaleRule)
+
+        msg = "Invalid data type"
+        raise ValueError(msg)
+
     def block_size(self) -> int | None:
         """Return the block size if this a block-scaled format, or `None` otherwise."""
 

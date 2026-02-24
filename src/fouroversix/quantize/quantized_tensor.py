@@ -67,7 +67,7 @@ def unpack_packed_if4(
     ).reshape(x.shape[0], x.shape[1] * 2 // 16, 16)
 
     return torch.where(
-        (scale_factors.view(torch.uint8) >= 128).unsqueeze(2),
+        (scale_factors.view(torch.uint8) >= 128).unsqueeze(2),  # noqa: PLR2004
         ((x_unpacked.to(torch.int8) << 4) >> 4).to(to_dtype) * (6 / 7),
         convert_e2m1_to_fp8_e4m3(x_unpacked).to(to_dtype),
     ).reshape(x.shape[0], x.shape[1] * 2)
@@ -235,13 +235,14 @@ class QuantizedTensor:
 
         if self.dtype == DataType.if4:
             scales = torch.where(
-                scales.view(torch.uint8) >= 128,
+                scales.view(torch.uint8) >= 128,  # noqa: PLR2004
                 (scales.view(torch.uint8) - 128).view(
                     torch.float8_e4m3fn,
                 ),
                 scales,
             ).reshape(
-                self.padded_shape[0], self.padded_shape[1] // self.dtype.block_size()
+                self.padded_shape[0],
+                self.padded_shape[1] // self.dtype.block_size(),
             )
 
         result = values * scales.to(intermediate_dtype).repeat_interleave(

@@ -3,8 +3,8 @@ from fouroversix.quantize import QuantizationConfig, QuantizedTensor, quantize_t
 from fouroversix.utils import DataType, MatmulBackend
 
 from .cutlass import CUTLASSMatmulBackend
-from .triton import TritonMatmulBackend
 from .pytorch import PyTorchMatmulBackend
+from .triton import TritonMatmulBackend
 
 AVAILABLE_BACKENDS = {
     MatmulBackend.cutlass: CUTLASSMatmulBackend,

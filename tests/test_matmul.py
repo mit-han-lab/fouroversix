@@ -4,11 +4,11 @@ import pytest
 import torch
 from fouroversix import (
     DataType,
-    QuantizationConfig,
     MatmulBackend,
+    QuantizationConfig,
     ScaleRule,
-    quantize_to_fp4,
     fp4_matmul,
+    quantize_to_fp4,
 )
 from fouroversix.matmul.frontend import AVAILABLE_BACKENDS
 
@@ -33,7 +33,15 @@ NUM_RANDOM_SEEDS = 10
     "scale_rule",
     [ScaleRule.static_6, ScaleRule.static_4, ScaleRule.mse],
 )
-def test_matmul(m, n, k, backend_a, backend_b, dtype, scale_rule):
+def test_matmul(
+    m: int,
+    n: int,
+    k: int,
+    backend_a: MatmulBackend,
+    backend_b: MatmulBackend,
+    dtype: DataType,
+    scale_rule: ScaleRule,
+) -> None:
     torch.set_printoptions(precision=10)
 
     backend_a_cls = AVAILABLE_BACKENDS[backend_a]

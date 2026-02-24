@@ -1,12 +1,13 @@
 from __future__ import annotations
-from re import I
 
 import torch
 import triton
 import triton.language as tl
-from fouroversix.utils import SM_100, SM_120, DataType, RoundStyle, ScaleRule
 from fouroversix.quantize.quantized_tensor import from_blocked
+from fouroversix.utils import SM_100, SM_120, DataType, RoundStyle, ScaleRule
 from triton.tools.tensor_descriptor import TensorDescriptor
+
+from .convert import convert_to_packed_fp4_kernel
 
 E2M1_MAX_VALUE = tl.constexpr(6)
 E2M1_MAX_FOUR = tl.constexpr(4)
@@ -22,13 +23,13 @@ ROUND_STYLE_NEAREST = tl.constexpr(RoundStyle.nearest.value)
 ROUND_STYLE_STOCHASTIC = tl.constexpr(RoundStyle.stochastic.value)
 
 SCALE_RULE_ABS_MAX = tl.constexpr(ScaleRule.abs_max.value)
-SCALE_RULE_STATIC_4 = tl.constexpr(ScaleRule.static_4.value)
-SCALE_RULE_STATIC_6 = tl.constexpr(ScaleRule.static_6.value)
 SCALE_RULE_MAE = tl.constexpr(ScaleRule.mae.value)
 SCALE_RULE_MSE = tl.constexpr(ScaleRule.mse.value)
+SCALE_RULE_STATIC_4 = tl.constexpr(ScaleRule.static_4.value)
+SCALE_RULE_STATIC_6 = tl.constexpr(ScaleRule.static_6.value)
 
 DEVICE_IS_BLACKWELL = tl.constexpr(
-    torch.cuda.get_device_capability()[0] in {SM_100, SM_120}
+    torch.cuda.get_device_capability()[0] in {SM_100, SM_120},
 )
 DEVICE_SUPPORTS_CVT_RS = tl.constexpr(torch.cuda.get_device_capability()[0] == SM_100)
 
@@ -89,135 +90,19 @@ def add_fake_rbits_kernel(
 
     return tl.where(x_block < 0, -1, 1) * tl.abs(
         tl.where(
-            tl.abs(x_block) < 2,
+            tl.abs(x_block) < 2,  # noqa: PLR2004
             tl.abs(x_block) + rbits / 2,
             tl.where(
-                tl.abs(x_block) < 4,
+                tl.abs(x_block) < 4,  # noqa: PLR2004
                 tl.abs(x_block) + rbits,
                 tl.abs(x_block) + rbits * 2,
             ),
-        )
+        ),
     )
 
 
 @triton.jit
-def quantize_to_packed_fp4_kernel(
-    x_block_scaled_b1,
-    x_block_scaled_b2,
-    DEQUANTIZE: tl.constexpr,
-) -> None:
-    abs_b1 = tl.abs(x_block_scaled_b1)
-    abs_b2 = tl.abs(x_block_scaled_b2)
-
-    sign_b1 = tl.where(x_block_scaled_b1 >= 0, 0, 1).to(tl.uint8)
-    sign_b2 = tl.where(x_block_scaled_b2 >= 0, 0, 1).to(tl.uint8)
-
-    value_b1 = tl.where(
-        abs_b1 <= 0.25,
-        0,
-        tl.where(
-            abs_b1 < 0.75,
-            1,
-            tl.where(
-                abs_b1 <= 1.25,
-                2,
-                tl.where(
-                    abs_b1 < 1.75,
-                    3,
-                    tl.where(
-                        abs_b1 <= 2.5,
-                        4,
-                        tl.where(abs_b1 < 3.5, 5, tl.where(abs_b1 <= 5, 6, 7)),
-                    ),
-                ),
-            ),
-        ),
-    ).to(tl.uint8)
-
-    value_b2 = tl.where(
-        abs_b2 <= 0.25,
-        0,
-        tl.where(
-            abs_b2 < 0.75,
-            1,
-            tl.where(
-                abs_b2 <= 1.25,
-                2,
-                tl.where(
-                    abs_b2 < 1.75,
-                    3,
-                    tl.where(
-                        abs_b2 <= 2.5,
-                        4,
-                        tl.where(abs_b2 < 3.5, 5, tl.where(abs_b2 <= 5, 6, 7)),
-                    ),
-                ),
-            ),
-        ),
-    ).to(tl.uint8)
-
-    result = (sign_b2 << 7) | (value_b2 << 4) | (sign_b1 << 3) | value_b1
-
-    if DEQUANTIZE:
-        dequantized_b1 = tl.where(
-            value_b1 == 0,
-            0,
-            tl.where(
-                value_b1 == 1,
-                0.5,
-                tl.where(
-                    value_b1 == 2,
-                    1,
-                    tl.where(
-                        value_b1 == 3,
-                        1.5,
-                        tl.where(
-                            value_b1 == 4,
-                            2,
-                            tl.where(
-                                value_b1 == 5,
-                                3,
-                                tl.where(value_b1 == 6, 4, 6),
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-        ).to(tl.float32) * tl.where(x_block_scaled_b1 >= 0, 1, -1)
-
-        dequantized_b2 = tl.where(
-            value_b2 == 0,
-            0,
-            tl.where(
-                value_b2 == 1,
-                0.5,
-                tl.where(
-                    value_b2 == 2,
-                    1,
-                    tl.where(
-                        value_b2 == 3,
-                        1.5,
-                        tl.where(
-                            value_b2 == 4,
-                            2,
-                            tl.where(
-                                value_b2 == 5,
-                                3,
-                                tl.where(value_b2 == 6, 4, 6),
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-        ).to(tl.float32) * tl.where(x_block_scaled_b2 >= 0, 1, -1)
-
-        return result, tl.join(dequantized_b1, dequantized_b2).reshape(128, 4, 16)
-    else:
-        return result
-
-
-@triton.jit
-def block_scaled_fp4_quantization_kernel(
+def block_scaled_fp4_quantization_kernel(  # noqa: C901, PLR0912
     x_block,
     x_amax_ptr,
     BLOCK_SIZE_M: tl.constexpr,
@@ -345,8 +230,10 @@ def block_scaled_fp4_quantization_kernel(
                 pack=4,
             )
         else:
-            x_e2m1 = quantize_to_packed_fp4_kernel(
-                x_block_scaled_b1, x_block_scaled_b2, False
+            x_e2m1 = convert_to_packed_fp4_kernel(
+                x_block_scaled_b1,
+                x_block_scaled_b2,
+                RETURN_HIGH_PRECISION_VALUES=True,
             )
     elif ROUND_STYLE == ROUND_STYLE_STOCHASTIC:
         if RBITS == -1:
@@ -536,16 +423,16 @@ def nvfp4_fouroversix_quantization_kernel(  # noqa: C901, PLR0912, PLR0915
 
             NEED_TO_UNPACK_FP16X2: tl.constexpr = True
         else:
-            x_e2m1_6, x_hp_6 = quantize_to_packed_fp4_kernel(
+            x_e2m1_6, x_hp_6 = convert_to_packed_fp4_kernel(
                 x_block_scaled_6_b1,
                 x_block_scaled_6_b2,
-                True,
+                RETURN_HIGH_PRECISION_VALUES=True,
             )
 
-            x_e2m1_4, x_hp_4 = quantize_to_packed_fp4_kernel(
+            x_e2m1_4, x_hp_4 = convert_to_packed_fp4_kernel(
                 x_block_scaled_4_b1,
                 x_block_scaled_4_b2,
-                True,
+                RETURN_HIGH_PRECISION_VALUES=True,
             )
 
             NEED_TO_UNPACK_FP16X2: tl.constexpr = False
@@ -718,7 +605,7 @@ def nvfp4_fouroversix_quantization_kernel(  # noqa: C901, PLR0912, PLR0915
 
 
 @triton.jit
-def if4_quantization_kernel(
+def if4_quantization_kernel(  # noqa: C901, PLR0915
     x_block,
     x_amax_ptr,
     BLOCK_SIZE_M: tl.constexpr,
@@ -726,7 +613,6 @@ def if4_quantization_kernel(
     ROUND_STYLE: tl.constexpr,
     BLOCK_SCALE_2D: tl.constexpr,
     SCALE_RULE: tl.constexpr,
-    RBITS: tl.constexpr,
 ) -> None:
     x_amax = tl.load(x_amax_ptr)
     x_scale_blocks = x_block.reshape(128, 4, 16)
@@ -767,7 +653,9 @@ def if4_quantization_kernel(
     )
 
     (x_block_scaled_b1, x_block_scaled_b2) = x_block_scaled.reshape(
-        BLOCK_SIZE_M, BLOCK_SIZE_N // 2, 2
+        BLOCK_SIZE_M,
+        BLOCK_SIZE_N // 2,
+        2,
     ).split()
 
     # Int and fp need different amounts of randomness because int gets scaled by 7/6
@@ -831,11 +719,14 @@ def if4_quantization_kernel(
         )
 
         x_fp_hp = tl.join(
-            x_fp_dequantized_fp16x2_lo, x_fp_dequantized_fp16x2_hi
+            x_fp_dequantized_fp16x2_lo,
+            x_fp_dequantized_fp16x2_hi,
         ).reshape(128, 4, 16)
     else:
-        x_fp, x_fp_hp = quantize_to_packed_fp4_kernel(
-            x_block_scaled_b1, x_block_scaled_b2, True
+        x_fp, x_fp_hp = convert_to_packed_fp4_kernel(
+            x_block_scaled_b1,
+            x_block_scaled_b2,
+            RETURN_HIGH_PRECISION_VALUES=True,
         )
 
     x_int_hp = tl.extra.cuda.libdevice.rint(tl.clamp(x_block_scaled * (7 / 6), -7, 7))
@@ -964,7 +855,6 @@ def fp4_quantization_kernel(
             ROUND_STYLE,
             BLOCK_SCALE_2D,
             SCALE_RULE,
-            RBITS,
         )
     else:
         x_e2m1, x_scales = nvfp4_fouroversix_quantization_kernel(

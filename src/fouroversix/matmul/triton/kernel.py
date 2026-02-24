@@ -1,14 +1,11 @@
-from fouroversix.quantize.quantized_tensor import from_blocked
 import torch
 import triton
 import triton.language as tl
-from .backend import MatmulBackendBase
-from fouroversix.quantize import QuantizedTensor
 from fouroversix.utils import SM_100, SM_120, DataType
 
 DATA_TYPE_NVFP4 = tl.constexpr(DataType.nvfp4.value)
 DEVICE_IS_BLACKWELL = tl.constexpr(
-    torch.cuda.get_device_capability()[0] in {SM_100, SM_120}
+    torch.cuda.get_device_capability()[0] in {SM_100, SM_120},
 )
 Q_BLOCK_SIZE = tl.constexpr(16)
 
@@ -121,7 +118,9 @@ def dequantize_if4_kernel(
         fp_values_2 = dequantized_value_2 * sign_2
 
     fp_values = tl.join(fp_values_1, fp_values_2).reshape(
-        BLOCK_SIZE_M, BLOCK_SIZE_N // Q_BLOCK_SIZE, Q_BLOCK_SIZE
+        BLOCK_SIZE_M,
+        BLOCK_SIZE_N // Q_BLOCK_SIZE,
+        Q_BLOCK_SIZE,
     )
 
     if RETURN_FP:
@@ -220,7 +219,7 @@ def matmul_kernel(
     DTYPE: tl.constexpr,
     INTERMEDIATE_DTYPE: tl.constexpr,
     OUT_DTYPE: tl.constexpr,
-):
+) -> None:
     pid = tl.program_id(0)
     num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
@@ -340,117 +339,3 @@ def matmul_kernel(
     c_ptrs = c_ptr + offs_cm[:, None] * stride_cm + offs_cn[None, :] * stride_cn
     c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
     tl.store(c_ptrs, (accumulator * alpha).to(OUT_DTYPE), mask=c_mask)
-
-
-class TritonMatmulBackend(MatmulBackendBase):
-    """
-    The Triton matrix multiplication backend. Uses Triton kernels to perform fast
-    FP4 matrix multiplication. Requires a Blackwell GPU.
-    """
-
-    @classmethod
-    def is_available(cls) -> bool:
-        """Return True if the Triton backend is available on the current machine."""
-        return True
-
-    @classmethod
-    def is_supported(
-        cls,
-        input: QuantizedTensor,
-        other: QuantizedTensor,
-        *,
-        out_dtype: DataType,
-    ) -> bool:
-        """Return True if the Triton backend supports the given inputs and output data type."""
-
-        if not super().is_supported(input, other, out_dtype=out_dtype):
-            return False
-
-        return (
-            input.dtype in {DataType.if4, DataType.nvfp4}
-            and input.device.type == "cuda"
-        )
-
-    @classmethod
-    def fp4_matmul(
-        cls,
-        input: QuantizedTensor,
-        other: QuantizedTensor,
-        *,
-        out_dtype: DataType,
-    ) -> torch.Tensor:
-        """Perform a matrix multiplication (`a @ b.T`) between two quantized tensors using the Triton backend."""
-        M = input.original_shape[0]
-        N = other.original_shape[0]
-        K = input.original_shape[1]
-
-        input_sf_shape = (
-            input.padded_shape[0],
-            input.padded_shape[1] // input.dtype.block_size(),
-        )
-        other_sf_shape = (
-            other.padded_shape[0],
-            other.padded_shape[1] // other.dtype.block_size(),
-        )
-
-        if input.scale_factors_are_in_blackwell_layout:
-            input_scale_factors = from_blocked(
-                input.scale_factors,
-                input_sf_shape,
-            )
-        else:
-            input_scale_factors = input.scale_factors.reshape(input_sf_shape)
-
-        if other.scale_factors_are_in_blackwell_layout:
-            other_scale_factors = from_blocked(
-                other.scale_factors,
-                other_sf_shape,
-            )
-        else:
-            other_scale_factors = other.scale_factors.reshape(other_sf_shape)
-
-        output = torch.empty(
-            (M, N),
-            device=input.values.device,
-            dtype=out_dtype.torch_dtype(),
-        )
-
-        grid = lambda meta: (
-            triton.cdiv(M, meta["BLOCK_SIZE_M"]) * triton.cdiv(N, meta["BLOCK_SIZE_N"]),
-        )  # noqa: E731
-
-        matmul_kernel[grid](
-            input.values,
-            input_scale_factors,
-            input.amax,
-            other.values,
-            other_scale_factors,
-            other.amax,
-            output,
-            M,
-            N,
-            K,
-            input.values.stride(0),
-            input_scale_factors.stride(0),
-            input.values.stride(1),
-            input_scale_factors.stride(1),
-            other.values.stride(0),
-            other_scale_factors.stride(0),
-            other.values.stride(1),
-            other_scale_factors.stride(1),
-            output.stride(0),
-            output.stride(1),
-            BLOCK_SIZE_M=64,
-            BLOCK_SIZE_N=64,
-            BLOCK_SIZE_K=32,
-            GROUP_SIZE_M=6,
-            A_E2M1_MAX_VALUE=input.dtype.max_allowed_e2m1_value(input.scale_rule),
-            B_E2M1_MAX_VALUE=other.dtype.max_allowed_e2m1_value(other.scale_rule),
-            A_E4M3_MAX_VALUE=input.dtype.max_allowed_e4m3_value(input.scale_rule),
-            B_E4M3_MAX_VALUE=other.dtype.max_allowed_e4m3_value(other.scale_rule),
-            DTYPE=input.dtype.value,
-            INTERMEDIATE_DTYPE=tl.float16,
-            OUT_DTYPE=tl.bfloat16,
-        )
-
-        return output

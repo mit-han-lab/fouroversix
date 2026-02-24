@@ -49,7 +49,7 @@ NUM_RANDOM_SEEDS = 10
 )
 @pytest.mark.parametrize("round_style", [RoundStyle.nearest, RoundStyle.stochastic])
 @pytest.mark.parametrize("transpose", ["transpose", "no_transpose"])
-def test_backend_outputs_are_consistent(  # noqa: C901, PLR0915
+def test_backend_outputs_are_consistent(  # noqa: C901, PLR0912, PLR0915
     input_type: str,
     input_shape: tuple[int, int],
     backend_a: QuantizeBackend,
@@ -136,7 +136,8 @@ def test_backend_outputs_are_consistent(  # noqa: C901, PLR0915
             )
         else:
             sf_a = quantized_a.scale_factors.bfloat16().reshape(
-                input_shape[0], input_shape[1] // 16
+                input_shape[0],
+                input_shape[1] // 16,
             )
 
         if quantized_b.scale_factors_are_in_blackwell_layout:
@@ -146,7 +147,8 @@ def test_backend_outputs_are_consistent(  # noqa: C901, PLR0915
             )
         else:
             sf_b = quantized_b.scale_factors.bfloat16().reshape(
-                input_shape[0], input_shape[1] // 16
+                input_shape[0],
+                input_shape[1] // 16,
             )
 
         # When computing 4/6 with the MAE and MSE scale rules, computing the errors

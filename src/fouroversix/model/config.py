@@ -62,7 +62,7 @@ class ModuleQuantizationConfig:
     weight_scale_2d: bool = False
     weight_scale_rule: ScaleRule | None = None
 
-    def __post_init__(self) -> None:
+    def __post_init__(self) -> None:  # noqa: C901
         """Convert string values to enums."""
 
         if isinstance(self.activation_round_style, str):

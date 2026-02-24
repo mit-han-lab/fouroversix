@@ -23,8 +23,8 @@ class PyTorchQuantizeBackend(QuantizeBackendBase):
     @classmethod
     def is_supported(
         cls,
-        x: torch.Tensor,  # noqa: ARG003
-        config: QuantizationConfig,  # noqa: ARG003
+        x: torch.Tensor,
+        config: QuantizationConfig,
     ) -> bool:
         """
         Return True if the PyTorch backend supports the given input and quantization
