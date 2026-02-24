@@ -51,7 +51,7 @@ class TritonQuantizeBackend(QuantizeBackendBase):
 
         """
 
-        from .kernel import quantize_to_fp4
+        from .kernels import quantize_to_fp4
 
         values, scale_factors, amax = quantize_to_fp4(
             x,

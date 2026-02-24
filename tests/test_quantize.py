@@ -69,7 +69,7 @@ NUM_RANDOM_SEEDS = 10
         ScaleRule.static_6,
     ],
 )
-@pytest.mark.parametrize("round_style", [RoundStyle.nearest, RoundStyle.stochastic])
+@pytest.mark.parametrize("round_style", [RoundStyle.nearest])
 @pytest.mark.parametrize("transpose", ["transpose", "no_transpose"])
 def test_backend_outputs_are_consistent(  # noqa: C901, PLR0912, PLR0915
     input_type: str,

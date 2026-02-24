@@ -13,7 +13,8 @@ from fouroversix.utils import (
 )
 from triton.tools.tensor_descriptor import TensorDescriptor
 
-from .convert import convert_to_e2m1x2_kernel, convert_to_e2m1x2_with_hp_values_kernel
+from .fp4 import convert_to_e2m1x2, convert_to_e2m1x2_and_quantized_fp16
+from .rht import rht_kernel
 
 E2M1_MAX_VALUE = tl.constexpr(6)
 E2M1_MAX_FOUR = tl.constexpr(4)
@@ -33,44 +34,6 @@ SCALE_RULE_MAE = tl.constexpr(ScaleRule.mae.value)
 SCALE_RULE_MSE = tl.constexpr(ScaleRule.mse.value)
 SCALE_RULE_STATIC_4 = tl.constexpr(ScaleRule.static_4.value)
 SCALE_RULE_STATIC_6 = tl.constexpr(ScaleRule.static_6.value)
-
-
-@triton.jit
-def rht_kernel(
-    x_desc,
-    h_desc,
-    y_desc,
-    # Meta-parameters
-    # TODO(jack): Update RHT kernel to support unpadded dimensions
-    BLOCK_SIZE_M: tl.constexpr,
-    BLOCK_SIZE_N: tl.constexpr,
-    TRANSPOSE: tl.constexpr,
-) -> None:
-    HAD_BLOCK_SIZE: tl.constexpr = h_desc.block_shape[0]
-
-    pid_m = tl.program_id(0)
-    pid_n = tl.program_id(1)
-
-    # Load H [B, B]
-    h_block = h_desc.load([0, 0])
-
-    m_block_offset = pid_m * BLOCK_SIZE_M
-    n_block_offset = pid_n * BLOCK_SIZE_N
-
-    if not TRANSPOSE:
-        x_block = x_desc.load([m_block_offset, n_block_offset])
-    else:
-        x_block = x_desc.load([n_block_offset, m_block_offset]).T
-
-    y_block = tl.dot(
-        x_block.reshape(
-            BLOCK_SIZE_M * BLOCK_SIZE_N // HAD_BLOCK_SIZE,
-            HAD_BLOCK_SIZE,
-        ).to(tl.bfloat16),
-        h_block,
-    ).reshape(BLOCK_SIZE_M, BLOCK_SIZE_N)
-
-    y_desc.store([m_block_offset, n_block_offset], y_block)
 
 
 @triton.jit
@@ -103,7 +66,7 @@ def add_fake_rbits_kernel(
 
 
 @triton.jit
-def block_scaled_fp4_quantization_kernel(  # noqa: C901, PLR0912
+def block_scaled_fp4_quantization_kernel(
     x_block,
     x_amax_ptr,
     BLOCK_SIZE_M: tl.constexpr,
@@ -214,26 +177,11 @@ def block_scaled_fp4_quantization_kernel(  # noqa: C901, PLR0912
     if ROUND_STYLE == ROUND_STYLE_NEAREST or (
         not USE_BLACKWELL_CVT_RS_INSTRUCTIONS and ROUND_STYLE == ROUND_STYLE_STOCHASTIC
     ):
-        if USE_BLACKWELL_CVT_RN_INSTRUCTIONS:
-            x_e2m1 = tl.inline_asm_elementwise(
-                asm="""
-                    {
-                    .reg .b8 byte0, byte1, byte2, byte3;
-                    cvt.rn.satfinite.e2m1x2.f32 byte0, $5, $1;
-                    cvt.rn.satfinite.e2m1x2.f32 byte1, $6, $2;
-                    cvt.rn.satfinite.e2m1x2.f32 byte2, $7, $3;
-                    cvt.rn.satfinite.e2m1x2.f32 byte3, $8, $4;
-                    mov.b32 $0, {byte0, byte1, byte2, byte3};
-                    }
-                    """,
-                constraints="=r,r,r,r,r,r,r,r,r",
-                args=[x_block_scaled_b1, x_block_scaled_b2],
-                dtype=tl.uint8,
-                is_pure=True,
-                pack=4,
-            )
-        else:
-            x_e2m1 = convert_to_e2m1x2_kernel(x_block_scaled_b1, x_block_scaled_b2)
+        x_e2m1 = convert_to_e2m1x2(
+            x_block_scaled_b1,
+            x_block_scaled_b2,
+            USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+        )
     elif ROUND_STYLE == ROUND_STYLE_STOCHASTIC:
         if RBITS == -1:
             rbits = tl.rand(
@@ -363,78 +311,22 @@ def nvfp4_fouroversix_quantization_kernel(  # noqa: C901, PLR0912, PLR0915
     if ROUND_STYLE == ROUND_STYLE_NEAREST or (
         not USE_BLACKWELL_CVT_RS_INSTRUCTIONS and ROUND_STYLE == ROUND_STYLE_STOCHASTIC
     ):
-        if USE_BLACKWELL_CVT_RN_INSTRUCTIONS:
-            (x_e2m1_6, x_e2m1_4, x_fp16x2_6, x_fp16x2_4) = tl.inline_asm_elementwise(
-                asm="""
-                {
-                .reg .b8 byte0, byte1, byte2, byte3;
+        x_e2m1_6, x_hp_6 = convert_to_e2m1x2_and_quantized_fp16(
+            x_block_scaled_6_b1,
+            x_block_scaled_6_b2,
+            USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+        )
 
-                cvt.rn.satfinite.e2m1x2.f32 byte0, $28, $20;
-                cvt.rn.f16x2.e2m1x2 $4, byte0;
-                cvt.rn.satfinite.e2m1x2.f32 byte1, $29, $21;
-                cvt.rn.f16x2.e2m1x2 $5, byte1;
-                cvt.rn.satfinite.e2m1x2.f32 byte2, $30, $22;
-                cvt.rn.f16x2.e2m1x2 $6, byte2;
-                cvt.rn.satfinite.e2m1x2.f32 byte3, $31, $23;
-                cvt.rn.f16x2.e2m1x2 $7, byte3;
-                mov.b32 $0, {byte0, byte1, byte2, byte3};
+        x_e2m1_4, x_hp_4 = convert_to_e2m1x2_and_quantized_fp16(
+            x_block_scaled_4_b1,
+            x_block_scaled_4_b2,
+            USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+        )
 
-                cvt.rn.satfinite.e2m1x2.f32 byte0, $32, $24;
-                cvt.rn.f16x2.e2m1x2 $8, byte0;
-                cvt.rn.satfinite.e2m1x2.f32 byte1, $33, $25;
-                cvt.rn.f16x2.e2m1x2 $9, byte1;
-                cvt.rn.satfinite.e2m1x2.f32 byte2, $34, $26;
-                cvt.rn.f16x2.e2m1x2 $10, byte2;
-                cvt.rn.satfinite.e2m1x2.f32 byte3, $35, $27;
-                cvt.rn.f16x2.e2m1x2 $11, byte3;
-                mov.b32 $1, {byte0, byte1, byte2, byte3};
+        x_hp_6 = x_hp_6.to(tl.float32)
+        x_hp_4 = x_hp_4.to(tl.float32)
 
-                cvt.rn.satfinite.e2m1x2.f32 byte0, $44, $36;
-                cvt.rn.f16x2.e2m1x2 $12, byte0;
-                cvt.rn.satfinite.e2m1x2.f32 byte1, $45, $37;
-                cvt.rn.f16x2.e2m1x2 $13, byte1;
-                cvt.rn.satfinite.e2m1x2.f32 byte2, $46, $38;
-                cvt.rn.f16x2.e2m1x2 $14, byte2;
-                cvt.rn.satfinite.e2m1x2.f32 byte3, $47, $39;
-                cvt.rn.f16x2.e2m1x2 $15, byte3;
-                mov.b32 $2, {byte0, byte1, byte2, byte3};
-
-                cvt.rn.satfinite.e2m1x2.f32 byte0, $48, $40;
-                cvt.rn.f16x2.e2m1x2 $16, byte0;
-                cvt.rn.satfinite.e2m1x2.f32 byte1, $49, $41;
-                cvt.rn.f16x2.e2m1x2 $17, byte1;
-                cvt.rn.satfinite.e2m1x2.f32 byte2, $50, $42;
-                cvt.rn.f16x2.e2m1x2 $18, byte2;
-                cvt.rn.satfinite.e2m1x2.f32 byte3, $51, $43;
-                cvt.rn.f16x2.e2m1x2 $19, byte3;
-                mov.b32 $3, {byte0, byte1, byte2, byte3};
-                }
-                """,
-                constraints="=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r",
-                args=[
-                    x_block_scaled_6_b1,
-                    x_block_scaled_6_b2,
-                    x_block_scaled_4_b1,
-                    x_block_scaled_4_b2,
-                ],
-                dtype=(tl.uint8, tl.uint8, tl.uint32, tl.uint32),
-                is_pure=True,
-                pack=8,
-            )
-
-            NEED_TO_UNPACK_FP16X2: tl.constexpr = True
-        else:
-            x_e2m1_6, x_hp_6 = convert_to_e2m1x2_with_hp_values_kernel(
-                x_block_scaled_6_b1,
-                x_block_scaled_6_b2,
-            )
-
-            x_e2m1_4, x_hp_4 = convert_to_e2m1x2_with_hp_values_kernel(
-                x_block_scaled_4_b1,
-                x_block_scaled_4_b2,
-            )
-
-            NEED_TO_UNPACK_FP16X2: tl.constexpr = False
+        NEED_TO_UNPACK_FP16X2: tl.constexpr = False
     elif ROUND_STYLE == ROUND_STYLE_STOCHASTIC:
         if RBITS == -1:
             rbits = tl.rand(
@@ -604,7 +496,7 @@ def nvfp4_fouroversix_quantization_kernel(  # noqa: C901, PLR0912, PLR0915
 
 
 @triton.jit
-def if4_quantization_kernel(  # noqa: C901, PLR0915
+def if4_quantization_kernel(
     x_block,
     x_amax_ptr,
     BLOCK_SIZE_M: tl.constexpr,
@@ -682,51 +574,13 @@ def if4_quantization_kernel(  # noqa: C901, PLR0915
             - 0.5
         ) * (6 / 7)
 
-    if USE_BLACKWELL_CVT_RN_INSTRUCTIONS:
-        x_fp, x_fp_dequantized_fp16x2 = tl.inline_asm_elementwise(
-            asm="""
-                {
-                .reg .b8 byte0, byte1, byte2, byte3;
-                cvt.rn.satfinite.e2m1x2.f32 byte0, $9, $5;
-                cvt.rn.f16x2.e2m1x2 $1, byte0;
-                cvt.rn.satfinite.e2m1x2.f32 byte1, $10, $6;
-                cvt.rn.f16x2.e2m1x2 $2, byte1;
-                cvt.rn.satfinite.e2m1x2.f32 byte2, $11, $7;
-                cvt.rn.f16x2.e2m1x2 $3, byte2;
-                cvt.rn.satfinite.e2m1x2.f32 byte3, $12, $8;
-                cvt.rn.f16x2.e2m1x2 $4, byte3;
-                mov.b32 $0, {byte0, byte1, byte2, byte3};
-                }
-                """,
-            constraints="=r,=r,=r,=r,=r,r,r,r,r,r,r,r,r",
-            args=[x_block_scaled_b1, x_block_scaled_b2],
-            dtype=(tl.uint8, tl.uint32),
-            is_pure=True,
-            pack=4,
-        )
+    x_fp, x_fp_hp = convert_to_e2m1x2_and_quantized_fp16(
+        x_block_scaled_b1,
+        x_block_scaled_b2,
+        USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+    )
 
-        x_fp_dequantized_fp16x2_lo = (
-            (x_fp_dequantized_fp16x2 & 0xFFFF)
-            .cast(tl.uint16)
-            .cast(tl.float16, bitcast=True)
-            .cast(x_amax.dtype)
-        )
-        x_fp_dequantized_fp16x2_hi = (
-            (x_fp_dequantized_fp16x2 >> 16)
-            .cast(tl.uint16)
-            .cast(tl.float16, bitcast=True)
-            .cast(x_amax.dtype)
-        )
-
-        x_fp_hp = tl.join(
-            x_fp_dequantized_fp16x2_lo,
-            x_fp_dequantized_fp16x2_hi,
-        ).reshape(128, 4, 16)
-    else:
-        x_fp, x_fp_hp = convert_to_e2m1x2_with_hp_values_kernel(
-            x_block_scaled_b1,
-            x_block_scaled_b2,
-        )
+    x_fp_hp = x_fp_hp.to(tl.float32)
 
     x_int_hp = tl.extra.cuda.libdevice.rint(tl.clamp(x_block_scaled * (7 / 6), -7, 7))
     (x_int_b1, x_int_b2) = (
