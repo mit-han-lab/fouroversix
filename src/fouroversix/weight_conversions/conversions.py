@@ -38,4 +38,8 @@ class WeightConversions:
         Get the weight conversion for a given model type determined
         by the model config type.
         """
-        return cls._registry.get(pre_quantized_model_config_type, [])
+        weight_conversions = cls._registry.get(pre_quantized_model_config_type, None)
+        if weight_conversions is None:
+            msg = f"Config type {pre_quantized_model_config_type} not supported."
+            raise ValueError(msg)
+        return weight_conversions

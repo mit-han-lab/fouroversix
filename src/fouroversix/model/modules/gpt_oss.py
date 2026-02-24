@@ -20,7 +20,7 @@ from transformers.models.gpt_oss.modeling_gpt_oss import (
 
 @QuantizedModule.register(GptOssMLP)
 class FourOverSixGptOssMLP(nn.Module):
-    """Drop-in replacement for MoE layer that uses FP4 quantization."""
+    """Drop-in replacement for GptOssMLP layer that uses FP4 quantization."""
 
     def __init__(
         self,
@@ -80,7 +80,7 @@ class FourOverSixGptOssMLP(nn.Module):
 
 @QuantizedModule.register(GptOssExperts, replace_existing_modules_in_model=False)
 class FourOverSixGptOssExperts(nn.Module):
-    """Drop-in replacement for MoE layer that uses FP4 quantization."""
+    """Drop-in replacement for GptOssExperts layer that uses FP4 quantization."""
 
     def __init__(
         self,
@@ -104,7 +104,6 @@ class FourOverSixGptOssExperts(nn.Module):
         self.config = quantization_config
 
         if not self.config.keep_master_weights:
-
             self.register_buffer(
                 "quantized_down_proj_values",
                 nn.Parameter(
@@ -206,9 +205,6 @@ class FourOverSixGptOssExperts(nn.Module):
         high-precision weight.
         """
 
-        if "bias" in parameter_name:
-            return {parameter_name: parameter}
-
         weight_config = QuantizationConfig(
             backend=self.config.quantize_backend,
             dtype=self.config.dtype,
@@ -283,8 +279,7 @@ class FourOverSixGptOssExperts(nn.Module):
             expert_mask = expert_mask.permute(2, 1, 0)
             expert_hit = torch.greater(expert_mask.sum(dim=(-1, -2)), 0).nonzero()
 
-        for expert_i in expert_hit[:]:
-            expert_idx = expert_i[0]
+        for [expert_idx] in expert_hit:
             if expert_idx == self.num_experts:
                 continue
             with torch.no_grad():

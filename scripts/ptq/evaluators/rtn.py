@@ -66,9 +66,11 @@ class RTNEvaluatorImpl(PTQEvaluator):
                 weight_scale_rule=quantization_config.get_weight_scale_rule(),
             )
 
+            save_kwargs = {}
             if hasattr(model_config,  "quantization_config"):
                 hf_quantization_config.pre_quantized_model_config_type = \
                     str(type(model_config))
+                save_kwargs["save_original_format"] = False
                 delattr(model_config, "quantization_config")
 
             model = AutoModelForCausalLM.from_pretrained(
@@ -79,7 +81,7 @@ class RTNEvaluatorImpl(PTQEvaluator):
                 trust_remote_code=trust_remote_code,
             )
 
-            model.save_pretrained(model_save_path, save_original_format=False)
+            model.save_pretrained(model_save_path, **save_kwargs)
         else:
             model = AutoModelForCausalLM.from_pretrained(
                 model_save_path,
