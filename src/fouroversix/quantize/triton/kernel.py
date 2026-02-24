@@ -4,10 +4,16 @@ import torch
 import triton
 import triton.language as tl
 from fouroversix.quantize.quantized_tensor import from_blocked
-from fouroversix.utils import SM_100, SM_120, DataType, RoundStyle, ScaleRule
+from fouroversix.utils import (
+    DataType,
+    RoundStyle,
+    ScaleRule,
+    device_supports_cvt_rn_e2m1x2,
+    device_supports_cvt_rs_e2m1x4,
+)
 from triton.tools.tensor_descriptor import TensorDescriptor
 
-from .convert import convert_to_packed_fp4_kernel
+from .convert import convert_to_e2m1x2_kernel, convert_to_e2m1x2_with_hp_values_kernel
 
 E2M1_MAX_VALUE = tl.constexpr(6)
 E2M1_MAX_FOUR = tl.constexpr(4)
@@ -27,11 +33,6 @@ SCALE_RULE_MAE = tl.constexpr(ScaleRule.mae.value)
 SCALE_RULE_MSE = tl.constexpr(ScaleRule.mse.value)
 SCALE_RULE_STATIC_4 = tl.constexpr(ScaleRule.static_4.value)
 SCALE_RULE_STATIC_6 = tl.constexpr(ScaleRule.static_6.value)
-
-DEVICE_IS_BLACKWELL = tl.constexpr(
-    torch.cuda.get_device_capability()[0] in {SM_100, SM_120},
-)
-DEVICE_SUPPORTS_CVT_RS = tl.constexpr(torch.cuda.get_device_capability()[0] == SM_100)
 
 
 @triton.jit
@@ -112,6 +113,8 @@ def block_scaled_fp4_quantization_kernel(  # noqa: C901, PLR0912
     BLOCK_SCALE_2D: tl.constexpr,
     SCALE_RULE: tl.constexpr,
     RBITS: tl.constexpr,
+    USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
+    USE_BLACKWELL_CVT_RS_INSTRUCTIONS: tl.constexpr,
 ) -> None:
     E2M1_MAX_ALLOWED_VALUE: tl.constexpr = (
         E2M1_MAX_VALUE if SCALE_RULE == SCALE_RULE_STATIC_6 else E2M1_MAX_FOUR
@@ -194,7 +197,7 @@ def block_scaled_fp4_quantization_kernel(  # noqa: C901, PLR0912
             .split()
         )
 
-    if not DEVICE_SUPPORTS_CVT_RS and ROUND_STYLE == ROUND_STYLE_STOCHASTIC:
+    if not USE_BLACKWELL_CVT_RS_INSTRUCTIONS and ROUND_STYLE == ROUND_STYLE_STOCHASTIC:
         x_block_scaled_b1 = add_fake_rbits_kernel(
             x_block_scaled_b1,
             BLOCK_SIZE_M,
@@ -209,9 +212,9 @@ def block_scaled_fp4_quantization_kernel(  # noqa: C901, PLR0912
         )
 
     if ROUND_STYLE == ROUND_STYLE_NEAREST or (
-        not DEVICE_SUPPORTS_CVT_RS and ROUND_STYLE == ROUND_STYLE_STOCHASTIC
+        not USE_BLACKWELL_CVT_RS_INSTRUCTIONS and ROUND_STYLE == ROUND_STYLE_STOCHASTIC
     ):
-        if DEVICE_IS_BLACKWELL:
+        if USE_BLACKWELL_CVT_RN_INSTRUCTIONS:
             x_e2m1 = tl.inline_asm_elementwise(
                 asm="""
                     {
@@ -230,11 +233,7 @@ def block_scaled_fp4_quantization_kernel(  # noqa: C901, PLR0912
                 pack=4,
             )
         else:
-            x_e2m1 = convert_to_packed_fp4_kernel(
-                x_block_scaled_b1,
-                x_block_scaled_b2,
-                RETURN_HIGH_PRECISION_VALUES=True,
-            )
+            x_e2m1 = convert_to_e2m1x2_kernel(x_block_scaled_b1, x_block_scaled_b2)
     elif ROUND_STYLE == ROUND_STYLE_STOCHASTIC:
         if RBITS == -1:
             rbits = tl.rand(
@@ -278,6 +277,8 @@ def nvfp4_fouroversix_quantization_kernel(  # noqa: C901, PLR0912, PLR0915
     BLOCK_SCALE_2D: tl.constexpr,
     SCALE_RULE: tl.constexpr,
     RBITS: tl.constexpr,
+    USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
+    USE_BLACKWELL_CVT_RS_INSTRUCTIONS: tl.constexpr,
 ) -> None:
     x_amax = tl.load(x_amax_ptr)
     x_scale_blocks = x_block.reshape(128, 4, 16)
@@ -333,7 +334,7 @@ def nvfp4_fouroversix_quantization_kernel(  # noqa: C901, PLR0912, PLR0915
         .split()
     )
 
-    if not DEVICE_SUPPORTS_CVT_RS and ROUND_STYLE == ROUND_STYLE_STOCHASTIC:
+    if not USE_BLACKWELL_CVT_RS_INSTRUCTIONS and ROUND_STYLE == ROUND_STYLE_STOCHASTIC:
         x_block_scaled_6_b1 = add_fake_rbits_kernel(
             x_block_scaled_6_b1,
             BLOCK_SIZE_M,
@@ -360,9 +361,9 @@ def nvfp4_fouroversix_quantization_kernel(  # noqa: C901, PLR0912, PLR0915
         )
 
     if ROUND_STYLE == ROUND_STYLE_NEAREST or (
-        not DEVICE_SUPPORTS_CVT_RS and ROUND_STYLE == ROUND_STYLE_STOCHASTIC
+        not USE_BLACKWELL_CVT_RS_INSTRUCTIONS and ROUND_STYLE == ROUND_STYLE_STOCHASTIC
     ):
-        if DEVICE_IS_BLACKWELL:
+        if USE_BLACKWELL_CVT_RN_INSTRUCTIONS:
             (x_e2m1_6, x_e2m1_4, x_fp16x2_6, x_fp16x2_4) = tl.inline_asm_elementwise(
                 asm="""
                 {
@@ -423,16 +424,14 @@ def nvfp4_fouroversix_quantization_kernel(  # noqa: C901, PLR0912, PLR0915
 
             NEED_TO_UNPACK_FP16X2: tl.constexpr = True
         else:
-            x_e2m1_6, x_hp_6 = convert_to_packed_fp4_kernel(
+            x_e2m1_6, x_hp_6 = convert_to_e2m1x2_with_hp_values_kernel(
                 x_block_scaled_6_b1,
                 x_block_scaled_6_b2,
-                RETURN_HIGH_PRECISION_VALUES=True,
             )
 
-            x_e2m1_4, x_hp_4 = convert_to_packed_fp4_kernel(
+            x_e2m1_4, x_hp_4 = convert_to_e2m1x2_with_hp_values_kernel(
                 x_block_scaled_4_b1,
                 x_block_scaled_4_b2,
-                RETURN_HIGH_PRECISION_VALUES=True,
             )
 
             NEED_TO_UNPACK_FP16X2: tl.constexpr = False
@@ -613,6 +612,7 @@ def if4_quantization_kernel(  # noqa: C901, PLR0915
     ROUND_STYLE: tl.constexpr,
     BLOCK_SCALE_2D: tl.constexpr,
     SCALE_RULE: tl.constexpr,
+    USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
 ) -> None:
     x_amax = tl.load(x_amax_ptr)
     x_scale_blocks = x_block.reshape(128, 4, 16)
@@ -682,7 +682,7 @@ def if4_quantization_kernel(  # noqa: C901, PLR0915
             - 0.5
         ) * (6 / 7)
 
-    if DEVICE_IS_BLACKWELL:
+    if USE_BLACKWELL_CVT_RN_INSTRUCTIONS:
         x_fp, x_fp_dequantized_fp16x2 = tl.inline_asm_elementwise(
             asm="""
                 {
@@ -723,10 +723,9 @@ def if4_quantization_kernel(  # noqa: C901, PLR0915
             x_fp_dequantized_fp16x2_hi,
         ).reshape(128, 4, 16)
     else:
-        x_fp, x_fp_hp = convert_to_packed_fp4_kernel(
+        x_fp, x_fp_hp = convert_to_e2m1x2_with_hp_values_kernel(
             x_block_scaled_b1,
             x_block_scaled_b2,
-            RETURN_HIGH_PRECISION_VALUES=True,
         )
 
     x_int_hp = tl.extra.cuda.libdevice.rint(tl.clamp(x_block_scaled * (7 / 6), -7, 7))
@@ -819,6 +818,8 @@ def fp4_quantization_kernel(
     BLOCK_SCALE_2D: tl.constexpr,
     SCALE_RULE: tl.constexpr,
     RBITS: tl.constexpr,
+    USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
+    USE_BLACKWELL_CVT_RS_INSTRUCTIONS: tl.constexpr,
 ) -> None:
     pid_m = tl.program_id(0)
     pid_n = tl.program_id(1)
@@ -845,6 +846,8 @@ def fp4_quantization_kernel(
             BLOCK_SCALE_2D,
             SCALE_RULE,
             RBITS,
+            USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+            USE_BLACKWELL_CVT_RS_INSTRUCTIONS,
         )
     elif FP4_FORMAT == DATA_TYPE_IF4:
         x_e2m1, x_scales = if4_quantization_kernel(
@@ -855,6 +858,7 @@ def fp4_quantization_kernel(
             ROUND_STYLE,
             BLOCK_SCALE_2D,
             SCALE_RULE,
+            USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
         )
     else:
         x_e2m1, x_scales = nvfp4_fouroversix_quantization_kernel(
@@ -866,6 +870,8 @@ def fp4_quantization_kernel(
             BLOCK_SCALE_2D,
             SCALE_RULE,
             RBITS,
+            USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+            USE_BLACKWELL_CVT_RS_INSTRUCTIONS,
         )
 
     e2m1_n_block_offset = pid_n * BLOCK_SIZE_N // 2
@@ -885,7 +891,9 @@ def quantize_to_fp4(
     scale_rule: ScaleRule = ScaleRule.mse,
     block_scale_2d: bool = False,
     transpose: bool = False,
-    rbits: int = 0,
+    rbits: int = -1,
+    use_blackwell_cvt_rn_instructions: bool | None = None,
+    use_blackwell_cvt_rs_instructions: bool | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
     if transpose:
         N, M = x.shape
@@ -992,6 +1000,16 @@ def quantize_to_fp4(
         BLOCK_SCALE_2D=block_scale_2d,
         SCALE_RULE=scale_rule.value,
         RBITS=rbits,
+        USE_BLACKWELL_CVT_RN_INSTRUCTIONS=(
+            device_supports_cvt_rn_e2m1x2()
+            if use_blackwell_cvt_rn_instructions is None
+            else use_blackwell_cvt_rn_instructions
+        ),
+        USE_BLACKWELL_CVT_RS_INSTRUCTIONS=(
+            device_supports_cvt_rs_e2m1x4()
+            if use_blackwell_cvt_rs_instructions is None
+            else use_blackwell_cvt_rs_instructions
+        ),
     )
 
     if fp4_format == DataType.mxfp4:

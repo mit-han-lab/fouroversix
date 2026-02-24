@@ -79,7 +79,7 @@ class CUDAQuantizeBackend(QuantizeBackendBase):
             config.block_scale_2d,
             config.transpose,
             config.scale_rule.cuda_id,
-            config.rbits,
+            config.kwargs.get("rbits", -1),
         )
 
         return QuantizedTensor(

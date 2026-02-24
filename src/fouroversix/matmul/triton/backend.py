@@ -2,7 +2,7 @@ import torch
 from fouroversix.matmul.backend import MatmulBackendBase
 from fouroversix.quantize import QuantizedTensor
 from fouroversix.quantize.quantized_tensor import from_blocked
-from fouroversix.utils import DataType
+from fouroversix.utils import DataType, device_supports_cvt_rn_e2m1x2
 
 
 class TritonMatmulBackend(MatmulBackendBase):
@@ -44,6 +44,7 @@ class TritonMatmulBackend(MatmulBackendBase):
         other: QuantizedTensor,
         *,
         out_dtype: DataType,
+        use_blackwell_cvt_rn_instructions: bool | None = None,
     ) -> torch.Tensor:
         """
         Perform a matrix multiplication (`a @ b.T`) between two quantized tensors using
@@ -126,6 +127,11 @@ class TritonMatmulBackend(MatmulBackendBase):
             DTYPE=input.dtype.value,
             INTERMEDIATE_DTYPE=tl.float16,
             OUT_DTYPE=tl.bfloat16,
+            USE_BLACKWELL_CVT_RN_INSTRUCTIONS=(
+                device_supports_cvt_rn_e2m1x2()
+                if use_blackwell_cvt_rn_instructions is None
+                else use_blackwell_cvt_rn_instructions
+            ),
         )
 
         return output

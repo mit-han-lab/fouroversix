@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 from fouroversix.utils import DataType, QuantizeBackend, RoundStyle, ScaleRule
 
@@ -17,9 +18,7 @@ class QuantizationConfig:
             weight matrix during training, so that W and W.T will be equivalent after
             quantization.
         dtype (DataType): The data type to quantize to.
-        rbits (int): Random bits to provide to the cvt.rs instruction when performing
-            stochastic rounding. Only supported with the Triton and CUDA backends. If
-            set to -1, random bits will be generated on the fly.
+        kwargs (dict[str, Any]): Additional keyword arguments to pass to the backend.
         rht (bool): If True, the random Hadamard transform will be applied to the input
             prior to quantization.
         round_style (RoundStyle): The rounding style to apply during quantization.
@@ -33,7 +32,7 @@ class QuantizationConfig:
     backend: QuantizeBackend | None = None
     block_scale_2d: bool = False
     dtype: DataType = DataType.nvfp4
-    rbits: int = -1
+    kwargs: dict[str, Any] = field(default_factory=dict)
     rht: bool = False
     round_style: RoundStyle = RoundStyle.nearest
     scale_rule: ScaleRule = ScaleRule.mse

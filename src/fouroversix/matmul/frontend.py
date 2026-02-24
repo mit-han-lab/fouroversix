@@ -1,3 +1,5 @@
+from typing import Any
+
 import torch
 from fouroversix.quantize import QuantizationConfig, QuantizedTensor, quantize_to_fp4
 from fouroversix.utils import DataType, MatmulBackend
@@ -21,6 +23,7 @@ def fp4_matmul(
     input_config: QuantizationConfig | None = None,
     other_config: QuantizationConfig | None = None,
     out_dtype: DataType = DataType.bfloat16,
+    **kwargs: dict[str, Any],
 ) -> torch.Tensor:
     """
     Perform a matrix multiplication (`a @ b.T`) between two quantized tensors.
@@ -79,6 +82,7 @@ def fp4_matmul(
             done prior to the matrix multiplication.
         out_dtype (DataType): The data type of the output tensor. Defaults to
             `DataType.bfloat16`.
+        kwargs (dict[str, Any]): Additional keyword arguments to pass to the backend.
 
     Returns:
         The output tensor.
@@ -120,4 +124,9 @@ def fp4_matmul(
         msg = f"Backend {backend} does not support the given parameters"
         raise ValueError(msg)
 
-    return AVAILABLE_BACKENDS[backend].fp4_matmul(input, other, out_dtype=out_dtype)
+    return AVAILABLE_BACKENDS[backend].fp4_matmul(
+        input,
+        other,
+        out_dtype=out_dtype,
+        **kwargs,
+    )

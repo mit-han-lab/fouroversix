@@ -1,12 +1,8 @@
-import torch
 import triton
 import triton.language as tl
-from fouroversix.utils import SM_100, SM_120, DataType
+from fouroversix.utils import DataType
 
 DATA_TYPE_NVFP4 = tl.constexpr(DataType.nvfp4.value)
-DEVICE_IS_BLACKWELL = tl.constexpr(
-    torch.cuda.get_device_capability()[0] in {SM_100, SM_120},
-)
 Q_BLOCK_SIZE = tl.constexpr(16)
 
 
@@ -17,8 +13,9 @@ def dequantize_if4_kernel(
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
     RETURN_FP: tl.constexpr,
+    USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
 ) -> None:
-    if DEVICE_IS_BLACKWELL:
+    if USE_BLACKWELL_CVT_RN_INSTRUCTIONS:
         (fp_values_1, fp_values_2) = tl.inline_asm_elementwise(
             asm="""
             {
@@ -219,6 +216,7 @@ def matmul_kernel(
     DTYPE: tl.constexpr,
     INTERMEDIATE_DTYPE: tl.constexpr,
     OUT_DTYPE: tl.constexpr,
+    USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
 ) -> None:
     pid = tl.program_id(0)
     num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
@@ -289,6 +287,7 @@ def matmul_kernel(
             BLOCK_SIZE_M,
             BLOCK_SIZE_K,
             RETURN_FP=DTYPE == DATA_TYPE_NVFP4,
+            USE_BLACKWELL_CVT_RN_INSTRUCTIONS=USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
         )
         b_real_values = dequantize_if4_kernel(
             b_values,
@@ -296,6 +295,7 @@ def matmul_kernel(
             BLOCK_SIZE_N,
             BLOCK_SIZE_K,
             RETURN_FP=DTYPE == DATA_TYPE_NVFP4,
+            USE_BLACKWELL_CVT_RN_INSTRUCTIONS=USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
         )
 
         a_sf = tl.where(

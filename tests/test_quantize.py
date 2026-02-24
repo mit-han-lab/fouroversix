@@ -1,4 +1,5 @@
 import itertools
+from typing import Any
 
 import pytest
 import torch
@@ -23,16 +24,37 @@ NUM_RANDOM_SEEDS = 10
     [(1024, 1024), (1024, 512), (512, 1024)],
 )
 @pytest.mark.parametrize(
-    ("backend_a", "backend_b"),
-    itertools.combinations(
-        [
-            QuantizeBackend.cuda,
-            QuantizeBackend.triton,
-            QuantizeBackend.pytorch,
-            QuantizeBackend.transformer_engine,
-        ],
-        r=2,
-    ),
+    ("backend_a", "kwargs_a", "backend_b", "kwargs_b"),
+    [
+        (a[0], a[1], b[0], b[1])
+        for a, b in itertools.chain(
+            itertools.combinations(
+                [
+                    (QuantizeBackend.cuda, {}),
+                    (QuantizeBackend.triton, {}),
+                    (QuantizeBackend.pytorch, {}),
+                    (QuantizeBackend.transformer_engine, {}),
+                ],
+                r=2,
+            ),
+            [
+                (
+                    (QuantizeBackend.triton, {}),
+                    (
+                        QuantizeBackend.triton,
+                        {"use_blackwell_cvt_rn_instructions": True},
+                    ),
+                ),
+                (
+                    (QuantizeBackend.triton, {}),
+                    (
+                        QuantizeBackend.triton,
+                        {"use_blackwell_cvt_rn_instructions": False},
+                    ),
+                ),
+            ],
+        )
+    ],
 )
 @pytest.mark.parametrize("block_scale_2d", ["block_scale_2d", "no_block_scale_2d"])
 @pytest.mark.parametrize("dtype", [DataType.if4, DataType.nvfp4])
@@ -53,7 +75,9 @@ def test_backend_outputs_are_consistent(  # noqa: C901, PLR0912, PLR0915
     input_type: str,
     input_shape: tuple[int, int],
     backend_a: QuantizeBackend,
+    kwargs_a: dict[str, Any],
     backend_b: QuantizeBackend,
+    kwargs_b: dict[str, Any],
     *,
     block_scale_2d: str,
     dtype: DataType,
@@ -74,6 +98,7 @@ def test_backend_outputs_are_consistent(  # noqa: C901, PLR0912, PLR0915
         backend=backend_a,
         block_scale_2d=block_scale_2d == "block_scale_2d",
         dtype=dtype,
+        kwargs=kwargs_a,
         rht=rht == "rht",
         round_style=round_style,
         scale_rule=scale_rule,
@@ -84,6 +109,7 @@ def test_backend_outputs_are_consistent(  # noqa: C901, PLR0912, PLR0915
         backend=backend_b,
         block_scale_2d=block_scale_2d == "block_scale_2d",
         dtype=dtype,
+        kwargs=kwargs_b,
         rht=rht == "rht",
         round_style=round_style,
         scale_rule=scale_rule,
