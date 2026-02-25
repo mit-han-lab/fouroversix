@@ -46,7 +46,7 @@ class FourOverSixGptOssDeserialize(ConversionOps):
             weight_uint8 = weight[e].to(torch.uint8)
             quantized_tensor = QuantizedTensor(
                 values=weight_uint8,
-                scale_factors=scales[e].to(torch.uint8).view(torch.float8_e8m0fnu),
+                scale_factors=scales[e].to(torch.uint8).view(self.dtype.scale_dtype()),
                 amax=torch.ones(
                     (1,),
                     device=weight[e].device,

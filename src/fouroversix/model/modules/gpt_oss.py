@@ -346,7 +346,7 @@ class FourOverSixGptOssExperts(nn.Module):
             for e in range(self.num_experts):
                 down.append(QuantizedTensor(
                     values=self.quantized_down_proj_values.data[e],
-                    scale_factors=self.quantized_down_proj_scale_factors.data[e].view(torch.float8_e8m0fnu),
+                    scale_factors=self.quantized_down_proj_scale_factors.data[e].view(self.config.dtype.scale_dtype()),
                     amax=self.quantized_down_proj_amax.data[e],
                     dtype=self.config.dtype,
                     original_shape=tuple(
@@ -359,7 +359,7 @@ class FourOverSixGptOssExperts(nn.Module):
                 ))
                 gate_up.append(QuantizedTensor(
                     values=self.quantized_gate_up_proj_values.data[e],
-                    scale_factors=self.quantized_gate_up_proj_scale_factors.data[e].view(torch.float8_e8m0fnu),
+                    scale_factors=self.quantized_gate_up_proj_scale_factors.data[e].view(self.config.dtype.scale_dtype()),
                     amax=self.quantized_gate_up_proj_amax.data[e],
                     dtype=self.config.dtype,
                     original_shape=tuple(
