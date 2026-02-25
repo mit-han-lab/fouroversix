@@ -37,35 +37,6 @@ SCALE_RULE_STATIC_6 = tl.constexpr(ScaleRule.static_6.value)
 
 
 @triton.jit
-def add_fake_rbits_kernel(
-    x_block,
-    BLOCK_SIZE_M: tl.constexpr,
-    BLOCK_SIZE_N: tl.constexpr,
-    SEED: tl.constexpr,
-) -> tl.tensor:
-    rbits = (
-        tl.rand(
-            SEED,
-            tl.arange(0, BLOCK_SIZE_M)[:, None] * BLOCK_SIZE_N
-            + tl.arange(0, BLOCK_SIZE_N)[None, :],
-        )
-        - 0.5
-    )
-
-    return tl.where(x_block < 0, -1, 1) * tl.abs(
-        tl.where(
-            tl.abs(x_block) < 2,  # noqa: PLR2004
-            tl.abs(x_block) + rbits / 2,
-            tl.where(
-                tl.abs(x_block) < 4,  # noqa: PLR2004
-                tl.abs(x_block) + rbits,
-                tl.abs(x_block) + rbits * 2,
-            ),
-        ),
-    )
-
-
-@triton.jit
 def block_scaled_fp4_quantization_kernel(
     x_block,
     x_amax_ptr,
@@ -160,63 +131,22 @@ def block_scaled_fp4_quantization_kernel(
             .split()
         )
 
-    if not USE_BLACKWELL_CVT_RS_INSTRUCTIONS and ROUND_STYLE == ROUND_STYLE_STOCHASTIC:
-        x_block_scaled_b1 = add_fake_rbits_kernel(
-            x_block_scaled_b1,
-            BLOCK_SIZE_M,
-            BLOCK_SIZE_N // 2,
-            0,
-        )
-        x_block_scaled_b2 = add_fake_rbits_kernel(
-            x_block_scaled_b2,
-            BLOCK_SIZE_M,
-            BLOCK_SIZE_N // 2,
-            1,
-        )
-
-    if ROUND_STYLE == ROUND_STYLE_NEAREST or (
-        not USE_BLACKWELL_CVT_RS_INSTRUCTIONS and ROUND_STYLE == ROUND_STYLE_STOCHASTIC
-    ):
-        x_e2m1 = convert_to_e2m1x2(
-            x_block_scaled_b1,
-            x_block_scaled_b2,
-            USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
-        )
-    elif ROUND_STYLE == ROUND_STYLE_STOCHASTIC:
-        if RBITS == -1:
-            rbits = tl.rand(
-                0,
-                tl.arange(0, BLOCK_SIZE_M)[:, None] * BLOCK_SIZE_N // 2
-                + tl.arange(0, BLOCK_SIZE_N // 2)[None, :],
-            ).cast(tl.uint32, bitcast=True)
-        else:
-            rbits = tl.full(
-                (BLOCK_SIZE_M, BLOCK_SIZE_N // 2),
-                RBITS,
-                dtype=tl.uint32,
-            )
-
-        x_e2m1 = tl.inline_asm_elementwise(
-            asm="""
-            {
-            .reg .b16 tmp0, tmp1;
-            cvt.rs.satfinite.e2m1x4.f32 tmp0, {$6, $2, $5, $1}, $9;
-            cvt.rs.satfinite.e2m1x4.f32 tmp1, {$8, $4, $7, $3}, $10;
-            mov.b32 $0, {tmp0, tmp1};
-            }
-            """,
-            constraints="=r,r,r,r,r,r,r,r,r,r,r,r,r",
-            args=[x_block_scaled_b1, x_block_scaled_b2, rbits],
-            dtype=tl.uint8,
-            is_pure=True,
-            pack=4,
-        )
+    x_e2m1 = convert_to_e2m1x2(
+        x_block_scaled_b1,
+        x_block_scaled_b2,
+        BLOCK_SIZE_M,
+        BLOCK_SIZE_N,
+        ROUND_STYLE,
+        RBITS,
+        USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+        USE_BLACKWELL_CVT_RS_INSTRUCTIONS,
+    )
 
     return x_e2m1, x_scales.reshape(4, 32, 4).permute(1, 0, 2).ravel()
 
 
 @triton.jit
-def nvfp4_fouroversix_quantization_kernel(  # noqa: C901, PLR0912, PLR0915
+def nvfp4_fouroversix_quantization_kernel(
     x_block,
     x_amax_ptr,
     BLOCK_SIZE_M: tl.constexpr,
@@ -282,163 +212,35 @@ def nvfp4_fouroversix_quantization_kernel(  # noqa: C901, PLR0912, PLR0915
         .split()
     )
 
-    if not USE_BLACKWELL_CVT_RS_INSTRUCTIONS and ROUND_STYLE == ROUND_STYLE_STOCHASTIC:
-        x_block_scaled_6_b1 = add_fake_rbits_kernel(
-            x_block_scaled_6_b1,
-            BLOCK_SIZE_M,
-            BLOCK_SIZE_N // 2,
-            0,
-        )
-        x_block_scaled_6_b2 = add_fake_rbits_kernel(
-            x_block_scaled_6_b2,
-            BLOCK_SIZE_M,
-            BLOCK_SIZE_N // 2,
-            1,
-        )
-        x_block_scaled_4_b1 = add_fake_rbits_kernel(
-            x_block_scaled_4_b1,
-            BLOCK_SIZE_M,
-            BLOCK_SIZE_N // 2,
-            2,
-        )
-        x_block_scaled_4_b2 = add_fake_rbits_kernel(
-            x_block_scaled_4_b2,
-            BLOCK_SIZE_M,
-            BLOCK_SIZE_N // 2,
-            3,
-        )
+    x_e2m1_6, x_fp16_6 = convert_to_e2m1x2_and_quantized_fp16(
+        x_block_scaled_6_b1,
+        x_block_scaled_6_b2,
+        BLOCK_SIZE_M,
+        BLOCK_SIZE_N,
+        ROUND_STYLE,
+        RBITS,
+        USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+        USE_BLACKWELL_CVT_RS_INSTRUCTIONS,
+    )
 
-    if ROUND_STYLE == ROUND_STYLE_NEAREST or (
-        not USE_BLACKWELL_CVT_RS_INSTRUCTIONS and ROUND_STYLE == ROUND_STYLE_STOCHASTIC
-    ):
-        x_e2m1_6, x_hp_6 = convert_to_e2m1x2_and_quantized_fp16(
-            x_block_scaled_6_b1,
-            x_block_scaled_6_b2,
-            USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
-        )
-
-        x_e2m1_4, x_hp_4 = convert_to_e2m1x2_and_quantized_fp16(
-            x_block_scaled_4_b1,
-            x_block_scaled_4_b2,
-            USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
-        )
-
-        x_hp_6 = x_hp_6.to(tl.float32)
-        x_hp_4 = x_hp_4.to(tl.float32)
-
-        NEED_TO_UNPACK_FP16X2: tl.constexpr = False
-    elif ROUND_STYLE == ROUND_STYLE_STOCHASTIC:
-        if RBITS == -1:
-            rbits = tl.rand(
-                0,
-                tl.arange(0, BLOCK_SIZE_M)[:, None] * BLOCK_SIZE_N // 2
-                + tl.arange(0, BLOCK_SIZE_N // 2)[None, :],
-            ).cast(tl.uint32, bitcast=True)
-        else:
-            rbits = tl.full(
-                (BLOCK_SIZE_M, BLOCK_SIZE_N // 2),
-                RBITS,
-                dtype=tl.uint32,
-            )
-
-        (x_e2m1_6, x_e2m1_4, x_fp16x2_6, x_fp16x2_4) = tl.inline_asm_elementwise(
-            asm="""
-                {
-                .reg .b16 tmp0, tmp1;
-                .reg .b8 byte0, byte1;
-
-                cvt.rs.satfinite.e2m1x4.f32 tmp0, {$29, $21, $28, $20}, $52;
-                mov.b16 {byte1, byte0}, tmp0;
-                cvt.rn.f16x2.e2m1x2 $4, byte0;
-                cvt.rn.f16x2.e2m1x2 $5, byte1;
-                cvt.rs.satfinite.e2m1x4.f32 tmp1, {$31, $23, $30, $22}, $53;
-                mov.b16 {byte1, byte0}, tmp1;
-                cvt.rn.f16x2.e2m1x2 $6, byte0;
-                cvt.rn.f16x2.e2m1x2 $7, byte1;
-                mov.b32 $0, {tmp0, tmp1};
-
-                cvt.rs.satfinite.e2m1x4.f32 tmp0, {$33, $25, $32, $24}, $54;
-                mov.b16 {byte1, byte0}, tmp0;
-                cvt.rn.f16x2.e2m1x2 $8, byte0;
-                cvt.rn.f16x2.e2m1x2 $9, byte1;
-                cvt.rs.satfinite.e2m1x4.f32 tmp1, {$35, $27, $34, $26}, $55;
-                mov.b16 {byte1, byte0}, tmp1;
-                cvt.rn.f16x2.e2m1x2 $10, byte0;
-                cvt.rn.f16x2.e2m1x2 $11, byte1;
-                mov.b32 $1, {tmp0, tmp1};
-
-                cvt.rs.satfinite.e2m1x4.f32 tmp0, {$45, $37, $44, $36}, $56;
-                mov.b16 {byte1, byte0}, tmp0;
-                cvt.rn.f16x2.e2m1x2 $12, byte0;
-                cvt.rn.f16x2.e2m1x2 $13, byte1;
-                cvt.rs.satfinite.e2m1x4.f32 tmp1, {$47, $39, $46, $38}, $57;
-                mov.b16 {byte1, byte0}, tmp1;
-                cvt.rn.f16x2.e2m1x2 $14, byte0;
-                cvt.rn.f16x2.e2m1x2 $15, byte1;
-                mov.b32 $2, {tmp0, tmp1};
-
-                cvt.rs.satfinite.e2m1x4.f32 tmp0, {$49, $41, $48, $40}, $58;
-                mov.b16 {byte1, byte0}, tmp0;
-                cvt.rn.f16x2.e2m1x2 $16, byte0;
-                cvt.rn.f16x2.e2m1x2 $17, byte1;
-                cvt.rs.satfinite.e2m1x4.f32 tmp1, {$51, $43, $50, $42}, $59;
-                mov.b16 {byte1, byte0}, tmp1;
-                cvt.rn.f16x2.e2m1x2 $18, byte0;
-                cvt.rn.f16x2.e2m1x2 $19, byte1;
-                mov.b32 $3, {tmp0, tmp1};
-                }
-                """,
-            constraints="=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,=r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r",
-            args=[
-                x_block_scaled_6_b1,
-                x_block_scaled_6_b2,
-                x_block_scaled_4_b1,
-                x_block_scaled_4_b2,
-                rbits,
-            ],
-            dtype=(tl.uint8, tl.uint8, tl.uint32, tl.uint32),
-            is_pure=True,
-            pack=8,
-        )
-
-        NEED_TO_UNPACK_FP16X2: tl.constexpr = True
-
-    if NEED_TO_UNPACK_FP16X2:
-        x_fp16_6_lo = (
-            (x_fp16x2_6 & 0xFFFF)
-            .cast(tl.uint16)
-            .cast(tl.float16, bitcast=True)
-            .cast(x_amax.dtype)
-        )
-        x_fp16_6_hi = (
-            (x_fp16x2_6 >> 16)
-            .cast(tl.uint16)
-            .cast(tl.float16, bitcast=True)
-            .cast(x_amax.dtype)
-        )
-        x_hp_6 = tl.join(x_fp16_6_lo, x_fp16_6_hi).reshape(128, 4, 16)
-
-        x_fp16_4_lo = (
-            (x_fp16x2_4 & 0xFFFF)
-            .cast(tl.uint16)
-            .cast(tl.float16, bitcast=True)
-            .cast(x_amax.dtype)
-        )
-        x_fp16_4_hi = (
-            (x_fp16x2_4 >> 16)
-            .cast(tl.uint16)
-            .cast(tl.float16, bitcast=True)
-            .cast(x_amax.dtype)
-        )
-        x_hp_4 = tl.join(x_fp16_4_lo, x_fp16_4_hi).reshape(128, 4, 16)
+    x_e2m1_4, x_fp16_4 = convert_to_e2m1x2_and_quantized_fp16(
+        x_block_scaled_4_b1,
+        x_block_scaled_4_b2,
+        BLOCK_SIZE_M,
+        BLOCK_SIZE_N,
+        ROUND_STYLE,
+        RBITS,
+        USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+        USE_BLACKWELL_CVT_RS_INSTRUCTIONS,
+    )
 
     x_dequantized_6 = tl.div_rn(
-        x_hp_6 * x_scales_6.to(x_amax.dtype).expand_dims(2) * x_amax,
+        x_fp16_6.to(x_amax.dtype) * x_scales_6.to(x_amax.dtype).expand_dims(2) * x_amax,
         E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX,
     )
 
     x_dequantized_4 = tl.div_rn(
-        x_hp_4 * x_scales_4.to(x_amax.dtype).expand_dims(2) * x_amax,
+        x_fp16_4.to(x_amax.dtype) * x_scales_4.to(x_amax.dtype).expand_dims(2) * x_amax,
         E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX,
     )
 
@@ -504,7 +306,9 @@ def if4_quantization_kernel(
     ROUND_STYLE: tl.constexpr,
     BLOCK_SCALE_2D: tl.constexpr,
     SCALE_RULE: tl.constexpr,
+    RBITS: tl.constexpr,
     USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
+    USE_BLACKWELL_CVT_RS_INSTRUCTIONS: tl.constexpr,
 ) -> None:
     x_amax = tl.load(x_amax_ptr)
     x_scale_blocks = x_block.reshape(128, 4, 16)
@@ -550,20 +354,19 @@ def if4_quantization_kernel(
         2,
     ).split()
 
+    x_fp, x_fp_fp16 = convert_to_e2m1x2_and_quantized_fp16(
+        x_block_scaled_b1,
+        x_block_scaled_b2,
+        BLOCK_SIZE_M,
+        BLOCK_SIZE_N,
+        ROUND_STYLE,
+        RBITS,
+        USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+        USE_BLACKWELL_CVT_RS_INSTRUCTIONS,
+    )
+
     # Int and fp need different amounts of randomness because int gets scaled by 7/6
     if ROUND_STYLE == ROUND_STYLE_STOCHASTIC:
-        x_block_scaled_b1 = add_fake_rbits_kernel(
-            x_block_scaled_b1,
-            BLOCK_SIZE_M,
-            BLOCK_SIZE_N // 2,
-            0,
-        )
-        x_block_scaled_b2 = add_fake_rbits_kernel(
-            x_block_scaled_b2,
-            BLOCK_SIZE_M,
-            BLOCK_SIZE_N // 2,
-            1,
-        )
         x_block_scaled = x_block_scaled + (
             tl.rand(
                 2,
@@ -573,14 +376,6 @@ def if4_quantization_kernel(
             )
             - 0.5
         ) * (6 / 7)
-
-    x_fp, x_fp_hp = convert_to_e2m1x2_and_quantized_fp16(
-        x_block_scaled_b1,
-        x_block_scaled_b2,
-        USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
-    )
-
-    x_fp_hp = x_fp_hp.to(tl.float32)
 
     x_int_hp = tl.extra.cuda.libdevice.rint(tl.clamp(x_block_scaled * (7 / 6), -7, 7))
     (x_int_b1, x_int_b2) = (
@@ -596,7 +391,7 @@ def if4_quantization_kernel(
     )
 
     x_fp_dequantized = tl.div_rn(
-        x_fp_hp * x_scales.to(x_amax.dtype).expand_dims(2) * x_amax,
+        x_fp_fp16.to(x_amax.dtype) * x_scales.to(x_amax.dtype).expand_dims(2) * x_amax,
         E2M1_MAX_VALUE * E4M3_MAX_VALUE,
     )
 
@@ -712,7 +507,9 @@ def fp4_quantization_kernel(
             ROUND_STYLE,
             BLOCK_SCALE_2D,
             SCALE_RULE,
+            RBITS,
             USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+            USE_BLACKWELL_CVT_RS_INSTRUCTIONS,
         )
     else:
         x_e2m1, x_scales = nvfp4_fouroversix_quantization_kernel(

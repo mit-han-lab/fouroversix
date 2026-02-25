@@ -233,3 +233,62 @@ def test_backend_outputs_are_consistent(  # noqa: C901, PLR0912, PLR0915
             print("original")
             print("x", x[i, 16 * (j // 8) : 16 * (j // 8 + 1)])
             pytest.fail("Backends A and B have different e2m1 values!")
+
+
+def test_stochastic_rounding() -> None:
+    test_cases = [
+        ({"backend": "transformer_engine", "scale_rule": "static_6"}, 141),
+        ({"backend": "cuda", "scale_rule": "static_6"}, 212),
+        ({"backend": "cuda", "scale_rule": "mse"}, 204),
+        ({"backend": "triton", "scale_rule": "static_6"}, 137),
+        ({"backend": "triton", "scale_rule": "mse"}, 122),
+        (
+            {
+                "backend": "triton",
+                "scale_rule": "static_6",
+                "kwargs": {"use_blackwell_cvt_rs_instructions": False},
+            },
+            141,
+        ),
+        (
+            {
+                "backend": "triton",
+                "scale_rule": "mse",
+                "kwargs": {"use_blackwell_cvt_rs_instructions": False},
+            },
+            126,
+        ),
+        (
+            {
+                "backend": "triton",
+                "scale_rule": "static_6",
+                "kwargs": {
+                    "use_blackwell_cvt_rn_instructions": False,
+                    "use_blackwell_cvt_rs_instructions": False,
+                },
+            },
+            141,
+        ),
+        (
+            {
+                "backend": "triton",
+                "scale_rule": "mse",
+                "kwargs": {
+                    "use_blackwell_cvt_rn_instructions": False,
+                    "use_blackwell_cvt_rs_instructions": False,
+                },
+            },
+            126,
+        ),
+        ({"backend": "pytorch", "scale_rule": "static_6"}, 137),
+        ({"backend": "pytorch", "scale_rule": "mse"}, 122),
+    ]
+
+    x = torch.randn(1024, 1024, dtype=torch.bfloat16, device="cuda")
+
+    for kwargs, expected_dist in test_cases:
+        config = QuantizationConfig(round_style=RoundStyle.stochastic, **kwargs)
+        x_dequantized = quantize_to_fp4(x, config).dequantize()
+        dist = torch.dist(x_dequantized, x)
+        print(kwargs, expected_dist, dist)
+        assert abs((dist - expected_dist) / expected_dist) < 0.05  # noqa: PLR2004

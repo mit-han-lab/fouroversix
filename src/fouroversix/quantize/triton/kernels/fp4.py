@@ -1,9 +1,13 @@
 import triton
 import triton.language as tl
+from fouroversix.utils import RoundStyle
+
+ROUND_STYLE_NEAREST = tl.constexpr(RoundStyle.nearest.value)
+ROUND_STYLE_STOCHASTIC = tl.constexpr(RoundStyle.stochastic.value)
 
 
 @triton.jit
-def _convert_to_unpacked_fp4(x_block_scaled_b1, x_block_scaled_b2) -> None:
+def _convert_to_unpacked_fp4_slow(x_block_scaled_b1, x_block_scaled_b2) -> None:
     abs_b1 = tl.abs(x_block_scaled_b1)
     abs_b2 = tl.abs(x_block_scaled_b2)
 
@@ -58,7 +62,113 @@ def _convert_to_unpacked_fp4(x_block_scaled_b1, x_block_scaled_b2) -> None:
 
 
 @triton.jit
-def convert_to_e2m1x2(
+def _convert_packed_fp4_to_fp16_slow(sign_b1, value_b1, sign_b2, value_b2) -> None:
+    x_fp16_b1 = tl.where(
+        value_b1 == 0,
+        0,
+        tl.where(
+            value_b1 == 1,
+            0.5,
+            tl.where(
+                value_b1 == 2,
+                1,
+                tl.where(
+                    value_b1 == 3,
+                    1.5,
+                    tl.where(
+                        value_b1 == 4,
+                        2,
+                        tl.where(
+                            value_b1 == 5,
+                            3,
+                            tl.where(value_b1 == 6, 4, 6),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    ).to(tl.float16) * tl.where(sign_b1 == 1, -1, 1)
+
+    x_fp16_b2 = tl.where(
+        value_b2 == 0,
+        0,
+        tl.where(
+            value_b2 == 1,
+            0.5,
+            tl.where(
+                value_b2 == 2,
+                1,
+                tl.where(
+                    value_b2 == 3,
+                    1.5,
+                    tl.where(
+                        value_b2 == 4,
+                        2,
+                        tl.where(
+                            value_b2 == 5,
+                            3,
+                            tl.where(value_b2 == 6, 4, 6),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    ).to(tl.float16) * tl.where(sign_b2 == 1, -1, 1)
+
+    return tl.join(x_fp16_b1, x_fp16_b2).reshape(128, 4, 16)
+
+
+@triton.jit
+def _create_rbits_for_cvt_rs(
+    BLOCK_SIZE_M: tl.constexpr,
+    BLOCK_SIZE_N: tl.constexpr,
+    RBITS: tl.constexpr,
+) -> tl.tensor:
+    if RBITS >= 0:
+        return tl.full((BLOCK_SIZE_M, BLOCK_SIZE_N // 2), RBITS, dtype=tl.uint32)
+
+    return tl.rand(
+        0,
+        tl.arange(0, BLOCK_SIZE_M)[:, None] * BLOCK_SIZE_N // 2
+        + tl.arange(0, BLOCK_SIZE_N // 2)[None, :],
+    ).cast(tl.uint32, bitcast=True)
+
+
+@triton.jit
+def _add_fake_randomness_for_stochastic_rounding(
+    x_block,
+    BLOCK_SIZE_M: tl.constexpr,
+    BLOCK_SIZE_N: tl.constexpr,
+    SEED: tl.constexpr,
+) -> tl.tensor:
+    rbits = (
+        tl.rand(
+            SEED,
+            tl.arange(0, BLOCK_SIZE_M)[:, None] * BLOCK_SIZE_N
+            + tl.arange(0, BLOCK_SIZE_N)[None, :],
+        )
+        - 0.5
+    )
+
+    return tl.where(x_block < 0, -1, 1) * tl.abs(
+        tl.where(
+            tl.abs(x_block) < 2,
+            tl.extra.cuda.libdevice.rint(2 * tl.abs(x_block) + rbits) / 2,
+            tl.where(
+                tl.abs(x_block) < 4,
+                tl.extra.cuda.libdevice.rint(tl.abs(x_block) + rbits),
+                tl.clamp(
+                    2 * tl.extra.cuda.libdevice.rint(tl.abs(x_block) / 2 + rbits),
+                    0,
+                    6,
+                ),
+            ),
+        ),
+    )
+
+
+@triton.jit
+def convert_to_e2m1x2_with_rtn(
     x_block_scaled_b1,
     x_block_scaled_b2,
     USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
@@ -82,7 +192,7 @@ def convert_to_e2m1x2(
             pack=4,
         )
 
-    sign_b1, value_b1, sign_b2, value_b2 = _convert_to_unpacked_fp4(
+    sign_b1, value_b1, sign_b2, value_b2 = _convert_to_unpacked_fp4_slow(
         x_block_scaled_b1,
         x_block_scaled_b2,
     )
@@ -91,7 +201,86 @@ def convert_to_e2m1x2(
 
 
 @triton.jit
-def convert_to_e2m1x2_and_quantized_fp16(
+def convert_to_e2m1x2_with_sr(
+    x_block_scaled_b1,
+    x_block_scaled_b2,
+    BLOCK_SIZE_M: tl.constexpr,
+    BLOCK_SIZE_N: tl.constexpr,
+    RBITS: tl.constexpr,
+    USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
+    USE_BLACKWELL_CVT_RS_INSTRUCTIONS: tl.constexpr,
+) -> None:
+    if USE_BLACKWELL_CVT_RS_INSTRUCTIONS:
+        rbits = _create_rbits_for_cvt_rs(BLOCK_SIZE_M, BLOCK_SIZE_N, RBITS)
+
+        return tl.inline_asm_elementwise(
+            asm="""
+                {
+                .reg .b16 tmp0, tmp1;
+                cvt.rs.satfinite.e2m1x4.f32 tmp0, {$6, $2, $5, $1}, $9;
+                cvt.rs.satfinite.e2m1x4.f32 tmp1, {$8, $4, $7, $3}, $10;
+                mov.b32 $0, {tmp0, tmp1};
+                }
+                """,
+            constraints="=r,r,r,r,r,r,r,r,r,r,r,r,r",
+            args=[x_block_scaled_b1, x_block_scaled_b2, rbits],
+            dtype=tl.uint8,
+            is_pure=True,
+            pack=4,
+        )
+
+    # Add fake randomness since we can't use cvt.rs
+    x_block_scaled_b1 = _add_fake_randomness_for_stochastic_rounding(
+        x_block_scaled_b1,
+        BLOCK_SIZE_M,
+        BLOCK_SIZE_N // 2,
+        0,
+    )
+    x_block_scaled_b2 = _add_fake_randomness_for_stochastic_rounding(
+        x_block_scaled_b2,
+        BLOCK_SIZE_M,
+        BLOCK_SIZE_N // 2,
+        1,
+    )
+
+    return convert_to_e2m1x2_with_rtn(
+        x_block_scaled_b1,
+        x_block_scaled_b2,
+        USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+    )
+
+
+@triton.jit
+def convert_to_e2m1x2(
+    x_block_scaled_b1,
+    x_block_scaled_b2,
+    BLOCK_SIZE_M: tl.constexpr,
+    BLOCK_SIZE_N: tl.constexpr,
+    ROUND_STYLE: tl.constexpr,
+    RBITS: tl.constexpr,
+    USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
+    USE_BLACKWELL_CVT_RS_INSTRUCTIONS: tl.constexpr,
+) -> None:
+    if ROUND_STYLE == ROUND_STYLE_STOCHASTIC:
+        return convert_to_e2m1x2_with_sr(
+            x_block_scaled_b1,
+            x_block_scaled_b2,
+            BLOCK_SIZE_M,
+            BLOCK_SIZE_N,
+            RBITS,
+            USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+            USE_BLACKWELL_CVT_RS_INSTRUCTIONS,
+        )
+
+    return convert_to_e2m1x2_with_rtn(
+        x_block_scaled_b1,
+        x_block_scaled_b2,
+        USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+    )
+
+
+@triton.jit
+def convert_to_e2m1x2_and_quantized_fp16_with_rtn(
     x_block_scaled_b1,
     x_block_scaled_b2,
     USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
@@ -125,63 +314,105 @@ def convert_to_e2m1x2_and_quantized_fp16(
 
         return x_e2m1, x_fp16
 
-    sign_b1, value_b1, sign_b2, value_b2 = _convert_to_unpacked_fp4(
+    sign_b1, value_b1, sign_b2, value_b2 = _convert_to_unpacked_fp4_slow(
         x_block_scaled_b1,
         x_block_scaled_b2,
     )
 
-    x_packed = (sign_b2 << 7) | (value_b2 << 4) | (sign_b1 << 3) | value_b1
+    x_e2m1 = (sign_b2 << 7) | (value_b2 << 4) | (sign_b1 << 3) | value_b1
+    x_fp16 = _convert_packed_fp4_to_fp16_slow(sign_b1, value_b1, sign_b2, value_b2)
 
-    x_fp16_b1 = tl.where(
-        value_b1 == 0,
+    return x_e2m1, x_fp16
+
+
+@triton.jit
+def convert_to_e2m1x2_and_quantized_fp16_with_sr(
+    x_block_scaled_b1,
+    x_block_scaled_b2,
+    BLOCK_SIZE_M: tl.constexpr,
+    BLOCK_SIZE_N: tl.constexpr,
+    RBITS: tl.constexpr,
+    USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
+    USE_BLACKWELL_CVT_RS_INSTRUCTIONS: tl.constexpr,
+) -> None:
+    if USE_BLACKWELL_CVT_RS_INSTRUCTIONS:
+        rbits = _create_rbits_for_cvt_rs(BLOCK_SIZE_M, BLOCK_SIZE_N, RBITS)
+
+        (x_e2m1, x_fp16x2) = tl.inline_asm_elementwise(
+            asm="""
+                {
+                .reg .b16 tmp0, tmp1;
+                .reg .b8 byte0, byte1;
+
+                cvt.rs.satfinite.e2m1x4.f32 tmp0, {$10, $6, $9, $5}, $13;
+                mov.b16 {byte0, byte1}, tmp0;
+                cvt.rn.f16x2.e2m1x2 $1, byte0;
+                cvt.rn.f16x2.e2m1x2 $2, byte1;
+                cvt.rs.satfinite.e2m1x4.f32 tmp1, {$12, $8, $11, $7}, $14;
+                mov.b16 {byte0, byte1}, tmp1;
+                cvt.rn.f16x2.e2m1x2 $3, byte0;
+                cvt.rn.f16x2.e2m1x2 $4, byte1;
+                mov.b32 $0, {tmp0, tmp1};
+                }
+                """,
+            constraints="=r,=r,=r,=r,=r,r,r,r,r,r,r,r,r,r,r,r,r",
+            args=[x_block_scaled_b1, x_block_scaled_b2, rbits],
+            dtype=(tl.uint8, tl.uint32),
+            is_pure=True,
+            pack=4,
+        )
+
+        x_fp16x2_lo = (x_fp16x2 & 0xFFFF).cast(tl.uint16).cast(tl.float16, bitcast=True)
+        x_fp16x2_hi = (x_fp16x2 >> 16).cast(tl.uint16).cast(tl.float16, bitcast=True)
+        x_fp16 = tl.join(x_fp16x2_lo, x_fp16x2_hi).reshape(128, 4, 16)
+
+        return x_e2m1, x_fp16
+
+    # Add fake randomness since we can't use cvt.rs
+    x_block_scaled_b1 = _add_fake_randomness_for_stochastic_rounding(
+        x_block_scaled_b1,
+        BLOCK_SIZE_M,
+        BLOCK_SIZE_N // 2,
         0,
-        tl.where(
-            value_b1 == 1,
-            0.5,
-            tl.where(
-                value_b1 == 2,
-                1,
-                tl.where(
-                    value_b1 == 3,
-                    1.5,
-                    tl.where(
-                        value_b1 == 4,
-                        2,
-                        tl.where(
-                            value_b1 == 5,
-                            3,
-                            tl.where(value_b1 == 6, 4, 6),
-                        ),
-                    ),
-                ),
-            ),
-        ),
-    ).to(tl.float16) * tl.where(x_block_scaled_b1 >= 0, 1, -1)
+    )
+    x_block_scaled_b2 = _add_fake_randomness_for_stochastic_rounding(
+        x_block_scaled_b2,
+        BLOCK_SIZE_M,
+        BLOCK_SIZE_N // 2,
+        1,
+    )
 
-    x_fp16_b2 = tl.where(
-        value_b2 == 0,
-        0,
-        tl.where(
-            value_b2 == 1,
-            0.5,
-            tl.where(
-                value_b2 == 2,
-                1,
-                tl.where(
-                    value_b2 == 3,
-                    1.5,
-                    tl.where(
-                        value_b2 == 4,
-                        2,
-                        tl.where(
-                            value_b2 == 5,
-                            3,
-                            tl.where(value_b2 == 6, 4, 6),
-                        ),
-                    ),
-                ),
-            ),
-        ),
-    ).to(tl.float16) * tl.where(x_block_scaled_b2 >= 0, 1, -1)
+    return convert_to_e2m1x2_and_quantized_fp16_with_rtn(
+        x_block_scaled_b1,
+        x_block_scaled_b2,
+        USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+    )
 
-    return x_packed, tl.join(x_fp16_b1, x_fp16_b2).reshape(128, 4, 16)
+
+@triton.jit
+def convert_to_e2m1x2_and_quantized_fp16(
+    x_block_scaled_b1,
+    x_block_scaled_b2,
+    BLOCK_SIZE_M: tl.constexpr,
+    BLOCK_SIZE_N: tl.constexpr,
+    ROUND_STYLE: tl.constexpr,
+    RBITS: tl.constexpr,
+    USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
+    USE_BLACKWELL_CVT_RS_INSTRUCTIONS: tl.constexpr,
+) -> None:
+    if ROUND_STYLE == ROUND_STYLE_STOCHASTIC:
+        return convert_to_e2m1x2_and_quantized_fp16_with_sr(
+            x_block_scaled_b1,
+            x_block_scaled_b2,
+            BLOCK_SIZE_M,
+            BLOCK_SIZE_N,
+            RBITS,
+            USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+            USE_BLACKWELL_CVT_RS_INSTRUCTIONS,
+        )
+
+    return convert_to_e2m1x2_and_quantized_fp16_with_rtn(
+        x_block_scaled_b1,
+        x_block_scaled_b2,
+        USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+    )
