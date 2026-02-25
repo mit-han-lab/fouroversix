@@ -367,7 +367,7 @@ def if4_quantization_kernel(
 
     # Int and fp need different amounts of randomness because int gets scaled by 7/6
     if ROUND_STYLE == ROUND_STYLE_STOCHASTIC:
-        x_block_scaled = x_block_scaled + (
+        rbits = (
             tl.rand(
                 2,
                 tl.arange(0, 128)[:, None, None] * 4 * 16
@@ -376,6 +376,10 @@ def if4_quantization_kernel(
             )
             - 0.5
         ) * (6 / 7)
+
+        x_block_scaled = tl.where(x_block_scaled < 0, -1, 1) * tl.abs(
+            tl.abs(x_block_scaled) + rbits,
+        )
 
     x_int_hp = tl.extra.cuda.libdevice.rint(tl.clamp(x_block_scaled * (7 / 6), -7, 7))
     (x_int_b1, x_int_b2) = (

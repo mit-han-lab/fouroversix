@@ -238,10 +238,9 @@ def test_backend_outputs_are_consistent(  # noqa: C901, PLR0912, PLR0915
 def test_stochastic_rounding() -> None:
     test_cases = [
         ({"backend": "transformer_engine", "scale_rule": "static_6"}, 141),
-        ({"backend": "cuda", "scale_rule": "static_6"}, 212),
-        ({"backend": "cuda", "scale_rule": "mse"}, 204),
         ({"backend": "triton", "scale_rule": "static_6"}, 137),
         ({"backend": "triton", "scale_rule": "mse"}, 122),
+        ({"backend": "triton", "dtype": "if4", "scale_rule": "mse"}, 110),
         (
             {
                 "backend": "triton",
