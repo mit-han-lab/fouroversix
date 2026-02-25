@@ -15,7 +15,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from fouroversix import ModelQuantizationConfig
-    from fouroversix import ModelQuantizationConfig
     from transformers import AutoModelForCausalLM
 
 
