@@ -338,8 +338,7 @@ class FourOverSixGptOssExperts(nn.Module):
                     quantize_to_fp4(self.gate_up_proj[e], weight_config)
                     for e in range(self.num_experts)
                 ]
-                self._quantized_weights = (down, gate_up)
-                return self._quantized_weights
+                return (down, gate_up)
 
             down = []
             gate_up = []
