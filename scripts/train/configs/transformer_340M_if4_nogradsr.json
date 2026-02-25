@@ -21,6 +21,7 @@
         {
             "repeats": 20,
             "dtype": "if4",
+            "gradient_round_style": "nearest",
             "scale_rule": "mse"
         },
         {
