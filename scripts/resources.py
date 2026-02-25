@@ -278,9 +278,6 @@ def get_image(  # noqa: C901, PLR0912
                 .uv_pip_install(
                     *pyproject_data["project"]["optional-dependencies"]["evals"],
                 )
-                .uv_pip_install(
-                    "git+https://github.com/kathrynle20/transformers.git@kathryn/gpt-oss-support",
-                )
                 .add_local_file(
                     "setup.py",
                     f"{FOUROVERSIX_INSTALL_PATH}/setup.py",
