@@ -20,7 +20,7 @@ from transformers.models.gpt_oss.modeling_gpt_oss import (
 
 @QuantizedModule.register(GptOssMLP)
 class FourOverSixGptOssMLP(nn.Module):
-    """Drop-in replacement for MoE layer that uses FP4 quantization."""
+    """Drop-in replacement for GptOssMLP layer that uses FP4 quantization."""
 
     def __init__(
         self,
@@ -80,7 +80,7 @@ class FourOverSixGptOssMLP(nn.Module):
 
 @QuantizedModule.register(GptOssExperts, replace_existing_modules_in_model=False)
 class FourOverSixGptOssExperts(nn.Module):
-    """Drop-in replacement for MoE layer that uses FP4 quantization."""
+    """Drop-in replacement for GptOssExperts layer that uses FP4 quantization."""
 
     def __init__(
         self,
@@ -104,7 +104,6 @@ class FourOverSixGptOssExperts(nn.Module):
         self.config = quantization_config
 
         if not self.config.keep_master_weights:
-
             self.register_buffer(
                 "quantized_down_proj_values",
                 nn.Parameter(
@@ -206,9 +205,6 @@ class FourOverSixGptOssExperts(nn.Module):
         high-precision weight.
         """
 
-        if "bias" in parameter_name:
-            return {parameter_name: parameter}
-
         weight_config = QuantizationConfig(
             backend=self.config.quantize_backend,
             dtype=self.config.dtype,
@@ -283,8 +279,7 @@ class FourOverSixGptOssExperts(nn.Module):
             expert_mask = expert_mask.permute(2, 1, 0)
             expert_hit = torch.greater(expert_mask.sum(dim=(-1, -2)), 0).nonzero()
 
-        for expert_i in expert_hit[:]:
-            expert_idx = expert_i[0]
+        for [expert_idx] in expert_hit:
             if expert_idx == self.num_experts:
                 continue
             with torch.no_grad():
@@ -305,16 +300,12 @@ class FourOverSixGptOssExperts(nn.Module):
                 out_dtype=self.config.output_dtype,
             )
             gate_up += self.gate_up_proj_bias[expert_idx]
-            del current_state
 
             gate, up = gate_up[..., ::2], gate_up[..., 1::2]
-            del gate_up
             gate = gate.clamp(min=None, max=self.limit)
             up = up.clamp(min=-self.limit, max=self.limit)
             glu = gate * torch.sigmoid(gate * self.alpha)
-            del gate
             gated_output = (up + 1) * glu
-            del up, glu
 
             # Down projection
             out = fp4_matmul(
@@ -323,20 +314,13 @@ class FourOverSixGptOssExperts(nn.Module):
                 input_config=fprop_activation_config,
                 out_dtype=self.config.output_dtype,
             )
-            del gated_output
             out += self.down_proj_bias[expert_idx]
             weighted_output = out * routing_weights[token_idx, top_k_pos, None]
-            del out
             next_states.index_add_(
                 0,
                 token_idx,
                 weighted_output.to(hidden_states.dtype),
             )
-            del weighted_output
-
-        del expert_mask, expert_hit
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
 
         return next_states.view(batch_size, -1, self.hidden_size)
 
@@ -374,4 +358,5 @@ class FourOverSixGptOssExperts(nn.Module):
                     scale_rule=self.config.get_weight_scale_rule(),
                 ))
             self._quantized_weights = (down, gate_up)
+
         return self._quantized_weights
