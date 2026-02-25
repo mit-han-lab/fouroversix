@@ -4,7 +4,7 @@ import torch
 from fouroversix.quantize.backend import QuantizeBackendBase
 from fouroversix.quantize.config import QuantizationConfig
 from fouroversix.quantize.quantized_tensor import QuantizedTensor
-from fouroversix.utils import BLACKWELL_SM_IDS, SM_100, DataType, RoundStyle
+from fouroversix.utils import BLACKWELL_SM_IDS, DataType, RoundStyle
 
 
 class CUDAQuantizeBackend(QuantizeBackendBase):
@@ -42,11 +42,9 @@ class CUDAQuantizeBackend(QuantizeBackendBase):
         if not super().is_supported(x, config):
             return False
 
-        if config.round_style == RoundStyle.stochastic:
-            return torch.cuda.get_device_capability()[0] == SM_100
-
         return (
             x.device.type == "cuda"
+            and config.round_style == RoundStyle.nearest
             and config.dtype == DataType.nvfp4
             and not config.transpose
         )
