@@ -115,7 +115,7 @@ def quantize_to_mxfp4(
 
     x_block_scaled = x_scale_blocks / x_scales_hp.unsqueeze(1)
 
-    return x_block_scaled, x_scales
+    return x_block_scaled, x_scales.view(torch.float8_e8m0fnu)
 
 
 def quantize_to_nvfp4(
