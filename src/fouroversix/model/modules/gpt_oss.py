@@ -328,34 +328,47 @@ class FourOverSixGptOssExperts(nn.Module):
         """Return quantized parameters as QuantizedTensor."""
 
         if not hasattr(self, "_quantized_weights"):
+            weight_config = self.config.get_weight_config()
             if self.config.keep_master_weights:
-                return (
-                    quantize_to_fp4(self.down_proj, self.config.get_weight_config()),
-                    quantize_to_fp4(self.gate_up_proj, self.config.get_weight_config()),
-                )
+                down = [
+                    quantize_to_fp4(self.down_proj[e], weight_config)
+                    for e in range(self.num_experts)
+                ]
+                gate_up = [
+                    quantize_to_fp4(self.gate_up_proj[e], weight_config)
+                    for e in range(self.num_experts)
+                ]
+                self._quantized_weights = (down, gate_up)
+                return self._quantized_weights
 
             down = []
             gate_up = []
             for e in range(self.num_experts):
                 down.append(QuantizedTensor(
                     values=self.quantized_down_proj_values.data[e],
-                    scale_factors=self.quantized_down_proj_scale_factors.data[e],
+                    scale_factors=self.quantized_down_proj_scale_factors.data[e].view(torch.float8_e8m0fnu),
                     amax=self.quantized_down_proj_amax.data[e],
                     dtype=self.config.dtype,
                     original_shape=tuple(
                         self.quantized_down_proj_metadata.data[e, :2].tolist(),
                     ),
                     scale_rule=self.config.get_weight_scale_rule(),
+                    padded_shape=tuple(
+                        self.quantized_down_proj_metadata.data[e, 2:].tolist(),
+                    ),
                 ))
                 gate_up.append(QuantizedTensor(
                     values=self.quantized_gate_up_proj_values.data[e],
-                    scale_factors=self.quantized_gate_up_proj_scale_factors.data[e],
+                    scale_factors=self.quantized_gate_up_proj_scale_factors.data[e].view(torch.float8_e8m0fnu),
                     amax=self.quantized_gate_up_proj_amax.data[e],
                     dtype=self.config.dtype,
                     original_shape=tuple(
                         self.quantized_gate_up_proj_metadata.data[e, :2].tolist(),
                     ),
                     scale_rule=self.config.get_weight_scale_rule(),
+                    padded_shape=tuple(
+                        self.quantized_gate_up_proj_metadata.data[e, 2:].tolist(),
+                    ),
                 ))
             self._quantized_weights = (down, gate_up)
 

@@ -44,12 +44,11 @@ class FourOverSixGptOssDeserialize(ConversionOps):
         dequantized_proj = []
         for e in range(num_experts):
             weight_uint8 = weight[e].to(torch.uint8)
-
             quantized_tensor = QuantizedTensor(
                 values=weight_uint8,
-                scale_factors=scales[e].view(torch.float8_e8m0fnu),
+                scale_factors=scales[e].to(torch.uint8).view(torch.float8_e8m0fnu),
                 amax=torch.ones(
-                    (weight[e].shape[1]),
+                    (1,),
                     device=weight[e].device,
                     dtype=torch.float32,
                 ),

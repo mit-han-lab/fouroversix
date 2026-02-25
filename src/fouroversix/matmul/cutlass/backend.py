@@ -78,6 +78,8 @@ class CUTLASSMatmulBackend(MatmulBackendBase):
                 device=input.values.device,
                 dtype=torch.float32,
             )
+            input.scale_factors = input.scale_factors.view(torch.float8_e8m0fnu)
+            other.scale_factors = other.scale_factors.view(torch.float8_e8m0fnu)
         elif input.dtype == DataType.nvfp4:
             alpha = (
                 (input.amax * other.amax)

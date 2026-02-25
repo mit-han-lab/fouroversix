@@ -44,6 +44,10 @@ def unpack_packed_fp4(
         msg = f"Unsupported dtype: {to_dtype}"
         raise ValueError(msg)
 
+    # Bitwise ops require integer view (values may be stored as float8_e8m0fnu)
+    if x.dtype in (torch.float8_e4m3fn, torch.float8_e5m2, torch.float8_e4m3fnuz, torch.float8_e5m2fnuz, torch.float8_e8m0fnu):
+        x = x.view(torch.uint8)
+
     high = (x >> 4) & 0xF
     low = x & 0xF
 
