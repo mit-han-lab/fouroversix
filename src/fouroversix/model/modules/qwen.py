@@ -2,21 +2,21 @@ from typing import Any
 
 import torch
 from fouroversix.matmul import fp4_matmul
-from fouroversix.model.config import LayerQuantizationConfig
-from fouroversix.model.quantize import QuantizedLayer
+from fouroversix.model.config import ModuleQuantizationConfig
+from fouroversix.model.quantize import QuantizedModule
 from fouroversix.quantize import QuantizationConfig, QuantizedTensor, quantize_to_fp4
 from torch import nn
 from transformers.models.qwen3_5_moe.modeling_qwen3_5_moe import Qwen3_5MoeExperts
 
 
-@QuantizedLayer.register(Qwen3_5MoeExperts)
+@QuantizedModule.register(Qwen3_5MoeExperts)
 class FourOverSixQwenExperts(nn.Module):
-    """Drop-in replacement for MoE layer that uses FP4 quantization."""
+    """Drop-in replacement for the Qwen3_5MoeExperts layer that uses FP4 quantization."""
 
     def __init__(
         self,
         module: Qwen3_5MoeExperts,
-        config: LayerQuantizationConfig,
+        config: ModuleQuantizationConfig,
     ) -> None:
         """
         Initialize the FourOverSixQwenExperts layer.
@@ -38,7 +38,7 @@ class FourOverSixQwenExperts(nn.Module):
         self.gate_up_proj = module.gate_up_proj #[512, 2048, 4096]
 
         self.device = self.down_proj.device
-        self.quantization_config = config
+        self.config = config
 
         self.act_fn = module.act_fn
 
@@ -202,22 +202,18 @@ class FourOverSixQwenExperts(nn.Module):
 
         final_hidden_states = torch.zeros_like(hidden_states)
         with torch.no_grad():
-            expert_mask = torch.nn.functional.one_hot(
-                top_k_index,
-                num_classes=self.num_experts,
-            )
+            expert_mask = torch.nn.functional.one_hot(top_k_index, num_classes=self.num_experts)
             expert_mask = expert_mask.permute(2, 1, 0)
             expert_hit = torch.greater(expert_mask.sum(dim=(-1, -2)), 0).nonzero()
 
-        for expert in expert_hit:
-            expert_idx = expert[0]
+        for [expert_idx] in expert_hit:
             if expert_idx == self.num_experts:
                 continue
 
             fprop_activation_config = QuantizationConfig(
-                backend=self.quantization_config.quantize_backend,
-                dtype=self.quantization_config.dtype,
-                scale_rule=self.quantization_config.get_activation_scale_rule(),
+                backend=self.config.quantize_backend,
+                dtype=self.config.dtype,
+                scale_rule=self.config.get_activation_scale_rule(),
             )
             top_k_pos, token_idx = torch.where(expert_mask[expert_idx])
             current_state = hidden_states[token_idx]
@@ -225,22 +221,17 @@ class FourOverSixQwenExperts(nn.Module):
                 current_state,
                 gate_up_proj[expert_idx],
                 input_config=fprop_activation_config,
-                out_dtype=self.quantization_config.output_dtype,
+                out_dtype=self.config.output_dtype,
             ).chunk(2, dim=-1)
             current_hidden_states = self.act_fn(gate) * up
             current_hidden_states = fp4_matmul(
                 current_hidden_states,
                 down_proj[expert_idx],
                 input_config=fprop_activation_config,
-                out_dtype=self.quantization_config.output_dtype,
+                out_dtype=self.config.output_dtype,
             )
-            current_hidden_states = current_hidden_states * \
-                top_k_weights[token_idx, top_k_pos, None]
-            final_hidden_states.index_add_(
-                0,
-                token_idx,
-                current_hidden_states.to(final_hidden_states.dtype),
-            )
+            current_hidden_states = current_hidden_states * top_k_weights[token_idx, top_k_pos, None]
+            final_hidden_states.index_add_(0, token_idx, current_hidden_states.to(final_hidden_states.dtype))
 
         return final_hidden_states
 
@@ -248,11 +239,17 @@ class FourOverSixQwenExperts(nn.Module):
         """Return quantized parameters as QuantizedTensor."""
 
         if not hasattr(self, "_quantized_weights"):
+            weight_config = self.config.get_weight_config()
             if self.config.keep_master_weights:
-                return (
-                    quantize_to_fp4(self.down_proj, self.config.get_weight_config()),
-                    quantize_to_fp4(self.gate_up_proj, self.config.get_weight_config()),
-                )
+                down = [
+                    quantize_to_fp4(self.down_proj[e], weight_config)
+                    for e in range(self.num_experts)
+                ]
+                gate_up = [
+                    quantize_to_fp4(self.gate_up_proj[e], weight_config)
+                    for e in range(self.num_experts)
+                ]
+                return (down, gate_up)
 
             down = []
             gate_up = []
@@ -266,6 +263,9 @@ class FourOverSixQwenExperts(nn.Module):
                         self.quantized_down_proj_metadata.data[e, :2].tolist(),
                     ),
                     scale_rule=self.config.get_weight_scale_rule(),
+                    padded_shape=tuple(
+                        self.quantized_down_proj_metadata.data[e, 2:].tolist(),
+                    ),
                 ))
                 gate_up.append(QuantizedTensor(
                     values=self.quantized_gate_up_proj_values.data[e],
@@ -276,6 +276,10 @@ class FourOverSixQwenExperts(nn.Module):
                         self.quantized_gate_up_proj_metadata.data[e, :2].tolist(),
                     ),
                     scale_rule=self.config.get_weight_scale_rule(),
+                    padded_shape=tuple(
+                        self.quantized_gate_up_proj_metadata.data[e, 2:].tolist(),
+                    ),
                 ))
             self._quantized_weights = (down, gate_up)
+
         return self._quantized_weights
