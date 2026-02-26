@@ -50,16 +50,23 @@ QUANTIZED_VALUE_TYPE_INT4 = tl.constexpr(QuantizedValueType.int4.value)
 def prepare_inputs_for_block_scaling(
     x_block,
     x_amax_ptr,
+    BLOCK_SIZE_M: tl.constexpr,
+    BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SCALE_2D: tl.constexpr,
     MAX_QUANTIZED_VALUE: tl.constexpr,
     MAX_SCALE_FACTOR: tl.constexpr,
     SCALE_TYPE: tl.constexpr,
+    SCALE_GROUP_SIZE: tl.constexpr,
     SCALE_EXPANSION_FACTOR: tl.constexpr,
 ) -> tuple[tl.tensor, tl.tensor, tl.tensor]:
     x_amax = tl.load(x_amax_ptr)
 
     if SCALE_TYPE == SCALE_TYPE_MX:
-        x_scale_blocks = x_block.reshape(128, 4, 32)
+        x_scale_blocks = x_block.reshape(
+            BLOCK_SIZE_M,
+            BLOCK_SIZE_N // SCALE_GROUP_SIZE,
+            SCALE_GROUP_SIZE,
+        )
         x_scales_hp = tl.max(x_scale_blocks.abs(), axis=-1) / MAX_QUANTIZED_VALUE
         x_scales_e8m0_u32 = x_scales_hp.cast(tl.uint32, bitcast=True)
 
@@ -79,13 +86,21 @@ def prepare_inputs_for_block_scaling(
         if BLOCK_SCALE_2D:
             x_scales_hp = (
                 tl.max(
-                    x_scales_hp.reshape(4, 32, 4).permute(0, 2, 1),
+                    x_scales_hp.reshape(
+                        BLOCK_SIZE_M // SCALE_GROUP_SIZE,
+                        SCALE_GROUP_SIZE,
+                        BLOCK_SIZE_N // SCALE_GROUP_SIZE,
+                    ).permute(0, 2, 1),
                     axis=-1,
                 )
                 .expand_dims(0)
-                .broadcast_to(4, 32, 4)
+                .broadcast_to(
+                    BLOCK_SIZE_M // SCALE_GROUP_SIZE,
+                    SCALE_GROUP_SIZE,
+                    BLOCK_SIZE_N // SCALE_GROUP_SIZE,
+                )
                 .permute(1, 0, 2)
-                .reshape(128, 4)
+                .reshape(BLOCK_SIZE_M, BLOCK_SIZE_N // SCALE_GROUP_SIZE)
             )
 
         x_block_scaled = x_scale_blocks / x_scales.to(x_scale_blocks.dtype).expand_dims(
@@ -95,10 +110,18 @@ def prepare_inputs_for_block_scaling(
         return x_block_scaled, x_scales, x_amax
 
     if SCALE_TYPE == SCALE_TYPE_NV or SCALE_TYPE == SCALE_TYPE_NV_IF:
-        x_scale_blocks = x_block.reshape(128, 4, 16)
+        x_scale_blocks = x_block.reshape(
+            BLOCK_SIZE_M,
+            BLOCK_SIZE_N // SCALE_GROUP_SIZE,
+            SCALE_GROUP_SIZE,
+        )
 
         if x_amax == 0:
-            x_scales_hp = tl.full((128, 4), 0, dtype=tl.float32)
+            x_scales_hp = tl.full(
+                (BLOCK_SIZE_M, BLOCK_SIZE_N // SCALE_GROUP_SIZE),
+                0,
+                dtype=tl.float32,
+            )
         else:
             encode_scale = tl.div_rn(MAX_QUANTIZED_VALUE * MAX_SCALE_FACTOR, x_amax)
             x_scales_hp = (
@@ -109,13 +132,21 @@ def prepare_inputs_for_block_scaling(
         if BLOCK_SCALE_2D:
             x_scales_hp = (
                 tl.max(
-                    x_scales_hp.reshape(8, 16, 4).permute(0, 2, 1),
+                    x_scales_hp.reshape(
+                        BLOCK_SIZE_M // SCALE_GROUP_SIZE,
+                        SCALE_GROUP_SIZE,
+                        BLOCK_SIZE_N // SCALE_GROUP_SIZE,
+                    ).permute(0, 2, 1),
                     axis=-1,
                 )
                 .expand_dims(0)
-                .broadcast_to(16, 8, 4)
+                .broadcast_to(
+                    SCALE_GROUP_SIZE,
+                    BLOCK_SIZE_M // SCALE_GROUP_SIZE,
+                    BLOCK_SIZE_N // SCALE_GROUP_SIZE,
+                )
                 .permute(1, 0, 2)
-                .reshape(128, 4)
+                .reshape(BLOCK_SIZE_M, BLOCK_SIZE_N // SCALE_GROUP_SIZE)
             )
 
         if SCALE_EXPANSION_FACTOR is not None:
@@ -147,6 +178,7 @@ def block_scaled_quantization_kernel(
     QUANTIZED_VALUE_TYPE: tl.constexpr,
     ROUND_STYLE: tl.constexpr,
     SCALE_TYPE: tl.constexpr,
+    SCALE_GROUP_SIZE: tl.constexpr,
     SCALE_RULE: tl.constexpr,
     BLOCK_SCALE_2D: tl.constexpr,
     RBITS: tl.constexpr,
@@ -157,10 +189,13 @@ def block_scaled_quantization_kernel(
         x_block_scaled, x_scales, _ = prepare_inputs_for_block_scaling(
             x_block,
             x_amax_ptr,
+            BLOCK_SIZE_M,
+            BLOCK_SIZE_N,
             BLOCK_SCALE_2D,
             E2M1_MAX_VALUE if SCALE_RULE == SCALE_RULE_STATIC_6 else E2M1_MAX_FOUR,
             E4M3_MAX_VALUE if SCALE_TYPE == SCALE_TYPE_NV else None,
             SCALE_TYPE,
+            SCALE_GROUP_SIZE,
             None,
         )
 
@@ -193,21 +228,29 @@ def nvfp4_fouroversix_quantization_kernel(
     QUANTIZED_VALUE_TYPE: tl.constexpr,
     ROUND_STYLE: tl.constexpr,
     SCALE_TYPE: tl.constexpr,
+    SCALE_GROUP_SIZE: tl.constexpr,
     SCALE_RULE: tl.constexpr,
     BLOCK_SCALE_2D: tl.constexpr,
     RBITS: tl.constexpr,
     USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
     USE_BLACKWELL_CVT_RS_INSTRUCTIONS: tl.constexpr,
 ) -> None:
-    x_scale_blocks = x_block.reshape(128, 4, 16)
+    x_scale_blocks = x_block.reshape(
+        BLOCK_SIZE_M,
+        BLOCK_SIZE_N // SCALE_GROUP_SIZE,
+        SCALE_GROUP_SIZE,
+    )
 
     x_block_scaled_6, x_scales_6, x_amax = prepare_inputs_for_block_scaling(
         x_scale_blocks,
         x_amax_ptr,
+        BLOCK_SIZE_M,
+        BLOCK_SIZE_N,
         BLOCK_SCALE_2D,
         E2M1_MAX_VALUE,
         E4M3_MAX_FOUROVERSIX,
         SCALE_TYPE,
+        SCALE_GROUP_SIZE,
         None,
     )
 
@@ -223,18 +266,27 @@ def nvfp4_fouroversix_quantization_kernel(
         BLOCK_SIZE_M,
         BLOCK_SIZE_N,
         ROUND_STYLE,
+        SCALE_GROUP_SIZE,
         RBITS,
         USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
         USE_BLACKWELL_CVT_RS_INSTRUCTIONS,
     )
 
+    x_dequantized_6 = tl.div_rn(
+        x_fp16_6.to(x_amax.dtype) * x_scales_6.to(x_amax.dtype).expand_dims(2) * x_amax,
+        E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX,
+    )
+
     x_block_scaled_4, x_scales_4, _ = prepare_inputs_for_block_scaling(
         x_scale_blocks,
         x_amax_ptr,
+        BLOCK_SIZE_M,
+        BLOCK_SIZE_N,
         BLOCK_SCALE_2D,
         E2M1_MAX_VALUE,
         E4M3_MAX_FOUROVERSIX,
         SCALE_TYPE,
+        SCALE_GROUP_SIZE,
         1.5,
     )
 
@@ -250,14 +302,10 @@ def nvfp4_fouroversix_quantization_kernel(
         BLOCK_SIZE_M,
         BLOCK_SIZE_N,
         ROUND_STYLE,
+        SCALE_GROUP_SIZE,
         RBITS,
         USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
         USE_BLACKWELL_CVT_RS_INSTRUCTIONS,
-    )
-
-    x_dequantized_6 = tl.div_rn(
-        x_fp16_6.to(x_amax.dtype) * x_scales_6.to(x_amax.dtype).expand_dims(2) * x_amax,
-        E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX,
     )
 
     x_dequantized_4 = tl.div_rn(
@@ -291,22 +339,38 @@ def nvfp4_fouroversix_quantization_kernel(
 
         six_error = (
             six_error.expand_dims(0)
-            .broadcast_to(16, 8, 4)
+            .broadcast_to(
+                SCALE_GROUP_SIZE,
+                BLOCK_SIZE_M // SCALE_GROUP_SIZE,
+                BLOCK_SIZE_N // SCALE_GROUP_SIZE,
+            )
             .permute(1, 0, 2)
-            .reshape(128, 4)
+            .reshape(BLOCK_SIZE_M, BLOCK_SIZE_N // SCALE_GROUP_SIZE)
         )
         four_error = (
             four_error.expand_dims(0)
-            .broadcast_to(16, 8, 4)
+            .broadcast_to(
+                SCALE_GROUP_SIZE,
+                BLOCK_SIZE_M // SCALE_GROUP_SIZE,
+                BLOCK_SIZE_N // SCALE_GROUP_SIZE,
+            )
             .permute(1, 0, 2)
-            .reshape(128, 4)
+            .reshape(BLOCK_SIZE_M, BLOCK_SIZE_N // SCALE_GROUP_SIZE)
         )
 
     x_e2m1 = tl.where(
         (four_error < six_error).expand_dims(2),
-        x_e2m1_4.reshape(128, 4, 8),
-        x_e2m1_6.reshape(128, 4, 8),
-    ).reshape(128, 32)
+        x_e2m1_4.reshape(
+            BLOCK_SIZE_M,
+            BLOCK_SIZE_N // SCALE_GROUP_SIZE,
+            SCALE_GROUP_SIZE // 2,
+        ),
+        x_e2m1_6.reshape(
+            BLOCK_SIZE_M,
+            BLOCK_SIZE_N // SCALE_GROUP_SIZE,
+            SCALE_GROUP_SIZE // 2,
+        ),
+    ).reshape(BLOCK_SIZE_M, BLOCK_SIZE_N // 2)
 
     x_scales = (
         tl.where(four_error < six_error, x_scales_4, x_scales_6)
@@ -327,6 +391,7 @@ def if4_quantization_kernel(
     QUANTIZED_VALUE_TYPE: tl.constexpr,
     ROUND_STYLE: tl.constexpr,
     SCALE_TYPE: tl.constexpr,
+    SCALE_GROUP_SIZE: tl.constexpr,
     SCALE_RULE: tl.constexpr,
     BLOCK_SCALE_2D: tl.constexpr,
     RBITS: tl.constexpr,
@@ -334,10 +399,18 @@ def if4_quantization_kernel(
     USE_BLACKWELL_CVT_RS_INSTRUCTIONS: tl.constexpr,
 ) -> None:
     x_amax = tl.load(x_amax_ptr)
-    x_scale_blocks = x_block.reshape(128, 4, 16)
+    x_scale_blocks = x_block.reshape(
+        BLOCK_SIZE_M,
+        BLOCK_SIZE_N // SCALE_GROUP_SIZE,
+        SCALE_GROUP_SIZE,
+    )
 
     if x_amax == 0:
-        x_scales_hp = tl.full((128, 4), 0, dtype=tl.float32)
+        x_scales_hp = tl.full(
+            (BLOCK_SIZE_M, BLOCK_SIZE_N // SCALE_GROUP_SIZE),
+            0,
+            dtype=tl.float32,
+        )
     else:
         encode_scale = tl.div_rn(E2M1_MAX_VALUE * E4M3_MAX_VALUE, x_amax)
         x_scales_hp = (
@@ -348,13 +421,21 @@ def if4_quantization_kernel(
     if BLOCK_SCALE_2D:
         x_scales_hp = (
             tl.max(
-                x_scales_hp.reshape(8, 16, 4).permute(0, 2, 1),
+                x_scales_hp.reshape(
+                    BLOCK_SIZE_M // SCALE_GROUP_SIZE,
+                    SCALE_GROUP_SIZE,
+                    BLOCK_SIZE_N // SCALE_GROUP_SIZE,
+                ).permute(0, 2, 1),
                 axis=-1,
             )
             .expand_dims(0)
-            .broadcast_to(16, 8, 4)
+            .broadcast_to(
+                SCALE_GROUP_SIZE,
+                BLOCK_SIZE_M // SCALE_GROUP_SIZE,
+                BLOCK_SIZE_N // SCALE_GROUP_SIZE,
+            )
             .permute(1, 0, 2)
-            .reshape(128, 4)
+            .reshape(BLOCK_SIZE_M, BLOCK_SIZE_N // SCALE_GROUP_SIZE)
         )
 
     x_scales = x_scales_hp.to(tl.float8e4nv)
@@ -383,6 +464,7 @@ def if4_quantization_kernel(
         BLOCK_SIZE_M,
         BLOCK_SIZE_N,
         ROUND_STYLE,
+        SCALE_GROUP_SIZE,
         RBITS,
         USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
         USE_BLACKWELL_CVT_RS_INSTRUCTIONS,
@@ -393,9 +475,10 @@ def if4_quantization_kernel(
         rbits = (
             tl.rand(
                 2,
-                tl.arange(0, 128)[:, None, None] * 4 * 16
-                + tl.arange(0, 4)[None, :, None] * 16
-                + tl.arange(0, 16)[None, None, :],
+                tl.arange(0, BLOCK_SIZE_M)[:, None, None] * BLOCK_SIZE_N
+                + tl.arange(0, BLOCK_SIZE_N // SCALE_GROUP_SIZE)[None, :, None]
+                * SCALE_GROUP_SIZE
+                + tl.arange(0, SCALE_GROUP_SIZE)[None, None, :],
             )
             - 0.5
         ) * (6 / 7)
@@ -448,22 +531,38 @@ def if4_quantization_kernel(
 
         fp_error = (
             fp_error.expand_dims(0)
-            .broadcast_to(16, 8, 4)
+            .broadcast_to(
+                SCALE_GROUP_SIZE,
+                BLOCK_SIZE_M // SCALE_GROUP_SIZE,
+                BLOCK_SIZE_N // SCALE_GROUP_SIZE,
+            )
             .permute(1, 0, 2)
-            .reshape(128, 4)
+            .reshape(BLOCK_SIZE_M, BLOCK_SIZE_N // SCALE_GROUP_SIZE)
         )
         int_error = (
             int_error.expand_dims(0)
-            .broadcast_to(16, 8, 4)
+            .broadcast_to(
+                SCALE_GROUP_SIZE,
+                BLOCK_SIZE_M // SCALE_GROUP_SIZE,
+                BLOCK_SIZE_N // SCALE_GROUP_SIZE,
+            )
             .permute(1, 0, 2)
-            .reshape(128, 4)
+            .reshape(BLOCK_SIZE_M, BLOCK_SIZE_N // SCALE_GROUP_SIZE)
         )
 
     x_values = tl.where(
         (int_error < fp_error).expand_dims(2),
-        x_int.reshape(128, 4, 8),
-        x_fp.reshape(128, 4, 8),
-    ).reshape(128, 32)
+        x_int.reshape(
+            BLOCK_SIZE_M,
+            BLOCK_SIZE_N // SCALE_GROUP_SIZE,
+            SCALE_GROUP_SIZE // 2,
+        ),
+        x_fp.reshape(
+            BLOCK_SIZE_M,
+            BLOCK_SIZE_N // SCALE_GROUP_SIZE,
+            SCALE_GROUP_SIZE // 2,
+        ),
+    ).reshape(BLOCK_SIZE_M, BLOCK_SIZE_N // 2)
 
     x_scales = (
         tl.where(
@@ -492,6 +591,7 @@ def quantization_kernel(
     QUANTIZED_VALUE_TYPE: tl.constexpr,
     ROUND_STYLE: tl.constexpr,
     SCALE_TYPE: tl.constexpr,
+    SCALE_GROUP_SIZE: tl.constexpr,
     SCALE_RULE: tl.constexpr,
     BLOCK_SCALE_2D: tl.constexpr,
     RBITS: tl.constexpr,
@@ -521,6 +621,7 @@ def quantization_kernel(
             QUANTIZED_VALUE_TYPE,
             ROUND_STYLE,
             SCALE_TYPE,
+            SCALE_GROUP_SIZE,
             SCALE_RULE,
             BLOCK_SCALE_2D,
             RBITS,
@@ -536,6 +637,7 @@ def quantization_kernel(
             QUANTIZED_VALUE_TYPE,
             ROUND_STYLE,
             SCALE_TYPE,
+            SCALE_GROUP_SIZE,
             SCALE_RULE,
             BLOCK_SCALE_2D,
             RBITS,
@@ -551,6 +653,7 @@ def quantization_kernel(
             QUANTIZED_VALUE_TYPE,
             ROUND_STYLE,
             SCALE_TYPE,
+            SCALE_GROUP_SIZE,
             SCALE_RULE,
             BLOCK_SCALE_2D,
             RBITS,
@@ -685,6 +788,7 @@ def quantize_to_fp4(
         QUANTIZED_VALUE_TYPE=dtype.quantized_value_type.value,
         ROUND_STYLE=round_style.value,
         SCALE_TYPE=dtype.scale_type.value,
+        SCALE_GROUP_SIZE=dtype.block_size,
         SCALE_RULE=scale_rule.value,
         BLOCK_SCALE_2D=block_scale_2d,
         RBITS=rbits,

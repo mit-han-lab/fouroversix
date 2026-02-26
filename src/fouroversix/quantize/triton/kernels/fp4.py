@@ -62,7 +62,15 @@ def _convert_to_unpacked_fp4_slow(x_block_scaled_b1, x_block_scaled_b2) -> None:
 
 
 @triton.jit
-def _convert_packed_fp4_to_fp16_slow(sign_b1, value_b1, sign_b2, value_b2) -> None:
+def _convert_packed_fp4_to_fp16_slow(
+    sign_b1,
+    value_b1,
+    sign_b2,
+    value_b2,
+    BLOCK_SIZE_M: tl.constexpr,
+    BLOCK_SIZE_N: tl.constexpr,
+    SCALE_GROUP_SIZE: tl.constexpr,
+) -> None:
     x_fp16_b1 = tl.where(
         value_b1 == 0,
         0,
@@ -115,7 +123,11 @@ def _convert_packed_fp4_to_fp16_slow(sign_b1, value_b1, sign_b2, value_b2) -> No
         ),
     ).to(tl.float16) * tl.where(sign_b2 == 1, -1, 1)
 
-    return tl.join(x_fp16_b1, x_fp16_b2).reshape(128, 4, 16)
+    return tl.join(x_fp16_b1, x_fp16_b2).reshape(
+        BLOCK_SIZE_M,
+        BLOCK_SIZE_N // SCALE_GROUP_SIZE,
+        SCALE_GROUP_SIZE,
+    )
 
 
 @triton.jit
@@ -283,6 +295,9 @@ def convert_to_e2m1x2(
 def convert_to_e2m1x2_and_quantized_fp16_with_rtn(
     x_block_scaled_b1,
     x_block_scaled_b2,
+    BLOCK_SIZE_M: tl.constexpr,
+    BLOCK_SIZE_N: tl.constexpr,
+    SCALE_GROUP_SIZE: tl.constexpr,
     USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
 ) -> None:
     if USE_BLACKWELL_CVT_RN_INSTRUCTIONS:
@@ -310,7 +325,11 @@ def convert_to_e2m1x2_and_quantized_fp16_with_rtn(
 
         x_fp16x2_lo = (x_fp16x2 & 0xFFFF).cast(tl.uint16).cast(tl.float16, bitcast=True)
         x_fp16x2_hi = (x_fp16x2 >> 16).cast(tl.uint16).cast(tl.float16, bitcast=True)
-        x_fp16 = tl.join(x_fp16x2_lo, x_fp16x2_hi).reshape(128, 4, 16)
+        x_fp16 = tl.join(x_fp16x2_lo, x_fp16x2_hi).reshape(
+            BLOCK_SIZE_M,
+            BLOCK_SIZE_N // SCALE_GROUP_SIZE,
+            SCALE_GROUP_SIZE,
+        )
 
         return x_e2m1, x_fp16
 
@@ -320,7 +339,15 @@ def convert_to_e2m1x2_and_quantized_fp16_with_rtn(
     )
 
     x_e2m1 = (sign_b2 << 7) | (value_b2 << 4) | (sign_b1 << 3) | value_b1
-    x_fp16 = _convert_packed_fp4_to_fp16_slow(sign_b1, value_b1, sign_b2, value_b2)
+    x_fp16 = _convert_packed_fp4_to_fp16_slow(
+        sign_b1,
+        value_b1,
+        sign_b2,
+        value_b2,
+        BLOCK_SIZE_M,
+        BLOCK_SIZE_N,
+        SCALE_GROUP_SIZE,
+    )
 
     return x_e2m1, x_fp16
 
@@ -331,6 +358,7 @@ def convert_to_e2m1x2_and_quantized_fp16_with_sr(
     x_block_scaled_b2,
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
+    SCALE_GROUP_SIZE: tl.constexpr,
     RBITS: tl.constexpr,
     USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
     USE_BLACKWELL_CVT_RS_INSTRUCTIONS: tl.constexpr,
@@ -364,7 +392,11 @@ def convert_to_e2m1x2_and_quantized_fp16_with_sr(
 
         x_fp16x2_lo = (x_fp16x2 & 0xFFFF).cast(tl.uint16).cast(tl.float16, bitcast=True)
         x_fp16x2_hi = (x_fp16x2 >> 16).cast(tl.uint16).cast(tl.float16, bitcast=True)
-        x_fp16 = tl.join(x_fp16x2_lo, x_fp16x2_hi).reshape(128, 4, 16)
+        x_fp16 = tl.join(x_fp16x2_lo, x_fp16x2_hi).reshape(
+            BLOCK_SIZE_M,
+            BLOCK_SIZE_N // SCALE_GROUP_SIZE,
+            SCALE_GROUP_SIZE,
+        )
 
         return x_e2m1, x_fp16
 
@@ -385,6 +417,9 @@ def convert_to_e2m1x2_and_quantized_fp16_with_sr(
     return convert_to_e2m1x2_and_quantized_fp16_with_rtn(
         x_block_scaled_b1,
         x_block_scaled_b2,
+        BLOCK_SIZE_M,
+        BLOCK_SIZE_N,
+        SCALE_GROUP_SIZE,
         USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
     )
 
@@ -396,6 +431,7 @@ def convert_to_e2m1x2_and_quantized_fp16(
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
     ROUND_STYLE: tl.constexpr,
+    SCALE_GROUP_SIZE: tl.constexpr,
     RBITS: tl.constexpr,
     USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
     USE_BLACKWELL_CVT_RS_INSTRUCTIONS: tl.constexpr,
@@ -406,6 +442,7 @@ def convert_to_e2m1x2_and_quantized_fp16(
             x_block_scaled_b2,
             BLOCK_SIZE_M,
             BLOCK_SIZE_N,
+            SCALE_GROUP_SIZE,
             RBITS,
             USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
             USE_BLACKWELL_CVT_RS_INSTRUCTIONS,
@@ -414,5 +451,8 @@ def convert_to_e2m1x2_and_quantized_fp16(
     return convert_to_e2m1x2_and_quantized_fp16_with_rtn(
         x_block_scaled_b1,
         x_block_scaled_b2,
+        BLOCK_SIZE_M,
+        BLOCK_SIZE_N,
+        SCALE_GROUP_SIZE,
         USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
     )
