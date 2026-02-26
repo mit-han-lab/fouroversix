@@ -5,14 +5,20 @@ from typing import Any
 import click
 import modal
 
-from ..resources import app, get_image
+from ..resources import Dependency, app, get_image
 
-img = get_image()
+img = get_image(dependencies=[Dependency.transformer_engine, Dependency.fouroversix])
 
 with img.imports():
     import torch
     import torch.utils.benchmark as benchmark
-    from fouroversix import DataType, MatmulBackend, QuantizationConfig, quantize_to_fp4
+    from fouroversix import (
+        DataType,
+        MatmulBackend,
+        QuantizationConfig,
+        ScaleRule,
+        quantize_to_fp4,
+    )
     from fouroversix.matmul.frontend import AVAILABLE_BACKENDS
 
 
@@ -23,13 +29,14 @@ def run_speedtest(
     n: int = 1024,
     k: int = 1024,
     repeats: int = 100,
+    scale_rule: ScaleRule = ScaleRule.mse,
 ) -> None:
     """Test speed on a B200 on Modal."""
 
     x = torch.randn(m, k, dtype=torch.bfloat16, device="cuda")
     y = torch.randn(k, n, dtype=torch.bfloat16, device="cuda")
 
-    config = QuantizationConfig(dtype=dtype)
+    config = QuantizationConfig(dtype=dtype, scale_rule=scale_rule)
     x_quantized = quantize_to_fp4(x, config)
     y_quantized = quantize_to_fp4(y, config)
     out_dtype = DataType.bfloat16
@@ -81,6 +88,7 @@ def run_speedtest_on_modal(**kwargs: dict[str, Any]) -> None:
 @click.option("--n", type=int, default=1024)
 @click.option("--k", type=int, default=1024)
 @click.option("--repeats", type=int, default=100)
+@click.option("--scale-rule", type=ScaleRule, default=ScaleRule.mse)
 def cli(**kwargs: dict[str, Any]) -> None:
     if kwargs.pop("modal"):
         with modal.enable_output(), app.run():
