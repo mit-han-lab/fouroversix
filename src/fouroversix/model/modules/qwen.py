@@ -11,7 +11,10 @@ from transformers.models.qwen3_5_moe.modeling_qwen3_5_moe import Qwen3_5MoeExper
 
 @QuantizedModule.register(Qwen3_5MoeExperts)
 class FourOverSixQwenExperts(nn.Module):
-    """Drop-in replacement for the Qwen3_5MoeExperts layer that uses FP4 quantization."""
+    """
+    Drop-in replacement for the Qwen3_5MoeExperts layer that
+    uses FP4 quantization.
+    """
 
     def __init__(
         self,
@@ -202,7 +205,10 @@ class FourOverSixQwenExperts(nn.Module):
 
         final_hidden_states = torch.zeros_like(hidden_states)
         with torch.no_grad():
-            expert_mask = torch.nn.functional.one_hot(top_k_index, num_classes=self.num_experts)
+            expert_mask = torch.nn.functional.one_hot(
+                top_k_index,
+                num_classes=self.num_experts,
+            )
             expert_mask = expert_mask.permute(2, 1, 0)
             expert_hit = torch.greater(expert_mask.sum(dim=(-1, -2)), 0).nonzero()
 
@@ -230,8 +236,13 @@ class FourOverSixQwenExperts(nn.Module):
                 input_config=fprop_activation_config,
                 out_dtype=self.config.output_dtype,
             )
-            current_hidden_states = current_hidden_states * top_k_weights[token_idx, top_k_pos, None]
-            final_hidden_states.index_add_(0, token_idx, current_hidden_states.to(final_hidden_states.dtype))
+            current_hidden_states = current_hidden_states * \
+            top_k_weights[token_idx, top_k_pos, None]
+            final_hidden_states.index_add_(
+                0,
+                token_idx,
+                current_hidden_states.to(final_hidden_states.dtype),
+            )
 
         return final_hidden_states
 
