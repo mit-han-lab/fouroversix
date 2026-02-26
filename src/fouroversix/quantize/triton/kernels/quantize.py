@@ -216,7 +216,7 @@ def block_scaled_quantization_kernel(
         USE_BLACKWELL_CVT_RS_INSTRUCTIONS,
     )
 
-    return x_e2m1, x_scales.reshape(4, 32, 4).permute(1, 0, 2).ravel()
+    return x_e2m1, x_scales
 
 
 @triton.jit
@@ -327,8 +327,17 @@ def nvfp4_fouroversix_quantization_kernel(
         four_error = tl.sum(diff_4 * diff_4, axis=-1)
 
     if BLOCK_SCALE_2D:
-        six_error = six_error.reshape(8, 16, 4).permute(0, 2, 1)
-        four_error = four_error.reshape(8, 16, 4).permute(0, 2, 1)
+        six_error = six_error.reshape(
+            BLOCK_SIZE_M // SCALE_GROUP_SIZE,
+            SCALE_GROUP_SIZE,
+            BLOCK_SIZE_N // SCALE_GROUP_SIZE,
+        ).permute(0, 2, 1)
+
+        four_error = four_error.reshape(
+            BLOCK_SIZE_M // SCALE_GROUP_SIZE,
+            SCALE_GROUP_SIZE,
+            BLOCK_SIZE_N // SCALE_GROUP_SIZE,
+        ).permute(0, 2, 1)
 
         if SCALE_RULE == SCALE_RULE_ABS_MAX:
             six_error = tl.max(six_error, axis=-1)
@@ -372,13 +381,7 @@ def nvfp4_fouroversix_quantization_kernel(
         ),
     ).reshape(BLOCK_SIZE_M, BLOCK_SIZE_N // 2)
 
-    x_scales = (
-        tl.where(four_error < six_error, x_scales_4, x_scales_6)
-        .reshape(4, 32, 4)
-        .permute(1, 0, 2)
-        .ravel()
-    )
-
+    x_scales = tl.where(four_error < six_error, x_scales_4, x_scales_6)
     return x_e2m1, x_scales
 
 
@@ -564,17 +567,11 @@ def if4_quantization_kernel(
         ),
     ).reshape(BLOCK_SIZE_M, BLOCK_SIZE_N // 2)
 
-    x_scales = (
-        tl.where(
-            int_error < fp_error,
-            x_scales.to(tl.uint8, bitcast=True) + 128,
-            x_scales.to(tl.uint8, bitcast=True),
-        )
-        .reshape(4, 32, 4)
-        .permute(1, 0, 2)
-        .ravel()
+    x_scales = tl.where(
+        int_error < fp_error,
+        x_scales.to(tl.uint8, bitcast=True) + 128,
+        x_scales.to(tl.uint8, bitcast=True),
     )
-
     return x_values, x_scales
 
 
@@ -587,6 +584,8 @@ def quantization_kernel(
     # Meta-parameters
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
+    TILE_SIZE_M: tl.constexpr,
+    TILE_SIZE_N: tl.constexpr,
     TRANSPOSE: tl.constexpr,
     QUANTIZED_VALUE_TYPE: tl.constexpr,
     ROUND_STYLE: tl.constexpr,
@@ -604,68 +603,111 @@ def quantization_kernel(
     m_block_offset = pid_m * BLOCK_SIZE_M
     n_block_offset = pid_n * BLOCK_SIZE_N
 
-    # Load [B, B] block from A or A^T
-    if not TRANSPOSE:
-        x_block = x_desc.load([m_block_offset, n_block_offset])
-    else:
-        x_block = x_desc.load([n_block_offset, m_block_offset]).T
+    NUM_TILES_M: tl.constexpr = BLOCK_SIZE_M // TILE_SIZE_M
+    NUM_TILES_N: tl.constexpr = BLOCK_SIZE_N // TILE_SIZE_N
+    SF_PER_TILE_M: tl.constexpr = TILE_SIZE_M
+    SF_PER_TILE_N: tl.constexpr = TILE_SIZE_N // SCALE_GROUP_SIZE
+    SF_DTYPE: tl.constexpr = tl.float8e4nv if SCALE_TYPE == SCALE_TYPE_NV else tl.uint8
 
-    x_block = x_block.to(tl.float32)
+    output_scales = tl.zeros(
+        (NUM_TILES_M, NUM_TILES_N, SF_PER_TILE_M, SF_PER_TILE_N),
+        dtype=SF_DTYPE,
+    )
 
-    if SCALE_RULE == SCALE_RULE_STATIC_6 or SCALE_RULE == SCALE_RULE_STATIC_4:
-        x_e2m1, x_scales = block_scaled_quantization_kernel(
-            x_block,
-            x_amax_ptr,
-            BLOCK_SIZE_M,
-            BLOCK_SIZE_N,
-            QUANTIZED_VALUE_TYPE,
-            ROUND_STYLE,
-            SCALE_TYPE,
-            SCALE_GROUP_SIZE,
-            SCALE_RULE,
-            BLOCK_SCALE_2D,
-            RBITS,
-            USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
-            USE_BLACKWELL_CVT_RS_INSTRUCTIONS,
-        )
-    elif SCALE_TYPE == SCALE_TYPE_NV_IF:
-        x_e2m1, x_scales = if4_quantization_kernel(
-            x_block,
-            x_amax_ptr,
-            BLOCK_SIZE_M,
-            BLOCK_SIZE_N,
-            QUANTIZED_VALUE_TYPE,
-            ROUND_STYLE,
-            SCALE_TYPE,
-            SCALE_GROUP_SIZE,
-            SCALE_RULE,
-            BLOCK_SCALE_2D,
-            RBITS,
-            USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
-            USE_BLACKWELL_CVT_RS_INSTRUCTIONS,
-        )
-    else:
-        x_e2m1, x_scales = nvfp4_fouroversix_quantization_kernel(
-            x_block,
-            x_amax_ptr,
-            BLOCK_SIZE_M,
-            BLOCK_SIZE_N,
-            QUANTIZED_VALUE_TYPE,
-            ROUND_STYLE,
-            SCALE_TYPE,
-            SCALE_GROUP_SIZE,
-            SCALE_RULE,
-            BLOCK_SCALE_2D,
-            RBITS,
-            USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
-            USE_BLACKWELL_CVT_RS_INSTRUCTIONS,
-        )
+    output_scales_idx = (
+        tl.arange(0, NUM_TILES_M)[:, None, None, None] * NUM_TILES_N
+        + tl.arange(0, NUM_TILES_N)[None, :, None, None]
+    ).broadcast_to(NUM_TILES_M, NUM_TILES_N, SF_PER_TILE_M, SF_PER_TILE_N)
 
-    e2m1_n_block_offset = pid_n * BLOCK_SIZE_N // 2
-    x_e2m1_desc.store([m_block_offset, e2m1_n_block_offset], x_e2m1)
+    for tile_m in range(NUM_TILES_M):
+        for tile_n in range(NUM_TILES_N):
+            # Load [B, B] block from A or A^T
+            if not TRANSPOSE:
+                x_block = x_desc.load(
+                    [
+                        m_block_offset + tile_m * TILE_SIZE_M,
+                        n_block_offset + tile_n * TILE_SIZE_N,
+                    ]
+                )
+            else:
+                x_block = x_desc.load(
+                    [
+                        n_block_offset + tile_n * TILE_SIZE_N,
+                        m_block_offset + tile_m * TILE_SIZE_M,
+                    ]
+                ).T
+
+            x_block = x_block.to(tl.float32)
+
+            if SCALE_RULE == SCALE_RULE_STATIC_6 or SCALE_RULE == SCALE_RULE_STATIC_4:
+                x_e2m1, x_scales = block_scaled_quantization_kernel(
+                    x_block,
+                    x_amax_ptr,
+                    TILE_SIZE_M,
+                    TILE_SIZE_N,
+                    QUANTIZED_VALUE_TYPE,
+                    ROUND_STYLE,
+                    SCALE_TYPE,
+                    SCALE_GROUP_SIZE,
+                    SCALE_RULE,
+                    BLOCK_SCALE_2D,
+                    RBITS,
+                    USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+                    USE_BLACKWELL_CVT_RS_INSTRUCTIONS,
+                )
+            elif SCALE_TYPE == SCALE_TYPE_NV_IF:
+                x_e2m1, x_scales = if4_quantization_kernel(
+                    x_block,
+                    x_amax_ptr,
+                    TILE_SIZE_M,
+                    TILE_SIZE_N,
+                    QUANTIZED_VALUE_TYPE,
+                    ROUND_STYLE,
+                    SCALE_TYPE,
+                    SCALE_GROUP_SIZE,
+                    SCALE_RULE,
+                    BLOCK_SCALE_2D,
+                    RBITS,
+                    USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+                    USE_BLACKWELL_CVT_RS_INSTRUCTIONS,
+                )
+            else:
+                x_e2m1, x_scales = nvfp4_fouroversix_quantization_kernel(
+                    x_block,
+                    x_amax_ptr,
+                    TILE_SIZE_M,
+                    TILE_SIZE_N,
+                    QUANTIZED_VALUE_TYPE,
+                    ROUND_STYLE,
+                    SCALE_TYPE,
+                    SCALE_GROUP_SIZE,
+                    SCALE_RULE,
+                    BLOCK_SCALE_2D,
+                    RBITS,
+                    USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+                    USE_BLACKWELL_CVT_RS_INSTRUCTIONS,
+                )
+
+            x_e2m1_desc.store(
+                [
+                    pid_m * BLOCK_SIZE_M + tile_m * TILE_SIZE_M,
+                    (pid_n * BLOCK_SIZE_N + tile_n * TILE_SIZE_N) // 2,
+                ],
+                x_e2m1,
+            )
+
+            output_scales = tl.where(
+                output_scales_idx == tile_m * NUM_TILES_N + tile_n,
+                x_scales[None, None, :, :],
+                output_scales,
+            )
+
+    output_scales = (
+        output_scales.permute(0, 2, 1, 3).reshape(4, 32, 4).permute(1, 0, 2).ravel()
+    )
 
     scale_block_offset = (pid_m * tl.num_programs(1) + pid_n) * SCALE_MEGABLOCK_SIZE
-    x_sf_desc.store([scale_block_offset], x_scales)
+    x_sf_desc.store([scale_block_offset], output_scales)
 
 
 def quantize_to_fp4(
@@ -689,6 +731,23 @@ def quantize_to_fp4(
 
     block_size_m = 128
     block_size_n = 4 * dtype.block_size
+
+    tile_size_m = 16
+    tile_size_n = 64
+
+    if tile_size_n % dtype.block_size != 0:
+        msg = (
+            f"Tile size N ({tile_size_n}) must be divisible by the block size "
+            f"({dtype.block_size})"
+        )
+        raise ValueError(msg)
+
+    if block_scale_2d and tile_size_m % dtype.block_size != 0:
+        msg = (
+            f"Tile size M ({tile_size_m}) must be divisible by the block size "
+            f"({dtype.block_size}) when performing 2D block scaling"
+        )
+        raise ValueError(msg)
 
     if x_amax is None:
         x_amax = (
@@ -719,13 +778,13 @@ def quantize_to_fp4(
     x_desc = TensorDescriptor.from_tensor(
         x,
         block_shape=[
-            block_size_m if not transpose else block_size_n,
-            block_size_n if not transpose else block_size_m,
+            tile_size_m if not transpose else tile_size_n,
+            tile_size_n if not transpose else tile_size_m,
         ],
     )
     x_e2m1_desc = TensorDescriptor.from_tensor(
         x_e2m1,
-        block_shape=[block_size_m, block_size_n // 2],
+        block_shape=[tile_size_m, tile_size_n // 2],
     )
     x_sf_desc = TensorDescriptor.from_tensor(
         x_sf,
@@ -762,15 +821,20 @@ def quantize_to_fp4(
         )
         x_rht_desc = TensorDescriptor.from_tensor(
             x_rht,
-            block_shape=[block_size_m, block_size_n],
+            block_shape=[tile_size_m, tile_size_n],
         )
 
-        rht_kernel[grid](
+        rht_grid = lambda _: (  # noqa: E731
+            padded_m // tile_size_m,
+            padded_n // tile_size_n,
+        )
+
+        rht_kernel[rht_grid](
             x_desc,
             h_desc,
             x_rht_desc,
-            BLOCK_SIZE_M=block_size_m,
-            BLOCK_SIZE_N=block_size_n,
+            BLOCK_SIZE_M=tile_size_m,
+            BLOCK_SIZE_N=tile_size_n,
             TRANSPOSE=transpose,
         )
 
@@ -784,6 +848,8 @@ def quantize_to_fp4(
         x_sf_desc,
         BLOCK_SIZE_M=block_size_m,
         BLOCK_SIZE_N=block_size_n,
+        TILE_SIZE_M=tile_size_m,
+        TILE_SIZE_N=tile_size_n,
         TRANSPOSE=transpose,
         QUANTIZED_VALUE_TYPE=dtype.quantized_value_type.value,
         ROUND_STYLE=round_style.value,
@@ -804,11 +870,10 @@ def quantize_to_fp4(
         ),
     )
 
-    if dtype.scale_type == ScaleType.mx:
-        x_sf = x_sf.view(torch.float8_e8m0fnu)
-    elif dtype == DataType.if4:
-        x_sf = from_blocked(x_sf, (padded_m, padded_n // dtype.block_size)).view(
-            torch.float8_e4m3fn,
-        )
+    if x_sf.dtype != dtype.scale_type.torch_dtype:
+        x_sf = x_sf.view(dtype.scale_type.torch_dtype)
+
+    if dtype == DataType.if4:
+        x_sf = from_blocked(x_sf, (padded_m, padded_n // dtype.block_size))
 
     return x_e2m1, x_sf, x_amax
