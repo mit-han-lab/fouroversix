@@ -52,13 +52,23 @@ class DataType(str, Enum):
         return 448 if scale_rule in {ScaleRule.static_6, ScaleRule.static_4} else 256
 
     @property
-    def scale_dtype(self) -> torch.dtype | None:
-        """Return the scale dtype if this a block-scaled format, or `None` otherwise."""
+    def quantized_value_type(self) -> "QuantizedValueType | None":
+        """Return the quantized value type if this a block-scaled format, or `None` otherwise."""
 
         return {
-            DataType.mxfp4: torch.float8_e8m0fnu,
-            DataType.nvfp4: torch.float8_e4m3fn,
-            DataType.if4: torch.float8_e4m3fn,
+            DataType.mxfp4: QuantizedValueType.fp4,
+            DataType.nvfp4: QuantizedValueType.fp4,
+            DataType.if4: QuantizedValueType.if4,
+        }.get(self)
+
+    @property
+    def scale_type(self) -> "ScaleType | None":
+        """Return the scale type if this a block-scaled format, or `None` otherwise."""
+
+        return {
+            DataType.mxfp4: ScaleType.mx,
+            DataType.nvfp4: ScaleType.nv,
+            DataType.if4: ScaleType.nv_if,
         }.get(self)
 
     @property
@@ -170,3 +180,44 @@ class ScaleRule(str, Enum):
     def is_static(self) -> bool:
         """Return True if the rule is static, False otherwise."""
         return self in {ScaleRule.static_4, ScaleRule.static_6}
+
+
+class ScaleType(str, Enum):
+    """
+    Scale types for quantization.
+
+    - `mx`: E8M0 scale factors, as is done in MX-style quantization formats.
+    - `nv`: E4M3 scale factors, as in NVFP4.
+    - `nv_if`: E4M3, but using the sign bit as an indicator for IF formats.
+    """
+
+    mx = "mx"
+    nv = "nv"
+    nv_if = "nv_if"
+
+    @property
+    def torch_dtype(self) -> torch.dtype | None:
+        """
+        Return the corresponding torch.dtype if one is available, or `None`
+        otherwise.
+        """
+
+        return {
+            ScaleType.mx: torch.float8_e8m0fnu,
+            ScaleType.nv: torch.float8_e4m3fn,
+            ScaleType.nv_if: torch.float8_e4m3fn,
+        }.get(self)
+
+
+class QuantizedValueType(str, Enum):
+    """
+    Allowed types for quantized values.
+
+    - `fp4`: FP4.
+    - `if4`: IF4.
+    - `int4`: Int4.
+    """
+
+    fp4 = "fp4"
+    if4 = "if4"
+    int4 = "int4"

@@ -56,7 +56,7 @@ class TritonQuantizeBackend(QuantizeBackendBase):
         values, scale_factors, amax = quantize_to_fp4(
             x,
             had=get_rht_matrix() if config.rht else None,
-            fp4_format=config.dtype,
+            dtype=config.dtype,
             round_style=config.round_style,
             scale_rule=config.scale_rule,
             block_scale_2d=config.block_scale_2d,
