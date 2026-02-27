@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import torch
+import triton.language as tl
+from fouroversix.quantize import QuantizedTensor, from_blocked
 from fouroversix.utils import (
     DataType,
     RoundStyle,
@@ -9,12 +11,12 @@ from fouroversix.utils import (
     device_supports_cvt_rn_e2m1x2,
     device_supports_cvt_rs_e2m1x4,
 )
-from fouroversix.quantize import QuantizedTensor, from_blocked
 from triton.tools.tensor_descriptor import TensorDescriptor
 
-from .rht import rht_kernel
-from .quantize import SCALE_MEGABLOCK_SIZE, quantization_kernel
+from .constants import SCALE_MEGABLOCK_SIZE
 from .dequantize import dequantize_kernel
+from .quantize import quantization_kernel
+from .rht import rht_kernel
 
 
 def quantize_to_fp4(
@@ -232,6 +234,8 @@ def dequantize_values(
         output_desc,
         BLOCK_SIZE_M=block_size_m,
         BLOCK_SIZE_N=block_size_n,
+        QUANTIZED_VALUE_TYPE=tensor.dtype.quantized_value_type.value,
+        OUT_DTYPE=tl.float16,
         USE_BLACKWELL_CVT_RN_INSTRUCTIONS=(
             device_supports_cvt_rn_e2m1x2()
             if use_blackwell_cvt_rn_instructions is None

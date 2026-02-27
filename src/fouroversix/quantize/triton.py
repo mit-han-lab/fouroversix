@@ -30,7 +30,7 @@ class TritonQuantizeBackend(QuantizeBackendBase):
 
         # FP6 dequantize kernel only works on Blackwell
         return (
-            tensor.dtype == DataType.nvfp6_e3m2
+            tensor.dtype in {DataType.nvfp6_e2m3, DataType.nvfp6_e3m2}
             and torch.cuda.get_device_capability()[0] in BLACKWELL_SM_IDS
         )
 
@@ -53,7 +53,7 @@ class TritonQuantizeBackend(QuantizeBackendBase):
         *,
         dtype: torch.dtype = torch.bfloat16,
     ) -> torch.Tensor:
-        if tensor.dtype == DataType.nvfp6_e3m2:
+        if tensor.dtype in {DataType.nvfp6_e2m3, DataType.nvfp6_e3m2}:
             from fouroversix.kernels.triton import dequantize_values
 
             return dequantize_values(tensor, dtype=dtype)

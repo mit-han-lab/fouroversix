@@ -28,6 +28,7 @@ class DataType(str, Enum):
     float32 = "float32"
     mxfp4 = "mxfp4"
     nvfp4 = "nvfp4"
+    nvfp6_e2m3 = "nvfp6_e2m3"
     nvfp6_e3m2 = "nvfp6_e3m2"
     if4 = "if4"
 
@@ -38,6 +39,7 @@ class DataType(str, Enum):
         return {
             DataType.mxfp4: 32,
             DataType.nvfp4: 16,
+            DataType.nvfp6_e2m3: 16,
             DataType.nvfp6_e3m2: 16,
             DataType.if4: 16,
         }.get(self)
@@ -49,6 +51,7 @@ class DataType(str, Enum):
         return {
             DataType.mxfp4: QuantizedValueType.fp4,
             DataType.nvfp4: QuantizedValueType.fp4,
+            DataType.nvfp6_e2m3: QuantizedValueType.fp6_e2m3,
             DataType.nvfp6_e3m2: QuantizedValueType.fp6_e3m2,
             DataType.if4: QuantizedValueType.if4,
         }.get(self)
@@ -60,6 +63,7 @@ class DataType(str, Enum):
         return {
             DataType.mxfp4: ScaleType.mx,
             DataType.nvfp4: ScaleType.nv,
+            DataType.nvfp6_e2m3: ScaleType.nv,
             DataType.nvfp6_e3m2: ScaleType.nv,
             DataType.if4: ScaleType.nv_if,
         }.get(self)
@@ -71,7 +75,7 @@ class DataType(str, Enum):
         if self == DataType.if4:
             return {scale_rule for scale_rule in ScaleRule if not scale_rule.is_static}
 
-        if self in {DataType.mxfp4, DataType.nvfp6_e3m2}:
+        if self in {DataType.mxfp4, DataType.nvfp6_e2m3, DataType.nvfp6_e3m2}:
             return {scale_rule for scale_rule in ScaleRule if scale_rule.is_static}
 
         if self == DataType.nvfp4:
@@ -215,11 +219,13 @@ class QuantizedValueType(str, Enum):
     Allowed types for quantized values.
 
     - `fp4`: FP4.
+    - `fp6_e2m3`: FP6 (E2M3).
     - `fp6_e3m2`: FP6 (E3M2).
     - `if4`: IF4.
     """
 
     fp4 = "fp4"
+    fp6_e2m3 = "fp6_e2m3"
     fp6_e3m2 = "fp6_e3m2"
     if4 = "if4"
 
@@ -231,6 +237,7 @@ class QuantizedValueType(str, Enum):
 
         return {
             QuantizedValueType.fp4: 6,
+            QuantizedValueType.fp6_e2m3: 7.5,
             QuantizedValueType.fp6_e3m2: 28,
             QuantizedValueType.if4: 6,
         }.get(self)
@@ -241,6 +248,7 @@ class QuantizedValueType(str, Enum):
 
         return {
             QuantizedValueType.fp4: 2,
+            QuantizedValueType.fp6_e2m3: 1,
             QuantizedValueType.fp6_e3m2: 1,
             QuantizedValueType.if4: 2,
         }.get(self)

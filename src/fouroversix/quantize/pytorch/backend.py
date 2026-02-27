@@ -34,7 +34,7 @@ class PyTorchQuantizeBackend(QuantizeBackendBase):
         if not super().can_quantize(x, config):
             return False
 
-        return config.dtype != DataType.nvfp6_e3m2
+        return config.dtype not in {DataType.nvfp6_e2m3, DataType.nvfp6_e3m2}
 
     @classmethod
     def quantize_to_fp4(

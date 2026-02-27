@@ -2,43 +2,27 @@ from __future__ import annotations
 
 import triton
 import triton.language as tl
-from fouroversix.utils import (
-    DataType,
-    QuantizedValueType,
-    RoundStyle,
-    ScaleRule,
-    ScaleType,
+
+from .constants import (
+    E2M1_MAX_VALUE,
+    E4M3_MAX_FOUROVERSIX,
+    E4M3_MAX_VALUE,
+    QUANTIZED_VALUE_TYPE_FP4,
+    QUANTIZED_VALUE_TYPE_FP6_E2M3,
+    QUANTIZED_VALUE_TYPE_FP6_E3M2,
+    ROUND_STYLE_STOCHASTIC,
+    SCALE_MEGABLOCK_SIZE,
+    SCALE_RULE_ABS_MAX,
+    SCALE_RULE_MAE,
+    SCALE_RULE_MSE,
+    SCALE_RULE_STATIC_4,
+    SCALE_RULE_STATIC_6,
+    SCALE_TYPE_MX,
+    SCALE_TYPE_NV,
+    SCALE_TYPE_NV_IF,
 )
-
 from .fp4 import convert_to_e2m1x2, convert_to_e2m1x2_and_quantized_fp16
-from .fp6 import convert_to_e3m2x2
-
-E2M1_MAX_VALUE = tl.constexpr(6)
-E2M1_MAX_FOUR = tl.constexpr(4)
-E4M3_MAX_VALUE = tl.constexpr(448)
-E4M3_MAX_FOUROVERSIX = tl.constexpr(256)
-SCALE_MEGABLOCK_SIZE = tl.constexpr(512)
-
-DATA_TYPE_IF4 = tl.constexpr(DataType.if4.value)
-DATA_TYPE_MXFP4 = tl.constexpr(DataType.mxfp4.value)
-DATA_TYPE_NVFP4 = tl.constexpr(DataType.nvfp4.value)
-
-ROUND_STYLE_NEAREST = tl.constexpr(RoundStyle.nearest.value)
-ROUND_STYLE_STOCHASTIC = tl.constexpr(RoundStyle.stochastic.value)
-
-SCALE_RULE_ABS_MAX = tl.constexpr(ScaleRule.abs_max.value)
-SCALE_RULE_MAE = tl.constexpr(ScaleRule.mae.value)
-SCALE_RULE_MSE = tl.constexpr(ScaleRule.mse.value)
-SCALE_RULE_STATIC_4 = tl.constexpr(ScaleRule.static_4.value)
-SCALE_RULE_STATIC_6 = tl.constexpr(ScaleRule.static_6.value)
-
-SCALE_TYPE_MX = tl.constexpr(ScaleType.mx.value)
-SCALE_TYPE_NV = tl.constexpr(ScaleType.nv.value)
-SCALE_TYPE_NV_IF = tl.constexpr(ScaleType.nv_if.value)
-
-QUANTIZED_VALUE_TYPE_FP4 = tl.constexpr(QuantizedValueType.fp4.value)
-QUANTIZED_VALUE_TYPE_FP6_E3M2 = tl.constexpr(QuantizedValueType.fp6_e3m2.value)
-QUANTIZED_VALUE_TYPE_IF4 = tl.constexpr(QuantizedValueType.if4.value)
+from .fp6 import convert_to_e2m3x2, convert_to_e3m2x2
 
 
 @triton.jit  # noqa: RET503
@@ -211,6 +195,11 @@ def block_scaled_quantization_kernel(
             RBITS,
             USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
             USE_BLACKWELL_CVT_RS_INSTRUCTIONS,
+        )
+    elif QUANTIZED_VALUE_TYPE == QUANTIZED_VALUE_TYPE_FP6_E2M3:
+        x_e2m1 = convert_to_e2m3x2(
+            x_block_scaled.reshape(BLOCK_SIZE_M, BLOCK_SIZE_N),
+            USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
         )
     elif QUANTIZED_VALUE_TYPE == QUANTIZED_VALUE_TYPE_FP6_E3M2:
         x_e2m1 = convert_to_e3m2x2(

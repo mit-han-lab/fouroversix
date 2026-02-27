@@ -1,10 +1,8 @@
 import triton
 import triton.language as tl
-from fouroversix.quantize.triton.kernels.if4 import (
-    Q_BLOCK_SIZE,
-    convert_from_if4_to_fp32,
-)
-from fouroversix.quantize.triton.kernels.quantize import DATA_TYPE_NVFP4
+
+from .constants import DATA_TYPE_NVFP4
+from .if4 import Q_BLOCK_SIZE, convert_from_if4_to_fp32
 
 
 @triton.jit

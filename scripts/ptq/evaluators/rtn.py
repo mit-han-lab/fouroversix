@@ -48,13 +48,7 @@ class RTNEvaluatorImpl(PTQEvaluator):
         """Quantize a model using round-to-nearest quantization."""
 
         model_save_path = (
-            save_path
-            / "rtn"
-            / (
-                f"{model_name}-{quantization_config.dtype.value}"
-                f"-{quantization_config.get_activation_scale_rule().value}"
-                f"-{quantization_config.get_weight_scale_rule().value}"
-            )
+            save_path / "rtn" / model_name / quantization_config.__hash__()
         )
 
         if not model_save_path.exists():

@@ -39,7 +39,7 @@ class QuantizeBackendBase(ABC):
         if not cls.is_available():
             return False
 
-        return tensor.dtype != DataType.nvfp6_e3m2
+        return tensor.dtype not in {DataType.nvfp6_e2m3, DataType.nvfp6_e3m2}
 
     @classmethod
     @abstractmethod
