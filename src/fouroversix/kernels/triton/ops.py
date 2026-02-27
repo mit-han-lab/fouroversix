@@ -327,7 +327,7 @@ def matmul(
         other_scale_factors.stride(1),
         output.stride(0),
         output.stride(1),
-        BLOCK_SIZE_M=64,
+        BLOCK_SIZE_M=128,
         BLOCK_SIZE_N=64,
         BLOCK_SIZE_K=32,
         GROUP_SIZE_M=6,
