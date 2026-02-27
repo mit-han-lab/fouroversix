@@ -70,8 +70,10 @@ class PTQEvaluator(ABC):
         disable_inference_mode: bool = False,
         matmul_backend: MatmulBackend | None = None,
         quantize_backend: QuantizeBackend | None = None,
-        weight_scale_2d: bool = False,
+        activation_dtype: DataType | None = None,
         activation_scale_rule: ScaleRule | None = None,
+        weight_dtype: DataType | None = None,
+        weight_scale_2d: bool = False,
         weight_scale_rule: ScaleRule | None = None,
         save_path: Path | None = None,
         **kwargs: dict[str, Any],
@@ -85,6 +87,7 @@ class PTQEvaluator(ABC):
         with inference_context:
             model_config = AutoConfig.from_pretrained(model_name)
             quantization_config = ModelQuantizationConfig(
+                activation_dtype=activation_dtype,
                 activation_scale_rule=activation_scale_rule,
                 dtype=dtype,
                 matmul_backend=matmul_backend,
@@ -97,6 +100,7 @@ class PTQEvaluator(ABC):
                 ),
                 quantize_backend=quantize_backend,
                 weight_scale_2d=weight_scale_2d,
+                weight_dtype=weight_dtype,
                 weight_scale_rule=weight_scale_rule,
             )
 

@@ -81,7 +81,7 @@ class PyTorchQuantizeBackend(QuantizeBackendBase):
         if x.device.type == "meta":
             values = torch.zeros(
                 input_shape[0],
-                input_shape[1] // 2,
+                input_shape[1] // config.dtype.quantized_value_type.packing_factor,
                 device=x.device,
                 dtype=torch.uint8,
             )

@@ -10,6 +10,7 @@ from .utils import EvaluationFramework, PTQMethod
 
 
 @click.command()
+@click.option("--activation-dtype", "--a-dtype", type=DataType, default=None)
 @click.option(
     "--activation-scale-rule",
     "--a-scale-rule",
@@ -36,6 +37,7 @@ from .utils import EvaluationFramework, PTQMethod
 @click.option("--quantize-backend", type=QuantizeBackend, default=None)
 @click.option("--task", "-t", type=str, multiple=True, default=["wikitext"])
 @click.option("--trust-remote-code", is_flag=True)
+@click.option("--weight-dtype", "--w-dtype", type=DataType, default=None)
 @click.option(
     "--weight-scale-rule",
     "--w-scale-rule",

@@ -19,12 +19,16 @@ class ModuleQuantizationConfig:
     Configuration for quantizing modules with Four Over Six.
 
     Args:
+        activation_dtype (DataType | None): The quantization data type to use for
+            activation tensors. If not provided, `dtype` will be used.
         activation_round_style (RoundStyle | None): The rounding style to use for
             activation tensors. Defaults to `RoundStyle.nearest`.
         activation_scale_rule (ScaleRule | None): The scaling rule to use for activation
             tensors. If not provided, `scale_rule` will be used.
         dtype (DataType): The quantization data type to use for the module. Defaults to
             `DataType.nvfp4`.
+        gradient_dtype (DataType | None): The quantization data type to use for gradient
+            tensors. If not provided, `dtype` will be used.
         gradient_round_style (RoundStyle | None): The rounding style to use for gradient
             tensors. Defaults to `RoundStyle.stochastic`.
         gradient_scale_rule (ScaleRule | None): The scaling rule to use for gradient
@@ -41,6 +45,8 @@ class ModuleQuantizationConfig:
             available GPU and the specified options.
         scale_rule (ScaleRule): The fallback scaling rule which will be used if any of
             the other scaling rules are not specified.
+        weight_dtype (DataType | None): The quantization data type to use for weight
+            tensors. If not provided, `dtype` will be used.
         weight_round_style (RoundStyle | None): The rounding style to use for weight
             tensors. Defaults to `RoundStyle.nearest`.
         weight_scale_2d (bool): Whether to use 2D block scaling for weights. Should be
@@ -50,9 +56,11 @@ class ModuleQuantizationConfig:
 
     """
 
+    activation_dtype: DataType | None = None
     activation_round_style: RoundStyle = RoundStyle.nearest
     activation_scale_rule: ScaleRule | None = None
     dtype: DataType = DataType.nvfp4
+    gradient_dtype: DataType | None = None
     gradient_round_style: RoundStyle = RoundStyle.stochastic
     gradient_scale_rule: ScaleRule | None = None
     keep_master_weights: bool = False
@@ -60,12 +68,16 @@ class ModuleQuantizationConfig:
     output_dtype: DataType = DataType.bfloat16
     quantize_backend: QuantizeBackend | None = None
     scale_rule: ScaleRule = ScaleRule.mse
+    weight_dtype: DataType | None = None
     weight_round_style: RoundStyle = RoundStyle.nearest
     weight_scale_2d: bool = False
     weight_scale_rule: ScaleRule | None = None
 
-    def __post_init__(self) -> None:  # noqa: C901
+    def __post_init__(self) -> None:  # noqa: C901, PLR0912
         """Convert string values to enums."""
+
+        if isinstance(self.activation_dtype, str):
+            self.activation_dtype = DataType(self.activation_dtype)
 
         if isinstance(self.activation_round_style, str):
             self.activation_round_style = RoundStyle(self.activation_round_style)
@@ -75,6 +87,9 @@ class ModuleQuantizationConfig:
 
         if isinstance(self.dtype, str):
             self.dtype = DataType(self.dtype)
+
+        if isinstance(self.gradient_dtype, str):
+            self.gradient_dtype = DataType(self.gradient_dtype)
 
         if isinstance(self.gradient_round_style, str):
             self.gradient_round_style = RoundStyle(self.gradient_round_style)
@@ -94,31 +109,30 @@ class ModuleQuantizationConfig:
         if isinstance(self.scale_rule, str):
             self.scale_rule = ScaleRule(self.scale_rule)
 
+        if isinstance(self.weight_dtype, str):
+            self.weight_dtype = DataType(self.weight_dtype)
+
         if isinstance(self.weight_round_style, str):
             self.weight_round_style = RoundStyle(self.weight_round_style)
 
         if isinstance(self.weight_scale_rule, str):
             self.weight_scale_rule = ScaleRule(self.weight_scale_rule)
 
-    def get_activation_scale_rule(self) -> ScaleRule:
-        """Return the scaling rule to use for activation tensors."""
-        return self.activation_scale_rule or self.scale_rule
+        self.activation_dtype = self.activation_dtype or self.dtype
+        self.gradient_dtype = self.gradient_dtype or self.dtype
+        self.weight_dtype = self.weight_dtype or self.dtype
 
-    def get_gradient_scale_rule(self) -> ScaleRule:
-        """Return the scaling rule to use for gradient tensors."""
-        return self.gradient_scale_rule or self.scale_rule
-
-    def get_weight_scale_rule(self) -> ScaleRule:
-        """Return the scaling rule to use for weight tensors."""
-        return self.weight_scale_rule or self.scale_rule
+        self.activation_scale_rule = self.activation_scale_rule or self.scale_rule
+        self.gradient_scale_rule = self.gradient_scale_rule or self.scale_rule
+        self.weight_scale_rule = self.weight_scale_rule or self.scale_rule
 
     def get_activation_config(self, **kwargs: dict[str, Any]) -> QuantizationConfig:
         """Return the quantization configuration for the activation tensors."""
         return QuantizationConfig(
             backend=self.quantize_backend,
-            dtype=self.dtype,
+            dtype=self.activation_dtype,
             round_style=self.activation_round_style,
-            scale_rule=self.get_activation_scale_rule(),
+            scale_rule=self.activation_scale_rule,
             **kwargs,
         )
 
@@ -126,9 +140,9 @@ class ModuleQuantizationConfig:
         """Return the quantization configuration for the gradient tensors."""
         return QuantizationConfig(
             backend=self.quantize_backend,
-            dtype=self.dtype,
+            dtype=self.gradient_dtype,
             round_style=self.gradient_round_style,
-            scale_rule=self.get_gradient_scale_rule(),
+            scale_rule=self.gradient_scale_rule,
             **kwargs,
         )
 
@@ -137,9 +151,9 @@ class ModuleQuantizationConfig:
         return QuantizationConfig(
             backend=self.quantize_backend,
             block_scale_2d=self.weight_scale_2d,
-            dtype=self.dtype,
+            dtype=self.weight_dtype,
             round_style=self.weight_round_style,
-            scale_rule=self.get_weight_scale_rule(),
+            scale_rule=self.weight_scale_rule,
             **kwargs,
         )
 
@@ -150,10 +164,14 @@ class ModelQuantizationConfig(ModuleQuantizationConfig):
     Configuration for quantizing a model with Four Over Six.
 
     Args:
+        activation_dtype (DataType | None): The quantization data type to use for
+            activation tensors. If not provided, `dtype` will be used.
         activation_scale_rule (ScaleRule | None): The scaling rule to use for activation
             tensors. If not provided, `scale_rule` will be used.
         dtype (DataType): The quantization data type to use for the module. Defaults to
             `DataType.nvfp4`.
+        gradient_dtype (DataType | None): The quantization data type to use for gradient
+            tensors. If not provided, `dtype` will be used.
         gradient_scale_rule (ScaleRule | None): The scaling rule to use for gradient
             tensors. If not provided, `scale_rule` will be used.
         keep_master_weights (bool): Whether to keep the master weights. Defaults to
@@ -168,6 +186,8 @@ class ModelQuantizationConfig(ModuleQuantizationConfig):
             available GPU and the specified options.
         scale_rule (ScaleRule): The fallback scaling rule which will be used if any of
             the other scaling rules are not specified.
+        weight_dtype (DataType | None): The quantization data type to use for weight
+            tensors. If not provided, `dtype` will be used.
         weight_scale_2d (bool): Whether to use 2D block scaling for weights. Should be
             set to `True` if the module is used for training.
         weight_scale_rule (ScaleRule | None): The scaling rule to use for weights. If

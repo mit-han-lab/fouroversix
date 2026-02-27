@@ -140,7 +140,8 @@ class FourOverSixLinear(nn.Linear):
                 nn.Parameter(
                     torch.zeros(
                         self.out_features,
-                        self.in_features // 2,
+                        self.in_features
+                        // self.config.weight_dtype.quantized_value_type.packing_factor,
                         dtype=torch.uint8,
                     ),
                     requires_grad=False,
@@ -152,8 +153,8 @@ class FourOverSixLinear(nn.Linear):
                     torch.zeros(
                         self.out_features
                         * self.in_features
-                        // self.config.dtype.block_size,
-                        dtype=self.config.dtype.scale_type.torch_dtype,
+                        // self.config.weight_dtype.block_size,
+                        dtype=self.config.weight_dtype.scale_type.torch_dtype,
                     ),
                     requires_grad=False,
                 ),
@@ -232,9 +233,9 @@ class FourOverSixLinear(nn.Linear):
                 self.quantized_weight_values.data,
                 self.quantized_weight_scale_factors.data,
                 self.quantized_weight_amax.data,
-                self.config.dtype,
+                self.config.weight_dtype,
                 original_shape,
-                self.config.get_weight_scale_rule(),
+                self.config.weight_scale_rule,
                 padded_shape,
                 values_are_packed=values_are_packed,
                 scale_factors_are_in_blackwell_layout=scale_factors_are_in_blackwell_layout,

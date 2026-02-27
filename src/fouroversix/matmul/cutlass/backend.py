@@ -47,7 +47,8 @@ class CUTLASSMatmulBackend(MatmulBackendBase):
             return False
 
         return (
-            input.dtype in {DataType.mxfp4, DataType.nvfp4}
+            input.dtype == other.dtype
+            and input.dtype in {DataType.mxfp4, DataType.nvfp4}
             and input.device.type == "cuda"
         )
 

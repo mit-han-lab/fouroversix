@@ -109,9 +109,9 @@ class SpinQuantOptimizer:
                 "--max_steps",
                 str(spinquant_steps),
                 "--activation_scale_rule",
-                quantization_config.get_activation_scale_rule().value,
+                quantization_config.activation_scale_rule.value,
                 "--weight_scale_rule",
-                quantization_config.get_weight_scale_rule().value,
+                quantization_config.weight_scale_rule.value,
                 *SPINQUANT_ARGS,
             ],
             check=True,
@@ -165,12 +165,7 @@ class SpinQuantEvaluator(PTQEvaluator):
         from utils.process_args import process_args_ptq
 
         save_path = (
-            save_path
-            / "spinquant"
-            / (
-                f"{model_name}-{quantization_config.get_activation_scale_rule().value}"
-                f"-{quantization_config.get_weight_scale_rule().value}"
-            )
+            save_path / "spinquant" / model_name / quantization_config.__hash__()
         )
 
         if not (save_path / "R.bin").exists():
@@ -204,9 +199,9 @@ class SpinQuantEvaluator(PTQEvaluator):
             "--optimized_rotation_path",
             (save_path / "R.bin").as_posix(),
             "--activation_scale_rule",
-            quantization_config.get_activation_scale_rule().value,
+            quantization_config.activation_scale_rule.value,
             "--weight_scale_rule",
-            quantization_config.get_weight_scale_rule().value,
+            quantization_config.weight_scale_rule.value,
             *SPINQUANT_ARGS,
         ]
 

@@ -85,17 +85,10 @@ class AWQEvaluator(RTNEvaluatorImpl):
         # Replace FourOverSixLinear with FourOverSixLinearForAWQ
         QuantizedModule.register(
             nn.Linear,
-            replace_existing_modules=True,
+            replace_existing_modules_in_registry=True,
         )(FourOverSixLinearForAWQ)
 
-        save_path = (
-            save_path
-            / "awq"
-            / (
-                f"{model_name}-{quantization_config.get_activation_scale_rule().value}"
-                f"-{quantization_config.get_weight_scale_rule().value}"
-            )
-        )
+        save_path = save_path / "awq" / model_name / quantization_config.__hash__()
 
         if not save_path.exists():
             model = AutoModelForCausalLM.from_pretrained(
