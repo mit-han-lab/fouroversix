@@ -81,7 +81,8 @@ class RTNEvaluatorImpl(PTQEvaluator):
                 trust_remote_code=trust_remote_code,
             )
 
-            hf_quantization_config.pre_quantized_model_config_type = None
+            if hasattr(hf_quantization_config, "pre_quantized_model_config_type"):
+                delattr(hf_quantization_config, "pre_quantized_model_config_type")
 
             model.save_pretrained(model_save_path, **save_kwargs)
         else:
