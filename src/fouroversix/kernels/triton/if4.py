@@ -6,7 +6,7 @@ Q_BLOCK_SIZE = tl.constexpr(DataType.if4.block_size)
 
 
 @triton.jit
-def convert_from_if4_to_fp32(
+def convert_if4_to_fp32(
     values,
     scale_factors,
     BLOCK_SIZE_M: tl.constexpr,

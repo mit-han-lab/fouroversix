@@ -9,10 +9,11 @@ from fouroversix import (
     QuantizeBackend,
     RoundStyle,
     ScaleRule,
+    dequantize,
     quantize_to_fp4,
 )
+from fouroversix.quantize import from_blocked
 from fouroversix.quantize.frontend import AVAILABLE_BACKENDS
-from fouroversix.quantize.quantized_tensor import from_blocked
 
 MAE_MSE_MISMATCH_TOLERANCE = 1e-3
 NUM_RANDOM_SEEDS = 10
@@ -287,7 +288,7 @@ def test_stochastic_rounding() -> None:
 
     for kwargs, expected_dist in test_cases:
         config = QuantizationConfig(round_style=RoundStyle.stochastic, **kwargs)
-        x_dequantized = quantize_to_fp4(x, config).dequantize()
+        x_dequantized = dequantize(quantize_to_fp4(x, config))
         dist = torch.dist(x_dequantized, x)
         print(kwargs, expected_dist, dist)
         assert abs((dist - expected_dist) / expected_dist) < 0.05  # noqa: PLR2004

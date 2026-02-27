@@ -160,7 +160,6 @@ def block_scaled_quantization_kernel(
     ROUND_STYLE: tl.constexpr,
     SCALE_TYPE: tl.constexpr,
     SCALE_GROUP_SIZE: tl.constexpr,
-    SCALE_RULE: tl.constexpr,
     BLOCK_SCALE_2D: tl.constexpr,
     RBITS: tl.constexpr,
     USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
@@ -216,7 +215,6 @@ def nvfp4_fouroversix_quantization_kernel(
     x_amax_ptr,
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
-    QUANTIZED_VALUE_TYPE: tl.constexpr,
     ROUND_STYLE: tl.constexpr,
     SCALE_TYPE: tl.constexpr,
     SCALE_GROUP_SIZE: tl.constexpr,
@@ -382,9 +380,7 @@ def if4_quantization_kernel(
     x_amax_ptr,
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
-    QUANTIZED_VALUE_TYPE: tl.constexpr,
     ROUND_STYLE: tl.constexpr,
-    SCALE_TYPE: tl.constexpr,
     SCALE_GROUP_SIZE: tl.constexpr,
     SCALE_RULE: tl.constexpr,
     BLOCK_SCALE_2D: tl.constexpr,
@@ -513,8 +509,17 @@ def if4_quantization_kernel(
         int_error = tl.sum(diff_int * diff_int, axis=-1)
 
     if BLOCK_SCALE_2D:
-        fp_error = fp_error.reshape(8, 16, 4).permute(0, 2, 1)
-        int_error = int_error.reshape(8, 16, 4).permute(0, 2, 1)
+        fp_error = fp_error.reshape(
+            BLOCK_SIZE_M // SCALE_GROUP_SIZE,
+            SCALE_GROUP_SIZE,
+            BLOCK_SIZE_N // SCALE_GROUP_SIZE,
+        ).permute(0, 2, 1)
+
+        int_error = int_error.reshape(
+            BLOCK_SIZE_M // SCALE_GROUP_SIZE,
+            SCALE_GROUP_SIZE,
+            BLOCK_SIZE_N // SCALE_GROUP_SIZE,
+        ).permute(0, 2, 1)
 
         if SCALE_RULE == SCALE_RULE_ABS_MAX:
             fp_error = tl.max(fp_error, axis=-1)
@@ -645,7 +650,6 @@ def quantization_kernel(
                     ROUND_STYLE,
                     SCALE_TYPE,
                     SCALE_GROUP_SIZE,
-                    SCALE_RULE,
                     BLOCK_SCALE_2D,
                     RBITS,
                     USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
@@ -657,9 +661,7 @@ def quantization_kernel(
                     x_amax_ptr,
                     TILE_SIZE_M,
                     TILE_SIZE_N,
-                    QUANTIZED_VALUE_TYPE,
                     ROUND_STYLE,
-                    SCALE_TYPE,
                     SCALE_GROUP_SIZE,
                     SCALE_RULE,
                     BLOCK_SCALE_2D,
@@ -673,7 +675,6 @@ def quantization_kernel(
                     x_amax_ptr,
                     TILE_SIZE_M,
                     TILE_SIZE_N,
-                    QUANTIZED_VALUE_TYPE,
                     ROUND_STYLE,
                     SCALE_TYPE,
                     SCALE_GROUP_SIZE,

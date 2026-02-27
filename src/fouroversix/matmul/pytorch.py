@@ -18,6 +18,24 @@ class PyTorchMatmulBackend(MatmulBackendBase):
         return True
 
     @classmethod
+    def is_supported(
+        cls,
+        input: QuantizedTensor,
+        other: QuantizedTensor,
+        *,
+        out_dtype: DataType,
+    ) -> bool:
+        """Return True if this backend supports the given inputs."""
+
+        if not super().is_supported(input, other, out_dtype=out_dtype):
+            return False
+
+        return input.dtype not in {
+            DataType.nvfp6_e2m3,
+            DataType.nvfp6_e3m2,
+        } and other.dtype not in {DataType.nvfp6_e2m3, DataType.nvfp6_e3m2}
+
+    @classmethod
     def fp4_matmul(
         cls,
         input: QuantizedTensor,

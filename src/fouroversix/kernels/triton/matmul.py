@@ -1,8 +1,8 @@
 import triton
 import triton.language as tl
 
-from .constants import DATA_TYPE_NVFP4
-from .if4 import Q_BLOCK_SIZE, convert_from_if4_to_fp32
+from .dequantize import dequantize_to_fp16_kernel
+from .if4 import Q_BLOCK_SIZE
 
 
 @triton.jit
@@ -27,15 +27,20 @@ def matmul_kernel(
     stride_bk_sf: tl.constexpr,
     stride_cm: tl.constexpr,
     stride_cn: tl.constexpr,
-    A_E2M1_MAX_VALUE: tl.constexpr,
-    B_E2M1_MAX_VALUE: tl.constexpr,
-    A_E4M3_MAX_VALUE: tl.constexpr,
-    B_E4M3_MAX_VALUE: tl.constexpr,
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
     GROUP_SIZE_M: tl.constexpr,
-    DTYPE: tl.constexpr,
+    INPUT_QUANTIZED_VALUE_TYPE: tl.constexpr,
+    INPUT_QUANTIZED_VALUE_PACKING_FACTOR: tl.constexpr,
+    INPUT_QUANTIZED_VALUE_MAX: tl.constexpr,
+    INPUT_SCALE_FACTOR_MAX: tl.constexpr,
+    INPUT_SCALE_GROUP_SIZE: tl.constexpr,
+    OTHER_QUANTIZED_VALUE_TYPE: tl.constexpr,
+    OTHER_QUANTIZED_VALUE_PACKING_FACTOR: tl.constexpr,
+    OTHER_QUANTIZED_VALUE_MAX: tl.constexpr,
+    OTHER_SCALE_FACTOR_MAX: tl.constexpr,
+    OTHER_SCALE_GROUP_SIZE: tl.constexpr,
     INTERMEDIATE_DTYPE: tl.constexpr,
     OUT_DTYPE: tl.constexpr,
     USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
@@ -52,29 +57,36 @@ def matmul_kernel(
 
     offs_am = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M
     offs_bn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N
-    offs_k_values = tl.arange(0, BLOCK_SIZE_K // 2)
-    offs_k_sf = tl.arange(0, BLOCK_SIZE_K // Q_BLOCK_SIZE)
+    offs_ak_values = tl.arange(0, BLOCK_SIZE_K // INPUT_QUANTIZED_VALUE_PACKING_FACTOR)
+    offs_ak_sf = tl.arange(0, BLOCK_SIZE_K // INPUT_SCALE_GROUP_SIZE)
+    offs_bk_values = tl.arange(0, BLOCK_SIZE_K // OTHER_QUANTIZED_VALUE_PACKING_FACTOR)
+    offs_bk_sf = tl.arange(0, BLOCK_SIZE_K // OTHER_SCALE_GROUP_SIZE)
     a_value_ptrs = (
         a_values_ptr
         + offs_am[:, None] * stride_am_values
-        + offs_k_values[None, :] * stride_ak_values
+        + offs_ak_values[None, :] * stride_ak_values
     )
     a_sf_ptrs = (
-        a_sf_ptr + offs_am[:, None] * stride_am_sf + offs_k_sf[None, :] * stride_ak_sf
+        a_sf_ptr + offs_am[:, None] * stride_am_sf + offs_ak_sf[None, :] * stride_ak_sf
     )
     b_value_ptrs = (
         b_values_ptr
         + offs_bn[:, None] * stride_bn_values
-        + offs_k_values[None, :] * stride_bk_values
+        + offs_bk_values[None, :] * stride_bk_values
     )
     b_sf_ptrs = (
-        b_sf_ptr + offs_bn[:, None] * stride_bn_sf + offs_k_sf[None, :] * stride_bk_sf
+        b_sf_ptr + offs_bn[:, None] * stride_bn_sf + offs_bk_sf[None, :] * stride_bk_sf
     )
 
     alpha = (
         tl.load(a_amax_ptr)
         * tl.load(b_amax_ptr)
-        / (A_E2M1_MAX_VALUE * B_E2M1_MAX_VALUE * A_E4M3_MAX_VALUE * B_E4M3_MAX_VALUE)
+        / (
+            INPUT_QUANTIZED_VALUE_MAX
+            * OTHER_QUANTIZED_VALUE_MAX
+            * INPUT_SCALE_FACTOR_MAX
+            * OTHER_SCALE_FACTOR_MAX
+        )
     )
     accumulator = tl.zeros(
         (BLOCK_SIZE_M, BLOCK_SIZE_N),
@@ -84,39 +96,39 @@ def matmul_kernel(
     for k in range(tl.cdiv(K, BLOCK_SIZE_K)):
         a_values = tl.load(
             a_value_ptrs,
-            mask=offs_k_values[None, :] < K - k * BLOCK_SIZE_K,
+            mask=offs_ak_values[None, :] < K - k * BLOCK_SIZE_K,
             other=0.0,
         )
         a_sf = tl.load(
             a_sf_ptrs,
-            mask=offs_k_sf[None, :] < K - k * BLOCK_SIZE_K,
+            mask=offs_ak_sf[None, :] < K - k * BLOCK_SIZE_K,
             other=0.0,
         )
         b_values = tl.load(
             b_value_ptrs,
-            mask=offs_k_values[None, :] < K - k * BLOCK_SIZE_K,
+            mask=offs_bk_values[None, :] < K - k * BLOCK_SIZE_K,
             other=0.0,
         )
         b_sf = tl.load(
             b_sf_ptrs,
-            mask=offs_k_sf[None, :] < K - k * BLOCK_SIZE_K,
+            mask=offs_bk_sf[None, :] < K - k * BLOCK_SIZE_K,
             other=0.0,
         )
 
-        a_real_values = convert_from_if4_to_fp32(
+        a_real_values = dequantize_to_fp16_kernel(
             a_values,
             a_sf,
             BLOCK_SIZE_M,
             BLOCK_SIZE_K,
-            RETURN_FP=DTYPE == DATA_TYPE_NVFP4,
+            QUANTIZED_VALUE_TYPE=INPUT_QUANTIZED_VALUE_TYPE,
             USE_BLACKWELL_CVT_RN_INSTRUCTIONS=USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
         )
-        b_real_values = convert_from_if4_to_fp32(
+        b_real_values = dequantize_to_fp16_kernel(
             b_values,
             b_sf,
             BLOCK_SIZE_N,
             BLOCK_SIZE_K,
-            RETURN_FP=DTYPE == DATA_TYPE_NVFP4,
+            QUANTIZED_VALUE_TYPE=OTHER_QUANTIZED_VALUE_TYPE,
             USE_BLACKWELL_CVT_RN_INSTRUCTIONS=USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
         )
 

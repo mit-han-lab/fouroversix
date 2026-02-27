@@ -53,6 +53,11 @@ class TritonQuantizeBackend(QuantizeBackendBase):
         *,
         dtype: torch.dtype = torch.bfloat16,
     ) -> torch.Tensor:
+        """
+        Get a high-precision representation of the raw values of a quantized tensor.
+        Note that this returns raw values only, and not the fully dequantized tensor.
+        """
+
         if tensor.dtype in {DataType.nvfp6_e2m3, DataType.nvfp6_e3m2}:
             from fouroversix.kernels.triton import dequantize_values
 

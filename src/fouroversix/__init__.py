@@ -8,7 +8,7 @@ from .model import (
     QuantizedModule,
     quantize_model,
 )
-from .quantize import QuantizationConfig, QuantizedTensor, quantize_to_fp4
+from .quantize import QuantizationConfig, QuantizedTensor, dequantize, quantize_to_fp4
 from .utils import DataType, MatmulBackend, QuantizeBackend, RoundStyle, ScaleRule
 from .weight_conversions import WeightConversions
 
@@ -27,6 +27,7 @@ __all__ = [
     "RoundStyle",
     "ScaleRule",
     "WeightConversions",
+    "dequantize",
     "fp4_matmul",
     "quantize_model",
     "quantize_to_fp4",

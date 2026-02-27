@@ -46,7 +46,10 @@ class DataType(str, Enum):
 
     @property
     def quantized_value_type(self) -> "QuantizedValueType | None":
-        """Return the quantized value type if this a block-scaled format, or `None` otherwise."""
+        """
+        Return the quantized value type if this a block-scaled format, or `None`
+        otherwise.
+        """
 
         return {
             DataType.mxfp4: QuantizedValueType.fp4,

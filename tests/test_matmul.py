@@ -82,6 +82,7 @@ def test_matmul(
 
         if values_mismatch_prop > MISMATCH_TOLERANCE:
             print(f"Values mismatch: {values_mismatch_prop:.2%}")
+            print(f"Distance: {torch.dist(out_a, out_b)}")
             print(f"Out A: {out_a}")
             print(f"Out B: {out_b}")
             pytest.fail("Values mismatch")
