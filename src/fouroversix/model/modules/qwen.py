@@ -34,11 +34,11 @@ class FourOverSixQwenExperts(nn.Module):
         super().__init__()
 
         self.num_experts = module.num_experts
-        self.intermediate_dim = module.intermediate_dim  # 1024
-        self.hidden_dim = module.hidden_dim  # 4096
+        self.intermediate_dim = module.intermediate_dim
+        self.hidden_dim = module.hidden_dim
 
-        self.down_proj = module.down_proj #[512, 4096, 1024]
-        self.gate_up_proj = module.gate_up_proj #[512, 2048, 4096]
+        self.down_proj = module.down_proj
+        self.gate_up_proj = module.gate_up_proj
 
         self.device = self.down_proj.device
         self.config = config
