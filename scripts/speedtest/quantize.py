@@ -71,7 +71,7 @@ def run_speedtest(
             print("Not available")
             continue
 
-        if not backend_cls.is_supported(x, config):
+        if not backend_cls.can_quantize(x, config):
             print("Not supported")
             continue
 

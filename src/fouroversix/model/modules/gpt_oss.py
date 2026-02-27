@@ -139,7 +139,7 @@ class FourOverSixGptOssExperts(nn.Module):
                         self.hidden_size
                         * self.intermediate_size
                         // self.config.dtype.block_size,
-                        dtype=self.config.dtype.scale_dtype(),
+                        dtype=self.config.dtype.scale_type.torch_dtype,
                     ),
                     requires_grad=False,
                 ),
@@ -152,7 +152,7 @@ class FourOverSixGptOssExperts(nn.Module):
                         self.hidden_size
                         * (self.intermediate_size * 2)
                         // self.config.dtype.block_size,
-                        dtype=self.config.dtype.scale_dtype(),
+                        dtype=self.config.dtype.scale_type.torch_dtype,
                     ),
                     requires_grad=False,
                 ),
@@ -245,7 +245,7 @@ class FourOverSixGptOssExperts(nn.Module):
                             tensor.original_shape[1],
                             tensor.padded_shape[0],
                             tensor.padded_shape[1],
-                        ]
+                        ],
                     )
                     for tensor in quantized_proj
                 ],
@@ -357,7 +357,7 @@ class FourOverSixGptOssExperts(nn.Module):
                         padded_shape=tuple(
                             self.quantized_down_proj_metadata.data[e, 2:].tolist(),
                         ),
-                    )
+                    ),
                 )
                 gate_up.append(
                     QuantizedTensor(
@@ -372,7 +372,7 @@ class FourOverSixGptOssExperts(nn.Module):
                         padded_shape=tuple(
                             self.quantized_gate_up_proj_metadata.data[e, 2:].tolist(),
                         ),
-                    )
+                    ),
                 )
             self._quantized_weights = (down, gate_up)
 

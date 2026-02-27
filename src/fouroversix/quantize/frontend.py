@@ -108,15 +108,47 @@ def quantize_to_fp4(
         ]:
             if AVAILABLE_BACKENDS[backend] is not None and AVAILABLE_BACKENDS[
                 backend
-            ].is_supported(x, config):
+            ].can_quantize(x, config):
                 selected_backend = backend
                 break
         else:
             msg = "No backend found that supports the given parameters"
             raise ValueError(msg)
 
-    elif not AVAILABLE_BACKENDS[selected_backend].is_supported(x, config):
+    elif not AVAILABLE_BACKENDS[selected_backend].can_quantize(x, config):
         msg = f"Backend {selected_backend} does not support the given parameters"
         raise ValueError(msg)
 
     return AVAILABLE_BACKENDS[selected_backend].quantize_to_fp4(x, config)
+
+
+def dequantize(
+    tensor: QuantizedTensor,
+    dtype: torch.dtype = torch.bfloat16,
+    *,
+    backend: QuantizeBackend | None = None,
+    intermediate_dtype: torch.dtype = torch.float16,
+) -> torch.Tensor:
+    selected_backend = backend
+
+    if selected_backend is None:
+        for backend_candidate in [
+            QuantizeBackend.cuda,
+            QuantizeBackend.triton,
+            QuantizeBackend.pytorch,
+        ]:
+            if AVAILABLE_BACKENDS[backend_candidate] is not None and AVAILABLE_BACKENDS[
+                backend_candidate
+            ].can_dequantize(tensor):
+                selected_backend = backend_candidate
+                break
+
+    elif not AVAILABLE_BACKENDS[selected_backend].can_dequantize(tensor):
+        msg = f"Backend {selected_backend} does not support the given parameters"
+        raise ValueError(msg)
+
+    return AVAILABLE_BACKENDS[selected_backend].dequantize(
+        tensor,
+        dtype,
+        intermediate_dtype=intermediate_dtype,
+    )

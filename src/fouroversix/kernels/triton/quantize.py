@@ -1,22 +1,17 @@
 from __future__ import annotations
 
-import torch
 import triton
 import triton.language as tl
-from fouroversix.quantize.quantized_tensor import from_blocked
 from fouroversix.utils import (
     DataType,
     QuantizedValueType,
     RoundStyle,
     ScaleRule,
     ScaleType,
-    device_supports_cvt_rn_e2m1x2,
-    device_supports_cvt_rs_e2m1x4,
 )
-from triton.tools.tensor_descriptor import TensorDescriptor
 
 from .fp4 import convert_to_e2m1x2, convert_to_e2m1x2_and_quantized_fp16
-from .rht import rht_kernel
+from .fp6 import convert_to_e3m2x2
 
 E2M1_MAX_VALUE = tl.constexpr(6)
 E2M1_MAX_FOUR = tl.constexpr(4)
@@ -42,8 +37,8 @@ SCALE_TYPE_NV = tl.constexpr(ScaleType.nv.value)
 SCALE_TYPE_NV_IF = tl.constexpr(ScaleType.nv_if.value)
 
 QUANTIZED_VALUE_TYPE_FP4 = tl.constexpr(QuantizedValueType.fp4.value)
+QUANTIZED_VALUE_TYPE_FP6_E3M2 = tl.constexpr(QuantizedValueType.fp6_e3m2.value)
 QUANTIZED_VALUE_TYPE_IF4 = tl.constexpr(QuantizedValueType.if4.value)
-QUANTIZED_VALUE_TYPE_INT4 = tl.constexpr(QuantizedValueType.int4.value)
 
 
 @triton.jit  # noqa: RET503
@@ -175,6 +170,8 @@ def block_scaled_quantization_kernel(
     x_amax_ptr,
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
+    MAX_QUANTIZED_VALUE: tl.constexpr,
+    MAX_SCALE_FACTOR: tl.constexpr,
     QUANTIZED_VALUE_TYPE: tl.constexpr,
     ROUND_STYLE: tl.constexpr,
     SCALE_TYPE: tl.constexpr,
@@ -185,36 +182,41 @@ def block_scaled_quantization_kernel(
     USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
     USE_BLACKWELL_CVT_RS_INSTRUCTIONS: tl.constexpr,
 ) -> None:
-    if QUANTIZED_VALUE_TYPE == QUANTIZED_VALUE_TYPE_FP4:
-        x_block_scaled, x_scales, _ = prepare_inputs_for_block_scaling(
-            x_block,
-            x_amax_ptr,
-            BLOCK_SIZE_M,
-            BLOCK_SIZE_N,
-            BLOCK_SCALE_2D,
-            E2M1_MAX_VALUE if SCALE_RULE == SCALE_RULE_STATIC_6 else E2M1_MAX_FOUR,
-            E4M3_MAX_VALUE if SCALE_TYPE == SCALE_TYPE_NV else None,
-            SCALE_TYPE,
-            SCALE_GROUP_SIZE,
-            None,
-        )
+    x_block_scaled, x_scales, _ = prepare_inputs_for_block_scaling(
+        x_block,
+        x_amax_ptr,
+        BLOCK_SIZE_M,
+        BLOCK_SIZE_N,
+        BLOCK_SCALE_2D,
+        MAX_QUANTIZED_VALUE,
+        MAX_SCALE_FACTOR,
+        SCALE_TYPE,
+        SCALE_GROUP_SIZE,
+        None,
+    )
 
+    if QUANTIZED_VALUE_TYPE == QUANTIZED_VALUE_TYPE_FP4:
         x_block_scaled_b1, x_block_scaled_b2 = x_block_scaled.reshape(
             BLOCK_SIZE_M,
             BLOCK_SIZE_N // 2,
             2,
         ).split()
 
-    x_e2m1 = convert_to_e2m1x2(
-        x_block_scaled_b1,
-        x_block_scaled_b2,
-        BLOCK_SIZE_M,
-        BLOCK_SIZE_N,
-        ROUND_STYLE,
-        RBITS,
-        USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
-        USE_BLACKWELL_CVT_RS_INSTRUCTIONS,
-    )
+        x_e2m1 = convert_to_e2m1x2(
+            x_block_scaled_b1,
+            x_block_scaled_b2,
+            BLOCK_SIZE_M,
+            BLOCK_SIZE_N,
+            ROUND_STYLE,
+            RBITS,
+            USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+            USE_BLACKWELL_CVT_RS_INSTRUCTIONS,
+        )
+    elif QUANTIZED_VALUE_TYPE == QUANTIZED_VALUE_TYPE_FP6_E3M2:
+        x_e2m1 = convert_to_e3m2x2(
+            x_block_scaled.reshape(BLOCK_SIZE_M, BLOCK_SIZE_N),
+            USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+        )
 
     return x_e2m1, x_scales
 
@@ -586,8 +588,11 @@ def quantization_kernel(
     BLOCK_SIZE_N: tl.constexpr,
     TILE_SIZE_M: tl.constexpr,
     TILE_SIZE_N: tl.constexpr,
+    MAX_QUANTIZED_VALUE: tl.constexpr,
+    MAX_SCALE_FACTOR: tl.constexpr,
     TRANSPOSE: tl.constexpr,
     QUANTIZED_VALUE_TYPE: tl.constexpr,
+    QUANTIZED_VALUE_PACKING_FACTOR: tl.constexpr,
     ROUND_STYLE: tl.constexpr,
     SCALE_TYPE: tl.constexpr,
     SCALE_GROUP_SIZE: tl.constexpr,
@@ -627,14 +632,14 @@ def quantization_kernel(
                     [
                         m_block_offset + tile_m * TILE_SIZE_M,
                         n_block_offset + tile_n * TILE_SIZE_N,
-                    ]
+                    ],
                 )
             else:
                 x_block = x_desc.load(
                     [
                         n_block_offset + tile_n * TILE_SIZE_N,
                         m_block_offset + tile_m * TILE_SIZE_M,
-                    ]
+                    ],
                 ).T
 
             x_block = x_block.to(tl.float32)
@@ -645,6 +650,8 @@ def quantization_kernel(
                     x_amax_ptr,
                     TILE_SIZE_M,
                     TILE_SIZE_N,
+                    MAX_QUANTIZED_VALUE,
+                    MAX_SCALE_FACTOR,
                     QUANTIZED_VALUE_TYPE,
                     ROUND_STYLE,
                     SCALE_TYPE,
@@ -691,7 +698,8 @@ def quantization_kernel(
             x_e2m1_desc.store(
                 [
                     pid_m * BLOCK_SIZE_M + tile_m * TILE_SIZE_M,
-                    (pid_n * BLOCK_SIZE_N + tile_n * TILE_SIZE_N) // 2,
+                    (pid_n * BLOCK_SIZE_N + tile_n * TILE_SIZE_N)
+                    // QUANTIZED_VALUE_PACKING_FACTOR,
                 ],
                 x_e2m1,
             )
@@ -708,172 +716,3 @@ def quantization_kernel(
 
     scale_block_offset = (pid_m * tl.num_programs(1) + pid_n) * SCALE_MEGABLOCK_SIZE
     x_sf_desc.store([scale_block_offset], output_scales)
-
-
-def quantize_to_fp4(
-    x: torch.Tensor,
-    x_amax: torch.Tensor | None = None,
-    had: torch.Tensor | None = None,
-    *,
-    dtype: DataType = DataType.nvfp4,
-    round_style: RoundStyle = RoundStyle.nearest,
-    scale_rule: ScaleRule = ScaleRule.mse,
-    block_scale_2d: bool = False,
-    transpose: bool = False,
-    rbits: int = -1,
-    use_blackwell_cvt_rn_instructions: bool | None = None,
-    use_blackwell_cvt_rs_instructions: bool | None = None,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
-    if transpose:
-        N, M = x.shape
-    else:
-        M, N = x.shape
-
-    block_size_m = 128
-    block_size_n = 4 * dtype.block_size
-
-    tile_size_m = 16
-    tile_size_n = 64
-
-    if tile_size_n % dtype.block_size != 0:
-        msg = (
-            f"Tile size N ({tile_size_n}) must be divisible by the block size "
-            f"({dtype.block_size})"
-        )
-        raise ValueError(msg)
-
-    if block_scale_2d and tile_size_m % dtype.block_size != 0:
-        msg = (
-            f"Tile size M ({tile_size_m}) must be divisible by the block size "
-            f"({dtype.block_size}) when performing 2D block scaling"
-        )
-        raise ValueError(msg)
-
-    if x_amax is None:
-        x_amax = (
-            x.abs().max().float()
-            if dtype.scale_type != ScaleType.mx
-            else torch.ones(1, device=x.device, dtype=torch.float32)
-        )
-
-    padded_m = M + (block_size_m - M % block_size_m) % block_size_m
-    padded_n = N + (block_size_n - N % block_size_n) % block_size_n
-
-    x_e2m1 = torch.empty((padded_m, padded_n // 2), device=x.device, dtype=torch.uint8)
-    x_sf = torch.empty(
-        padded_m * padded_n // dtype.block_size,
-        device=x.device,
-        dtype=(
-            torch.uint8
-            if dtype.scale_type != ScaleType.nv
-            else dtype.scale_type.torch_dtype
-        ),
-    )
-
-    grid = lambda _: (  # noqa: E731
-        padded_m // block_size_m,
-        padded_n // block_size_n,
-    )
-
-    x_desc = TensorDescriptor.from_tensor(
-        x,
-        block_shape=[
-            tile_size_m if not transpose else tile_size_n,
-            tile_size_n if not transpose else tile_size_m,
-        ],
-    )
-    x_e2m1_desc = TensorDescriptor.from_tensor(
-        x_e2m1,
-        block_shape=[tile_size_m, tile_size_n // 2],
-    )
-    x_sf_desc = TensorDescriptor.from_tensor(
-        x_sf,
-        block_shape=[SCALE_MEGABLOCK_SIZE.value],
-    )
-
-    if had is not None:
-        had_block_size = had.shape[0]
-
-        if M % had_block_size != 0:
-            msg = (
-                f"The first dimension of A ({M}) must be divisible by the width of H "
-                f"({had_block_size})"
-            )
-            raise ValueError(msg)
-        if N % had_block_size != 0:
-            msg = (
-                f"The second dimension of A ({N}) must be divisible by the width of H "
-                f"({had_block_size})"
-            )
-            raise ValueError(msg)
-        if had.shape[0] != had.shape[1]:
-            msg = "H must be a square matrix"
-            raise ValueError(msg)
-        if (had.shape[0] & (had.shape[0] - 1)) != 0:
-            msg = "H must have dimensions that are a power of two"
-            raise ValueError(msg)
-
-        x_rht = torch.empty((M, N), device=x.device, dtype=torch.bfloat16)
-
-        h_desc = TensorDescriptor.from_tensor(
-            had,
-            block_shape=[had_block_size, had_block_size],
-        )
-        x_rht_desc = TensorDescriptor.from_tensor(
-            x_rht,
-            block_shape=[tile_size_m, tile_size_n],
-        )
-
-        rht_grid = lambda _: (  # noqa: E731
-            padded_m // tile_size_m,
-            padded_n // tile_size_n,
-        )
-
-        rht_kernel[rht_grid](
-            x_desc,
-            h_desc,
-            x_rht_desc,
-            BLOCK_SIZE_M=tile_size_m,
-            BLOCK_SIZE_N=tile_size_n,
-            TRANSPOSE=transpose,
-        )
-
-        transpose = False
-        x_amax = x_rht.abs().max().float()
-
-    quantization_kernel[grid](
-        x_rht_desc if had is not None else x_desc,
-        x_amax,
-        x_e2m1_desc,
-        x_sf_desc,
-        BLOCK_SIZE_M=block_size_m,
-        BLOCK_SIZE_N=block_size_n,
-        TILE_SIZE_M=tile_size_m,
-        TILE_SIZE_N=tile_size_n,
-        TRANSPOSE=transpose,
-        QUANTIZED_VALUE_TYPE=dtype.quantized_value_type.value,
-        ROUND_STYLE=round_style.value,
-        SCALE_TYPE=dtype.scale_type.value,
-        SCALE_GROUP_SIZE=dtype.block_size,
-        SCALE_RULE=scale_rule.value,
-        BLOCK_SCALE_2D=block_scale_2d,
-        RBITS=rbits,
-        USE_BLACKWELL_CVT_RN_INSTRUCTIONS=(
-            device_supports_cvt_rn_e2m1x2()
-            if use_blackwell_cvt_rn_instructions is None
-            else use_blackwell_cvt_rn_instructions
-        ),
-        USE_BLACKWELL_CVT_RS_INSTRUCTIONS=(
-            device_supports_cvt_rs_e2m1x4()
-            if use_blackwell_cvt_rs_instructions is None
-            else use_blackwell_cvt_rs_instructions
-        ),
-    )
-
-    if x_sf.dtype != dtype.scale_type.torch_dtype:
-        x_sf = x_sf.view(dtype.scale_type.torch_dtype)
-
-    if dtype == DataType.if4:
-        x_sf = from_blocked(x_sf, (padded_m, padded_n // dtype.block_size))
-
-    return x_e2m1, x_sf, x_amax

@@ -137,10 +137,10 @@ def test_backend_outputs_are_consistent(  # noqa: C901, PLR0912, PLR0915
             msg = f"Invalid input type: {input_type}"
             raise ValueError(msg)
 
-        if not backend_a_cls.is_supported(
+        if not backend_a_cls.can_quantize(
             x,
             config_a,
-        ) or not backend_b_cls.is_supported(
+        ) or not backend_b_cls.can_quantize(
             x,
             config_b,
         ):

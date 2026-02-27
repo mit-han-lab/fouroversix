@@ -85,10 +85,12 @@ class CUTLASSMatmulBackend(MatmulBackendBase):
             alpha = (
                 (input.amax * other.amax)
                 / (
-                    input.dtype.get_maximum_quantized_value(input.scale_rule)
-                    * input.dtype.get_maximum_scale_factor(input.scale_rule)
-                    * other.dtype.get_maximum_quantized_value(other.scale_rule)
-                    * other.dtype.get_maximum_scale_factor(other.scale_rule)
+                    input.dtype.quantized_value_type.get_maximum_value(input.scale_rule)
+                    * input.dtype.scale_type.get_maximum_value(input.scale_rule)
+                    * other.dtype.quantized_value_type.get_maximum_value(
+                        other.scale_rule,
+                    )
+                    * other.dtype.scale_type.get_maximum_value(other.scale_rule)
                 )
             ).to(torch.float32)
 

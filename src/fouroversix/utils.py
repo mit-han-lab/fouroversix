@@ -28,6 +28,7 @@ class DataType(str, Enum):
     float32 = "float32"
     mxfp4 = "mxfp4"
     nvfp4 = "nvfp4"
+    nvfp6_e3m2 = "nvfp6_e3m2"
     if4 = "if4"
 
     @property
@@ -37,19 +38,9 @@ class DataType(str, Enum):
         return {
             DataType.mxfp4: 32,
             DataType.nvfp4: 16,
+            DataType.nvfp6_e3m2: 16,
             DataType.if4: 16,
         }.get(self)
-
-    def get_maximum_quantized_value(self, scale_rule: "ScaleRule") -> int:
-        """Return the maximum allowed E2M1 value for the rule."""
-        return 4 if scale_rule == ScaleRule.static_4 else 6
-
-    def get_maximum_scale_factor(self, scale_rule: "ScaleRule") -> int:
-        """Return the maximum allowed E4M3 value for the rule."""
-        if self == DataType.if4:
-            return 448
-
-        return 448 if scale_rule in {ScaleRule.static_6, ScaleRule.static_4} else 256
 
     @property
     def quantized_value_type(self) -> "QuantizedValueType | None":
@@ -58,6 +49,7 @@ class DataType(str, Enum):
         return {
             DataType.mxfp4: QuantizedValueType.fp4,
             DataType.nvfp4: QuantizedValueType.fp4,
+            DataType.nvfp6_e3m2: QuantizedValueType.fp6_e3m2,
             DataType.if4: QuantizedValueType.if4,
         }.get(self)
 
@@ -68,6 +60,7 @@ class DataType(str, Enum):
         return {
             DataType.mxfp4: ScaleType.mx,
             DataType.nvfp4: ScaleType.nv,
+            DataType.nvfp6_e3m2: ScaleType.nv,
             DataType.if4: ScaleType.nv_if,
         }.get(self)
 
@@ -78,7 +71,7 @@ class DataType(str, Enum):
         if self == DataType.if4:
             return {scale_rule for scale_rule in ScaleRule if not scale_rule.is_static}
 
-        if self == DataType.mxfp4:
+        if self in {DataType.mxfp4, DataType.nvfp6_e3m2}:
             return {scale_rule for scale_rule in ScaleRule if scale_rule.is_static}
 
         if self == DataType.nvfp4:
@@ -195,6 +188,14 @@ class ScaleType(str, Enum):
     nv = "nv"
     nv_if = "nv_if"
 
+    def get_maximum_value(self, scale_rule: "ScaleRule") -> int | None:
+        """Return the maximum value for the scale type."""
+        return {
+            ScaleType.mx: None,
+            ScaleType.nv: 448 if scale_rule.is_static else 256,
+            ScaleType.nv_if: 448,
+        }.get(self)
+
     @property
     def torch_dtype(self) -> torch.dtype | None:
         """
@@ -214,10 +215,32 @@ class QuantizedValueType(str, Enum):
     Allowed types for quantized values.
 
     - `fp4`: FP4.
+    - `fp6_e3m2`: FP6 (E3M2).
     - `if4`: IF4.
-    - `int4`: Int4.
     """
 
     fp4 = "fp4"
+    fp6_e3m2 = "fp6_e3m2"
     if4 = "if4"
-    int4 = "int4"
+
+    def get_maximum_value(self, scale_rule: "ScaleRule") -> int:
+        """Return the maximum value for the quantized value type."""
+
+        if scale_rule == ScaleRule.static_4:
+            return 4
+
+        return {
+            QuantizedValueType.fp4: 6,
+            QuantizedValueType.fp6_e3m2: 28,
+            QuantizedValueType.if4: 6,
+        }.get(self)
+
+    @property
+    def packing_factor(self) -> int:
+        """Return the packing factor for the quantized value type."""
+
+        return {
+            QuantizedValueType.fp4: 2,
+            QuantizedValueType.fp6_e3m2: 1,
+            QuantizedValueType.if4: 2,
+        }.get(self)

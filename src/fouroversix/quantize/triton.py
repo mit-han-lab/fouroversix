@@ -5,7 +5,7 @@ from fouroversix.quantize.backend import QuantizeBackendBase
 from fouroversix.quantize.config import QuantizationConfig
 from fouroversix.quantize.quantized_tensor import QuantizedTensor
 from fouroversix.quantize.utils import get_rht_matrix
-from fouroversix.utils import DataType
+from fouroversix.utils import BLACKWELL_SM_IDS, DataType
 
 
 class TritonQuantizeBackend(QuantizeBackendBase):
@@ -22,16 +22,43 @@ class TritonQuantizeBackend(QuantizeBackendBase):
         return torch.cuda.is_available()
 
     @classmethod
-    def is_supported(cls, x: torch.Tensor, config: QuantizationConfig) -> bool:
+    def can_dequantize_values(cls, tensor: QuantizedTensor) -> bool:
+        """
+        Return True if the Triton backend can dequantize the values of the given
+        quantized tensor.
+        """
+
+        # FP6 dequantize kernel only works on Blackwell
+        return (
+            tensor.dtype == DataType.nvfp6_e3m2
+            and torch.cuda.get_device_capability()[0] in BLACKWELL_SM_IDS
+        )
+
+    @classmethod
+    def can_quantize(cls, x: torch.Tensor, config: QuantizationConfig) -> bool:
         """
         Return True if the Triton backend supports the given input and quantization
         configuration.
         """
 
-        if not super().is_supported(x, config):
+        if not super().can_quantize(x, config):
             return False
 
         return x.device.type == "cuda"
+
+    @classmethod
+    def dequantize_values(
+        cls,
+        tensor: QuantizedTensor,
+        *,
+        dtype: torch.dtype = torch.bfloat16,
+    ) -> torch.Tensor:
+        if tensor.dtype == DataType.nvfp6_e3m2:
+            from fouroversix.kernels.triton import dequantize_values
+
+            return dequantize_values(tensor, dtype=dtype)
+
+        return super().dequantize_values(tensor, dtype=dtype)
 
     @classmethod
     def quantize_to_fp4(
@@ -51,7 +78,7 @@ class TritonQuantizeBackend(QuantizeBackendBase):
 
         """
 
-        from .kernels import quantize_to_fp4
+        from fouroversix.kernels.triton import quantize_to_fp4
 
         values, scale_factors, amax = quantize_to_fp4(
             x,

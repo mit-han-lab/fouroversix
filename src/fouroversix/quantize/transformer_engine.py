@@ -37,13 +37,13 @@ class TransformerEngineQuantizeBackend(QuantizeBackendBase):
         return True
 
     @classmethod
-    def is_supported(cls, x: torch.Tensor, config: QuantizationConfig) -> bool:
+    def can_quantize(cls, x: torch.Tensor, config: QuantizationConfig) -> bool:
         """
         Return True if the Transformer Engine backend supports the given input and
         quantization configuration.
         """
 
-        if not super().is_supported(x, config):
+        if not super().can_quantize(x, config):
             return False
 
         if config.dtype != DataType.nvfp4 or config.scale_rule != ScaleRule.static_6:

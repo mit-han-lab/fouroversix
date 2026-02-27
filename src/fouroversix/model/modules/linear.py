@@ -153,7 +153,7 @@ class FourOverSixLinear(nn.Linear):
                         self.out_features
                         * self.in_features
                         // self.config.dtype.block_size,
-                        dtype=self.config.dtype.scale_dtype,
+                        dtype=self.config.dtype.scale_type.torch_dtype,
                     ),
                     requires_grad=False,
                 ),

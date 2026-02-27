@@ -1,7 +1,6 @@
 import torch
 from fouroversix.matmul.backend import MatmulBackendBase
-from fouroversix.quantize import QuantizedTensor
-from fouroversix.quantize.quantized_tensor import from_blocked
+from fouroversix.quantize import QuantizedTensor, from_blocked
 from fouroversix.utils import DataType, device_supports_cvt_rn_e2m1x2
 
 
@@ -120,10 +119,14 @@ class TritonMatmulBackend(MatmulBackendBase):
             BLOCK_SIZE_N=64,
             BLOCK_SIZE_K=32,
             GROUP_SIZE_M=6,
-            A_E2M1_MAX_VALUE=input.dtype.get_maximum_quantized_value(input.scale_rule),
-            B_E2M1_MAX_VALUE=other.dtype.get_maximum_quantized_value(other.scale_rule),
-            A_E4M3_MAX_VALUE=input.dtype.get_maximum_scale_factor(input.scale_rule),
-            B_E4M3_MAX_VALUE=other.dtype.get_maximum_scale_factor(other.scale_rule),
+            A_E2M1_MAX_VALUE=input.dtype.quantized_value_type.get_maximum_value(
+                input.scale_rule,
+            ),
+            B_E2M1_MAX_VALUE=other.dtype.quantized_value_type.get_maximum_value(
+                other.scale_rule,
+            ),
+            A_E4M3_MAX_VALUE=input.dtype.scale_type.get_maximum_value(input.scale_rule),
+            B_E4M3_MAX_VALUE=other.dtype.scale_type.get_maximum_value(other.scale_rule),
             DTYPE=input.dtype.value,
             INTERMEDIATE_DTYPE=tl.float16,
             OUT_DTYPE=tl.bfloat16,

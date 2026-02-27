@@ -33,13 +33,13 @@ class CUDAQuantizeBackend(QuantizeBackendBase):
         return True
 
     @classmethod
-    def is_supported(cls, x: torch.Tensor, config: QuantizationConfig) -> bool:
+    def can_quantize(cls, x: torch.Tensor, config: QuantizationConfig) -> bool:
         """
         Return True if the CUDA backend supports the given input and quantization
         configuration.
         """
 
-        if not super().is_supported(x, config):
+        if not super().can_quantize(x, config):
             return False
 
         return (

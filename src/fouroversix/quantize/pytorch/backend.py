@@ -21,7 +21,7 @@ class PyTorchQuantizeBackend(QuantizeBackendBase):
         return True
 
     @classmethod
-    def is_supported(
+    def can_quantize(
         cls,
         x: torch.Tensor,
         config: QuantizationConfig,
@@ -31,7 +31,10 @@ class PyTorchQuantizeBackend(QuantizeBackendBase):
         configuration.
         """
 
-        return super().is_supported(x, config)
+        if not super().can_quantize(x, config):
+            return False
+
+        return config.dtype != DataType.nvfp6_e3m2
 
     @classmethod
     def quantize_to_fp4(
@@ -87,8 +90,8 @@ class PyTorchQuantizeBackend(QuantizeBackendBase):
                 device=x.device,
                 dtype=(
                     torch.uint8
-                    if config.dtype.scale_dtype == torch.float8_e8m0fnu
-                    else config.dtype.scale_dtype
+                    if config.dtype.scale_type.torch_dtype == torch.float8_e8m0fnu
+                    else config.dtype.scale_type.torch_dtype
                 ),
             )
             amax = torch.zeros(1, device=x.device, dtype=torch.float32)

@@ -1,5 +1,5 @@
 import torch
-from fouroversix.quantize import QuantizedTensor
+from fouroversix.quantize import QuantizedTensor, dequantize
 from fouroversix.utils import DataType
 
 from .backend import MatmulBackendBase
@@ -30,8 +30,8 @@ class PyTorchMatmulBackend(MatmulBackendBase):
         out_shape = (input.original_shape[0], other.original_shape[0])
 
         out = torch.matmul(
-            input.dequantize(dtype=torch.float32),
-            other.dequantize(dtype=torch.float32).T,
+            dequantize(input, dtype=torch.float32),
+            dequantize(other, dtype=torch.float32).T,
         ).to(out_dtype.torch_dtype)
 
         if out.shape != out_shape:
