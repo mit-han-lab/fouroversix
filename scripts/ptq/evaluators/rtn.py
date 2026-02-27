@@ -82,6 +82,9 @@ class RTNEvaluatorImpl(PTQEvaluator):
                 trust_remote_code=trust_remote_code,
             )
 
+            if hasattr(hf_quantization_config, "pre_quantized_model_config_type"):
+                delattr(hf_quantization_config, "pre_quantized_model_config_type")
+
             model.save_pretrained(model_save_path, **save_kwargs)
         else:
             model = AutoModelForCausalLM.from_pretrained(
