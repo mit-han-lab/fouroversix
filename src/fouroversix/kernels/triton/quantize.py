@@ -23,6 +23,7 @@ from .constants import (
 )
 from .fp4 import convert_to_e2m1x2, convert_to_e2m1x2_and_quantized_fp16
 from .fp6 import convert_to_e2m3x2, convert_to_e3m2x2
+from .fp8 import convert_e4m3_to_fp32, convert_to_e4m3_with_rtn
 
 
 @triton.jit  # noqa: RET503
@@ -37,6 +38,7 @@ def prepare_inputs_for_block_scaling(
     SCALE_TYPE: tl.constexpr,
     SCALE_GROUP_SIZE: tl.constexpr,
     SCALE_EXPANSION_FACTOR: tl.constexpr,
+    MAJOR_COMPUTE_CAPABILITY: tl.constexpr,
 ) -> tuple[tl.tensor, tl.tensor, tl.tensor]:
     x_amax = tl.load(x_amax_ptr)
 
@@ -131,7 +133,7 @@ def prepare_inputs_for_block_scaling(
         if SCALE_EXPANSION_FACTOR is not None:
             x_scales_hp = x_scales_hp * SCALE_EXPANSION_FACTOR
 
-        x_scales = x_scales_hp.to(tl.float8e4nv)
+        x_scales = convert_to_e4m3_with_rtn(x_scales_hp, MAJOR_COMPUTE_CAPABILITY)
 
         decode_scale = tl.div_rn(
             1,
@@ -141,7 +143,13 @@ def prepare_inputs_for_block_scaling(
         x_block_scaled = tl.where(
             x_scales.expand_dims(2).cast(tl.uint8, bitcast=True) != 0,
             x_scale_blocks
-            * tl.div_rn(1, decode_scale * x_scales.to(x_amax.dtype).expand_dims(2)),
+            * tl.div_rn(
+                1,
+                decode_scale
+                * convert_e4m3_to_fp32(x_scales, MAJOR_COMPUTE_CAPABILITY)
+                .to(x_amax.dtype)
+                .expand_dims(2),
+            ),
             0,
         )
 
@@ -162,8 +170,7 @@ def block_scaled_quantization_kernel(
     SCALE_GROUP_SIZE: tl.constexpr,
     BLOCK_SCALE_2D: tl.constexpr,
     RBITS: tl.constexpr,
-    USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
-    USE_BLACKWELL_CVT_RS_INSTRUCTIONS: tl.constexpr,
+    MAJOR_COMPUTE_CAPABILITY: tl.constexpr,
 ) -> None:
     x_block_scaled, x_scales, _ = prepare_inputs_for_block_scaling(
         x_block,
@@ -176,6 +183,7 @@ def block_scaled_quantization_kernel(
         SCALE_TYPE,
         SCALE_GROUP_SIZE,
         None,
+        MAJOR_COMPUTE_CAPABILITY,
     )
 
     if QUANTIZED_VALUE_TYPE == QUANTIZED_VALUE_TYPE_FP4:
@@ -192,18 +200,17 @@ def block_scaled_quantization_kernel(
             BLOCK_SIZE_N,
             ROUND_STYLE,
             RBITS,
-            USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
-            USE_BLACKWELL_CVT_RS_INSTRUCTIONS,
+            MAJOR_COMPUTE_CAPABILITY,
         )
     elif QUANTIZED_VALUE_TYPE == QUANTIZED_VALUE_TYPE_FP6_E2M3:
         x_e2m1 = convert_to_e2m3x2(
             x_block_scaled.reshape(BLOCK_SIZE_M, BLOCK_SIZE_N),
-            USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+            MAJOR_COMPUTE_CAPABILITY,
         )
     elif QUANTIZED_VALUE_TYPE == QUANTIZED_VALUE_TYPE_FP6_E3M2:
         x_e2m1 = convert_to_e3m2x2(
             x_block_scaled.reshape(BLOCK_SIZE_M, BLOCK_SIZE_N),
-            USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+            MAJOR_COMPUTE_CAPABILITY,
         )
 
     return x_e2m1, x_scales
@@ -221,8 +228,7 @@ def nvfp4_fouroversix_quantization_kernel(
     SCALE_RULE: tl.constexpr,
     BLOCK_SCALE_2D: tl.constexpr,
     RBITS: tl.constexpr,
-    USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
-    USE_BLACKWELL_CVT_RS_INSTRUCTIONS: tl.constexpr,
+    MAJOR_COMPUTE_CAPABILITY: tl.constexpr,
 ) -> None:
     x_scale_blocks = x_block.reshape(
         BLOCK_SIZE_M,
@@ -241,6 +247,7 @@ def nvfp4_fouroversix_quantization_kernel(
         SCALE_TYPE,
         SCALE_GROUP_SIZE,
         None,
+        MAJOR_COMPUTE_CAPABILITY,
     )
 
     x_block_scaled_6_b1, x_block_scaled_6_b2 = x_block_scaled_6.reshape(
@@ -257,12 +264,15 @@ def nvfp4_fouroversix_quantization_kernel(
         ROUND_STYLE,
         SCALE_GROUP_SIZE,
         RBITS,
-        USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
-        USE_BLACKWELL_CVT_RS_INSTRUCTIONS,
+        MAJOR_COMPUTE_CAPABILITY,
     )
 
     x_dequantized_6 = tl.div_rn(
-        x_fp16_6.to(x_amax.dtype) * x_scales_6.to(x_amax.dtype).expand_dims(2) * x_amax,
+        x_fp16_6.to(x_amax.dtype)
+        * convert_e4m3_to_fp32(x_scales_6, MAJOR_COMPUTE_CAPABILITY)
+        .to(x_amax.dtype)
+        .expand_dims(2)
+        * x_amax,
         E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX,
     )
 
@@ -277,6 +287,7 @@ def nvfp4_fouroversix_quantization_kernel(
         SCALE_TYPE,
         SCALE_GROUP_SIZE,
         1.5,
+        MAJOR_COMPUTE_CAPABILITY,
     )
 
     x_block_scaled_4_b1, x_block_scaled_4_b2 = x_block_scaled_4.reshape(
@@ -293,12 +304,15 @@ def nvfp4_fouroversix_quantization_kernel(
         ROUND_STYLE,
         SCALE_GROUP_SIZE,
         RBITS,
-        USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
-        USE_BLACKWELL_CVT_RS_INSTRUCTIONS,
+        MAJOR_COMPUTE_CAPABILITY,
     )
 
     x_dequantized_4 = tl.div_rn(
-        x_fp16_4.to(x_amax.dtype) * x_scales_4.to(x_amax.dtype).expand_dims(2) * x_amax,
+        x_fp16_4.to(x_amax.dtype)
+        * convert_e4m3_to_fp32(x_scales_4, MAJOR_COMPUTE_CAPABILITY)
+        .to(x_amax.dtype)
+        .expand_dims(2)
+        * x_amax,
         E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX,
     )
 
@@ -385,8 +399,7 @@ def if4_quantization_kernel(
     SCALE_RULE: tl.constexpr,
     BLOCK_SCALE_2D: tl.constexpr,
     RBITS: tl.constexpr,
-    USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
-    USE_BLACKWELL_CVT_RS_INSTRUCTIONS: tl.constexpr,
+    MAJOR_COMPUTE_CAPABILITY: tl.constexpr,
 ) -> None:
     x_amax = tl.load(x_amax_ptr)
     x_scale_blocks = x_block.reshape(
@@ -428,7 +441,7 @@ def if4_quantization_kernel(
             .reshape(BLOCK_SIZE_M, BLOCK_SIZE_N // SCALE_GROUP_SIZE)
         )
 
-    x_scales = x_scales_hp.to(tl.float8e4nv)
+    x_scales = convert_to_e4m3_with_rtn(x_scales_hp, MAJOR_COMPUTE_CAPABILITY)
 
     decode_scale = tl.div_rn(
         1,
@@ -436,9 +449,15 @@ def if4_quantization_kernel(
     )
 
     x_block_scaled = tl.where(
-        x_scales.expand_dims(2).to(x_amax.dtype) != 0,
+        x_scales.expand_dims(2) != 0,
         x_scale_blocks
-        * tl.div_rn(1, decode_scale * x_scales.to(x_amax.dtype).expand_dims(2)),
+        * tl.div_rn(
+            1,
+            decode_scale
+            * convert_e4m3_to_fp32(x_scales, MAJOR_COMPUTE_CAPABILITY)
+            .to(x_amax.dtype)
+            .expand_dims(2),
+        ),
         0,
     )
 
@@ -456,8 +475,7 @@ def if4_quantization_kernel(
         ROUND_STYLE,
         SCALE_GROUP_SIZE,
         RBITS,
-        USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
-        USE_BLACKWELL_CVT_RS_INSTRUCTIONS,
+        MAJOR_COMPUTE_CAPABILITY,
     )
 
     # Int and fp need different amounts of randomness because int gets scaled by 7/6
@@ -486,12 +504,21 @@ def if4_quantization_kernel(
 
     x_int = (x_int_b2 << 4) | x_int_b1
     x_int_dequantized = tl.div_rn(
-        x_int_hp * (6 / 7) * x_scales.to(x_amax.dtype).expand_dims(2) * x_amax,
+        x_int_hp
+        * (6 / 7)
+        * convert_e4m3_to_fp32(x_scales, MAJOR_COMPUTE_CAPABILITY)
+        .to(x_amax.dtype)
+        .expand_dims(2)
+        * x_amax,
         E2M1_MAX_VALUE * E4M3_MAX_VALUE,
     )
 
     x_fp_dequantized = tl.div_rn(
-        x_fp_fp16.to(x_amax.dtype) * x_scales.to(x_amax.dtype).expand_dims(2) * x_amax,
+        x_fp_fp16.to(x_amax.dtype)
+        * convert_e4m3_to_fp32(x_scales, MAJOR_COMPUTE_CAPABILITY)
+        .to(x_amax.dtype)
+        .expand_dims(2)
+        * x_amax,
         E2M1_MAX_VALUE * E4M3_MAX_VALUE,
     )
 
@@ -563,11 +590,8 @@ def if4_quantization_kernel(
         ),
     ).reshape(BLOCK_SIZE_M, BLOCK_SIZE_N // 2)
 
-    x_scales = tl.where(
-        int_error < fp_error,
-        x_scales.to(tl.uint8, bitcast=True) + 128,
-        x_scales.to(tl.uint8, bitcast=True),
-    )
+    x_scales = tl.where(int_error < fp_error, x_scales + 128, x_scales)
+
     return x_values, x_scales
 
 
@@ -593,8 +617,7 @@ def quantization_kernel(
     SCALE_RULE: tl.constexpr,
     BLOCK_SCALE_2D: tl.constexpr,
     RBITS: tl.constexpr,
-    USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
-    USE_BLACKWELL_CVT_RS_INSTRUCTIONS: tl.constexpr,
+    MAJOR_COMPUTE_CAPABILITY: tl.constexpr,
 ) -> None:
     pid_m = tl.program_id(0)
     pid_n = tl.program_id(1)
@@ -606,11 +629,10 @@ def quantization_kernel(
     NUM_TILES_N: tl.constexpr = BLOCK_SIZE_N // TILE_SIZE_N
     SF_PER_TILE_M: tl.constexpr = TILE_SIZE_M
     SF_PER_TILE_N: tl.constexpr = TILE_SIZE_N // SCALE_GROUP_SIZE
-    SF_DTYPE: tl.constexpr = tl.float8e4nv if SCALE_TYPE == SCALE_TYPE_NV else tl.uint8
 
     output_scales = tl.zeros(
         (NUM_TILES_M, NUM_TILES_N, SF_PER_TILE_M, SF_PER_TILE_N),
-        dtype=SF_DTYPE,
+        dtype=tl.uint8,
     )
 
     output_scales_idx = (
@@ -652,8 +674,7 @@ def quantization_kernel(
                     SCALE_GROUP_SIZE,
                     BLOCK_SCALE_2D,
                     RBITS,
-                    USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
-                    USE_BLACKWELL_CVT_RS_INSTRUCTIONS,
+                    MAJOR_COMPUTE_CAPABILITY,
                 )
             elif SCALE_TYPE == SCALE_TYPE_NV_IF:
                 x_e2m1, x_scales = if4_quantization_kernel(
@@ -666,8 +687,7 @@ def quantization_kernel(
                     SCALE_RULE,
                     BLOCK_SCALE_2D,
                     RBITS,
-                    USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
-                    USE_BLACKWELL_CVT_RS_INSTRUCTIONS,
+                    MAJOR_COMPUTE_CAPABILITY,
                 )
             else:
                 x_e2m1, x_scales = nvfp4_fouroversix_quantization_kernel(
@@ -681,8 +701,7 @@ def quantization_kernel(
                     SCALE_RULE,
                     BLOCK_SCALE_2D,
                     RBITS,
-                    USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
-                    USE_BLACKWELL_CVT_RS_INSTRUCTIONS,
+                    MAJOR_COMPUTE_CAPABILITY,
                 )
 
             x_e2m1_desc.store(

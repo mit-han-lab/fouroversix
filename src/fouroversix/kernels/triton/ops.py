@@ -4,14 +4,7 @@ import torch
 import triton
 import triton.language as tl
 from fouroversix.quantize import QuantizedTensor, from_blocked
-from fouroversix.utils import (
-    DataType,
-    RoundStyle,
-    ScaleRule,
-    ScaleType,
-    device_supports_cvt_rn_e2m1x2,
-    device_supports_cvt_rs_e2m1x4,
-)
+from fouroversix.utils import DataType, RoundStyle, ScaleRule, ScaleType
 from triton.tools.tensor_descriptor import TensorDescriptor
 
 from .constants import SCALE_MEGABLOCK_SIZE
@@ -21,7 +14,7 @@ from .quantize import quantization_kernel
 from .rht import rht_kernel
 
 
-def quantize_to_fp4(  # noqa: C901
+def quantize_to_fp4(  # noqa: C901, PLR0915
     x: torch.Tensor,
     x_amax: torch.Tensor | None = None,
     had: torch.Tensor | None = None,
@@ -32,9 +25,14 @@ def quantize_to_fp4(  # noqa: C901
     block_scale_2d: bool = False,
     transpose: bool = False,
     rbits: int = -1,
-    use_blackwell_cvt_rn_instructions: bool | None = None,
-    use_blackwell_cvt_rs_instructions: bool | None = None,
+    major_compute_capability: int | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
+    major_compute_capability = (
+        torch.cuda.get_device_capability()[0]
+        if major_compute_capability is None
+        else major_compute_capability
+    )
+
     if transpose:
         N, M = x.shape
     else:
@@ -78,11 +76,7 @@ def quantize_to_fp4(  # noqa: C901
     x_sf = torch.empty(
         padded_m * padded_n // dtype.block_size,
         device=x.device,
-        dtype=(
-            torch.uint8
-            if dtype.scale_type != ScaleType.nv
-            else dtype.scale_type.torch_dtype
-        ),
+        dtype=torch.uint8,
     )
 
     grid = lambda _: (  # noqa: E731
@@ -179,16 +173,7 @@ def quantize_to_fp4(  # noqa: C901
         SCALE_RULE=scale_rule.value,
         BLOCK_SCALE_2D=block_scale_2d,
         RBITS=rbits,
-        USE_BLACKWELL_CVT_RN_INSTRUCTIONS=(
-            device_supports_cvt_rn_e2m1x2()
-            if use_blackwell_cvt_rn_instructions is None
-            else use_blackwell_cvt_rn_instructions
-        ),
-        USE_BLACKWELL_CVT_RS_INSTRUCTIONS=(
-            device_supports_cvt_rs_e2m1x4()
-            if use_blackwell_cvt_rs_instructions is None
-            else use_blackwell_cvt_rs_instructions
-        ),
+        MAJOR_COMPUTE_CAPABILITY=major_compute_capability,
     )
 
     if x_sf.dtype != dtype.scale_type.torch_dtype:
@@ -204,8 +189,14 @@ def dequantize_values(
     tensor: QuantizedTensor,
     *,
     dtype: torch.dtype = torch.bfloat16,
-    use_blackwell_cvt_rn_instructions: bool | None = None,
+    major_compute_capability: int | None = None,
 ) -> torch.Tensor:
+    major_compute_capability = (
+        torch.cuda.get_device_capability()[0]
+        if major_compute_capability is None
+        else major_compute_capability
+    )
+
     block_size_m = 128
     block_size_n = 64
 
@@ -250,11 +241,7 @@ def dequantize_values(
         QUANTIZED_VALUE_PACKING_FACTOR=tensor.dtype.quantized_value_type.packing_factor,
         SCALE_GROUP_SIZE=tensor.dtype.block_size,
         OUT_DTYPE=tl.float16,
-        USE_BLACKWELL_CVT_RN_INSTRUCTIONS=(
-            device_supports_cvt_rn_e2m1x2()
-            if use_blackwell_cvt_rn_instructions is None
-            else use_blackwell_cvt_rn_instructions
-        ),
+        MAJOR_COMPUTE_CAPABILITY=major_compute_capability,
     )
 
     return output.to(dtype)
@@ -265,8 +252,14 @@ def matmul(
     other: QuantizedTensor,
     *,
     out_dtype: DataType,
-    use_blackwell_cvt_rn_instructions: bool | None = None,
+    major_compute_capability: int | None = None,
 ) -> torch.Tensor:
+    major_compute_capability = (
+        torch.cuda.get_device_capability()[0]
+        if major_compute_capability is None
+        else major_compute_capability
+    )
+
     m = input.original_shape[0]
     n = other.original_shape[0]
     k = input.original_shape[1]
@@ -308,10 +301,10 @@ def matmul(
 
     matmul_kernel[grid](
         input.values,
-        input_scale_factors,
+        input_scale_factors.view(torch.uint8),
         input.amax,
         other.values,
-        other_scale_factors,
+        other_scale_factors.view(torch.uint8),
         other.amax,
         output,
         m,
@@ -351,11 +344,7 @@ def matmul(
         OTHER_SCALE_GROUP_SIZE=other.dtype.block_size,
         INTERMEDIATE_DTYPE=tl.float16,
         OUT_DTYPE=tl.bfloat16,
-        USE_BLACKWELL_CVT_RN_INSTRUCTIONS=(
-            device_supports_cvt_rn_e2m1x2()
-            if use_blackwell_cvt_rn_instructions is None
-            else use_blackwell_cvt_rn_instructions
-        ),
+        MAJOR_COMPUTE_CAPABILITY=major_compute_capability,
     )
 
     return output

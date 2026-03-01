@@ -1,23 +1,13 @@
-import functools
 from enum import Enum
 
 import torch
 
+SM_80 = 8
 SM_100 = 10
 SM_110 = 11
 SM_120 = 12
 
 BLACKWELL_SM_IDS = {SM_100, SM_110, SM_120}
-
-
-@functools.lru_cache
-def device_supports_cvt_rn_e2m1x2() -> bool:
-    return torch.cuda.get_device_capability()[0] in BLACKWELL_SM_IDS
-
-
-@functools.lru_cache
-def device_supports_cvt_rs_e2m1x4() -> bool:
-    return torch.cuda.get_device_capability()[0] == SM_100
 
 
 class DataType(str, Enum):

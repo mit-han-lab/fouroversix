@@ -7,7 +7,7 @@ import modal
 
 from ..resources import Dependency, app, get_image
 
-img = get_image(dependencies=[Dependency.transformer_engine, Dependency.fouroversix])
+img = get_image(dependencies=[Dependency.fouroversix, Dependency.transformer_engine])
 
 with img.imports():
     import torch

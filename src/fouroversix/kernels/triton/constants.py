@@ -30,6 +30,11 @@ SCALE_TYPE_MX = tl.constexpr(ScaleType.mx.value)
 SCALE_TYPE_NV = tl.constexpr(ScaleType.nv.value)
 SCALE_TYPE_NV_IF = tl.constexpr(ScaleType.nv_if.value)
 
+SM_80 = tl.constexpr(8)
+SM_100 = tl.constexpr(10)
+SM_110 = tl.constexpr(11)
+SM_120 = tl.constexpr(12)
+
 QUANTIZED_VALUE_TYPE_FP4 = tl.constexpr(QuantizedValueType.fp4.value)
 QUANTIZED_VALUE_TYPE_FP6_E2M3 = tl.constexpr(QuantizedValueType.fp6_e2m3.value)
 QUANTIZED_VALUE_TYPE_FP6_E3M2 = tl.constexpr(QuantizedValueType.fp6_e3m2.value)

@@ -14,6 +14,7 @@ from fouroversix import (
 )
 from fouroversix.quantize import from_blocked
 from fouroversix.quantize.frontend import AVAILABLE_BACKENDS
+from fouroversix.utils import SM_80, SM_100, SM_120
 
 MAE_MSE_MISMATCH_TOLERANCE = 1e-3
 NUM_RANDOM_SEEDS = 10
@@ -41,17 +42,15 @@ NUM_RANDOM_SEEDS = 10
             [
                 (
                     (QuantizeBackend.triton, {}),
-                    (
-                        QuantizeBackend.triton,
-                        {"use_blackwell_cvt_rn_instructions": True},
-                    ),
+                    (QuantizeBackend.triton, {"major_compute_capability": SM_120}),
                 ),
                 (
                     (QuantizeBackend.triton, {}),
-                    (
-                        QuantizeBackend.triton,
-                        {"use_blackwell_cvt_rn_instructions": False},
-                    ),
+                    (QuantizeBackend.triton, {"major_compute_capability": SM_100}),
+                ),
+                (
+                    (QuantizeBackend.triton, {}),
+                    (QuantizeBackend.triton, {"major_compute_capability": SM_80}),
                 ),
             ],
         )
@@ -88,6 +87,12 @@ def test_backend_outputs_are_consistent(  # noqa: C901, PLR0912, PLR0915
     transpose: str,
 ) -> None:
     torch.set_printoptions(precision=10)
+
+    if (
+        kwargs_a.get("major_compute_capability") is not None
+        or kwargs_b.get("major_compute_capability") is not None
+    ) and torch.cuda.get_device_capability()[0] != SM_100:
+        pytest.skip("Can only simulate different major compute capabilities on SM_100")
 
     backend_a_cls = AVAILABLE_BACKENDS[backend_a]
     backend_b_cls = AVAILABLE_BACKENDS[backend_b]
@@ -199,6 +204,7 @@ def test_backend_outputs_are_consistent(  # noqa: C901, PLR0912, PLR0915
 
             [i, *_], [j, *_] = torch.where(sf_a != sf_b)
             print(backend_a)
+            print("amax", quantized_a.amax)
             print("sf", sf_a[i, j])
             print("e2m1", quantized_a.values[i, 8 * j : 8 * (j + 1)])
             print(backend_b)
@@ -246,7 +252,7 @@ def test_stochastic_rounding() -> None:
             {
                 "backend": "triton",
                 "scale_rule": "static_6",
-                "kwargs": {"use_blackwell_cvt_rs_instructions": False},
+                "kwargs": {"major_compute_capability": SM_120},
             },
             141,
         ),
@@ -254,7 +260,7 @@ def test_stochastic_rounding() -> None:
             {
                 "backend": "triton",
                 "scale_rule": "mse",
-                "kwargs": {"use_blackwell_cvt_rs_instructions": False},
+                "kwargs": {"major_compute_capability": SM_120},
             },
             126,
         ),
@@ -262,10 +268,7 @@ def test_stochastic_rounding() -> None:
             {
                 "backend": "triton",
                 "scale_rule": "static_6",
-                "kwargs": {
-                    "use_blackwell_cvt_rn_instructions": False,
-                    "use_blackwell_cvt_rs_instructions": False,
-                },
+                "kwargs": {"major_compute_capability": SM_80},
             },
             141,
         ),
@@ -273,10 +276,7 @@ def test_stochastic_rounding() -> None:
             {
                 "backend": "triton",
                 "scale_rule": "mse",
-                "kwargs": {
-                    "use_blackwell_cvt_rn_instructions": False,
-                    "use_blackwell_cvt_rs_instructions": False,
-                },
+                "kwargs": {"major_compute_capability": SM_80},
             },
             126,
         ),

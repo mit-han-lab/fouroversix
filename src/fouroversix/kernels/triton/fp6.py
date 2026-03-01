@@ -1,13 +1,19 @@
 import triton
 import triton.language as tl
 
+from .constants import SM_100, SM_110, SM_120
+
 
 @triton.jit  # noqa: RET503
 def convert_to_e3m2x2_with_rtn(
     x_block_scaled,
-    USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
+    MAJOR_COMPUTE_CAPABILITY: tl.constexpr,
 ) -> None:
-    if USE_BLACKWELL_CVT_RN_INSTRUCTIONS:
+    if (
+        MAJOR_COMPUTE_CAPABILITY == SM_100
+        or MAJOR_COMPUTE_CAPABILITY == SM_110
+        or MAJOR_COMPUTE_CAPABILITY == SM_120
+    ):
         return tl.inline_asm_elementwise(
             asm="""
             {
@@ -28,20 +34,24 @@ def convert_to_e3m2x2_with_rtn(
 @triton.jit
 def convert_to_e3m2x2(
     x_block_scaled,
-    USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
+    MAJOR_COMPUTE_CAPABILITY: tl.constexpr,
 ) -> None:
     return convert_to_e3m2x2_with_rtn(
         x_block_scaled,
-        USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+        MAJOR_COMPUTE_CAPABILITY,
     )
 
 
 @triton.jit  # noqa: RET503
 def convert_e3m2x2_to_fp16(
     x_block,
-    USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
+    MAJOR_COMPUTE_CAPABILITY: tl.constexpr,
 ) -> None:
-    if USE_BLACKWELL_CVT_RN_INSTRUCTIONS:
+    if (
+        MAJOR_COMPUTE_CAPABILITY == SM_100
+        or MAJOR_COMPUTE_CAPABILITY == SM_110
+        or MAJOR_COMPUTE_CAPABILITY == SM_120
+    ):
         return tl.inline_asm_elementwise(
             asm="""
             {
@@ -62,9 +72,13 @@ def convert_e3m2x2_to_fp16(
 @triton.jit  # noqa: RET503
 def convert_to_e2m3x2_with_rtn(
     x_block_scaled,
-    USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
+    MAJOR_COMPUTE_CAPABILITY: tl.constexpr,
 ) -> None:
-    if USE_BLACKWELL_CVT_RN_INSTRUCTIONS:
+    if (
+        MAJOR_COMPUTE_CAPABILITY == SM_100
+        or MAJOR_COMPUTE_CAPABILITY == SM_110
+        or MAJOR_COMPUTE_CAPABILITY == SM_120
+    ):
         return tl.inline_asm_elementwise(
             asm="""
             {
@@ -85,20 +99,24 @@ def convert_to_e2m3x2_with_rtn(
 @triton.jit
 def convert_to_e2m3x2(
     x_block_scaled,
-    USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
+    MAJOR_COMPUTE_CAPABILITY: tl.constexpr,
 ) -> None:
     return convert_to_e2m3x2_with_rtn(
         x_block_scaled,
-        USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+        MAJOR_COMPUTE_CAPABILITY,
     )
 
 
 @triton.jit  # noqa: RET503
 def convert_e2m3x2_to_fp16(
     x_block,
-    USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
+    MAJOR_COMPUTE_CAPABILITY: tl.constexpr,
 ) -> None:
-    if USE_BLACKWELL_CVT_RN_INSTRUCTIONS:
+    if (
+        MAJOR_COMPUTE_CAPABILITY == SM_100
+        or MAJOR_COMPUTE_CAPABILITY == SM_110
+        or MAJOR_COMPUTE_CAPABILITY == SM_120
+    ):
         return tl.inline_asm_elementwise(
             asm="""
             {

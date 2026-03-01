@@ -2,6 +2,7 @@ import triton
 import triton.language as tl
 
 from .dequantize import dequantize_to_fp16_kernel
+from .fp8 import convert_e4m3_to_fp32
 from .if4 import Q_BLOCK_SIZE
 
 
@@ -43,7 +44,7 @@ def matmul_kernel(
     OTHER_SCALE_GROUP_SIZE: tl.constexpr,
     INTERMEDIATE_DTYPE: tl.constexpr,
     OUT_DTYPE: tl.constexpr,
-    USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
+    MAJOR_COMPUTE_CAPABILITY: tl.constexpr,
 ) -> None:
     pid = tl.program_id(0)
     num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
@@ -121,7 +122,7 @@ def matmul_kernel(
             BLOCK_SIZE_M,
             BLOCK_SIZE_K,
             QUANTIZED_VALUE_TYPE=INPUT_QUANTIZED_VALUE_TYPE,
-            USE_BLACKWELL_CVT_RN_INSTRUCTIONS=USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+            MAJOR_COMPUTE_CAPABILITY=MAJOR_COMPUTE_CAPABILITY,
         )
         b_real_values = dequantize_to_fp16_kernel(
             b_values,
@@ -129,8 +130,11 @@ def matmul_kernel(
             BLOCK_SIZE_N,
             BLOCK_SIZE_K,
             QUANTIZED_VALUE_TYPE=OTHER_QUANTIZED_VALUE_TYPE,
-            USE_BLACKWELL_CVT_RN_INSTRUCTIONS=USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+            MAJOR_COMPUTE_CAPABILITY=MAJOR_COMPUTE_CAPABILITY,
         )
+
+        a_sf = convert_e4m3_to_fp32(a_sf, MAJOR_COMPUTE_CAPABILITY)
+        b_sf = convert_e4m3_to_fp32(b_sf, MAJOR_COMPUTE_CAPABILITY)
 
         a_sf = tl.where(
             a_sf < 0.0,

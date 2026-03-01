@@ -18,7 +18,7 @@ def dequantize_to_fp16_kernel(
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
     QUANTIZED_VALUE_TYPE: tl.constexpr,
-    USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
+    MAJOR_COMPUTE_CAPABILITY: tl.constexpr,
 ) -> None:
     if QUANTIZED_VALUE_TYPE == QUANTIZED_VALUE_TYPE_FP4:
         dequantized_values = convert_if4_to_fp32(
@@ -27,17 +27,17 @@ def dequantize_to_fp16_kernel(
             BLOCK_SIZE_M,
             BLOCK_SIZE_N,
             RETURN_FP=True,
-            USE_BLACKWELL_CVT_RN_INSTRUCTIONS=USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+            MAJOR_COMPUTE_CAPABILITY=MAJOR_COMPUTE_CAPABILITY,
         ).to(tl.float16)
     if QUANTIZED_VALUE_TYPE == QUANTIZED_VALUE_TYPE_FP6_E2M3:
         dequantized_values = convert_e2m3x2_to_fp16(
             values,
-            USE_BLACKWELL_CVT_RN_INSTRUCTIONS=USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+            MAJOR_COMPUTE_CAPABILITY=MAJOR_COMPUTE_CAPABILITY,
         )
     elif QUANTIZED_VALUE_TYPE == QUANTIZED_VALUE_TYPE_FP6_E3M2:
         dequantized_values = convert_e3m2x2_to_fp16(
             values,
-            USE_BLACKWELL_CVT_RN_INSTRUCTIONS=USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+            MAJOR_COMPUTE_CAPABILITY=MAJOR_COMPUTE_CAPABILITY,
         )
     if QUANTIZED_VALUE_TYPE == QUANTIZED_VALUE_TYPE_IF4:
         dequantized_values = convert_if4_to_fp32(
@@ -46,7 +46,7 @@ def dequantize_to_fp16_kernel(
             BLOCK_SIZE_M,
             BLOCK_SIZE_N,
             RETURN_FP=False,
-            USE_BLACKWELL_CVT_RN_INSTRUCTIONS=USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+            MAJOR_COMPUTE_CAPABILITY=MAJOR_COMPUTE_CAPABILITY,
         )
 
     return dequantized_values
@@ -63,7 +63,7 @@ def dequantize_with_tensor_descriptors(
     QUANTIZED_VALUE_PACKING_FACTOR: tl.constexpr,
     SCALE_GROUP_SIZE: tl.constexpr,
     OUT_DTYPE: tl.constexpr,
-    USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
+    MAJOR_COMPUTE_CAPABILITY: tl.constexpr,
 ) -> None:
     values = values_desc.load(
         [
@@ -88,7 +88,7 @@ def dequantize_with_tensor_descriptors(
         BLOCK_SIZE_M,
         BLOCK_SIZE_N,
         QUANTIZED_VALUE_TYPE,
-        USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+        MAJOR_COMPUTE_CAPABILITY,
     )
 
     output_desc.store(

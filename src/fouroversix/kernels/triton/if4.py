@@ -2,6 +2,8 @@ import triton
 import triton.language as tl
 from fouroversix.utils import DataType
 
+from .constants import SM_100, SM_110, SM_120
+
 Q_BLOCK_SIZE = tl.constexpr(DataType.if4.block_size)
 
 
@@ -12,9 +14,13 @@ def convert_if4_to_fp32(
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
     RETURN_FP: tl.constexpr,
-    USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
+    MAJOR_COMPUTE_CAPABILITY: tl.constexpr,
 ) -> None:
-    if USE_BLACKWELL_CVT_RN_INSTRUCTIONS:
+    if (
+        MAJOR_COMPUTE_CAPABILITY == SM_100
+        or MAJOR_COMPUTE_CAPABILITY == SM_110
+        or MAJOR_COMPUTE_CAPABILITY == SM_120
+    ):
         (fp_values_1, fp_values_2) = tl.inline_asm_elementwise(
             asm="""
             {
@@ -174,7 +180,7 @@ def convert_if4_to_fp32(
     )
 
     real_values = tl.where(
-        (scale_factors < 0.0).expand_dims(2),
+        (scale_factors >= 128).expand_dims(2),
         int_values * (6 / 7),
         fp_values,
     )

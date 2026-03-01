@@ -266,7 +266,7 @@ def get_image(  # noqa: C901, PLR0912
             img = (
                 add_submodule(
                     img.env(
-                        {"CUDA_ARCHS": "100", "FORCE_BUILD": "1", "MAX_JOBS": "32"},
+                        {"CUDA_ARCHS": "100", "FORCE_BUILD": "1", "MAX_JOBS": "16"},
                     ),
                     Submodule.cutlass,
                 )

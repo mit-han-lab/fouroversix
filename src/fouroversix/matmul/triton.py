@@ -1,7 +1,7 @@
 import torch
 from fouroversix.matmul.backend import MatmulBackendBase
 from fouroversix.quantize import QuantizedTensor
-from fouroversix.utils import DataType
+from fouroversix.utils import SM_80, DataType
 
 
 class TritonMatmulBackend(MatmulBackendBase):
@@ -13,7 +13,7 @@ class TritonMatmulBackend(MatmulBackendBase):
     @classmethod
     def is_available(cls) -> bool:
         """Return True if the Triton backend is available on the current machine."""
-        return True
+        return torch.cuda.get_device_capability()[0] > SM_80
 
     @classmethod
     def is_supported(
@@ -45,7 +45,7 @@ class TritonMatmulBackend(MatmulBackendBase):
         other: QuantizedTensor,
         *,
         out_dtype: DataType,
-        use_blackwell_cvt_rn_instructions: bool | None = None,
+        major_compute_capability: int | None = None,
     ) -> torch.Tensor:
         """
         Perform a matrix multiplication (`a @ b.T`) between two quantized tensors using
@@ -58,5 +58,5 @@ class TritonMatmulBackend(MatmulBackendBase):
             input,
             other,
             out_dtype=out_dtype,
-            use_blackwell_cvt_rn_instructions=use_blackwell_cvt_rn_instructions,
+            major_compute_capability=major_compute_capability,
         )

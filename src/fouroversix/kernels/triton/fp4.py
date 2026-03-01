@@ -2,6 +2,8 @@ import triton
 import triton.language as tl
 from fouroversix.utils import RoundStyle
 
+from .constants import SM_100, SM_110, SM_120
+
 ROUND_STYLE_NEAREST = tl.constexpr(RoundStyle.nearest.value)
 ROUND_STYLE_STOCHASTIC = tl.constexpr(RoundStyle.stochastic.value)
 
@@ -183,9 +185,13 @@ def _add_fake_randomness_for_stochastic_rounding(
 def convert_to_e2m1x2_with_rtn(
     x_block_scaled_b1,
     x_block_scaled_b2,
-    USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
+    MAJOR_COMPUTE_CAPABILITY: tl.constexpr,
 ) -> None:
-    if USE_BLACKWELL_CVT_RN_INSTRUCTIONS:
+    if (
+        MAJOR_COMPUTE_CAPABILITY == SM_100
+        or MAJOR_COMPUTE_CAPABILITY == SM_110
+        or MAJOR_COMPUTE_CAPABILITY == SM_120
+    ):
         return tl.inline_asm_elementwise(
             asm="""
                 {
@@ -219,10 +225,9 @@ def convert_to_e2m1x2_with_sr(
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
     RBITS: tl.constexpr,
-    USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
-    USE_BLACKWELL_CVT_RS_INSTRUCTIONS: tl.constexpr,
+    MAJOR_COMPUTE_CAPABILITY: tl.constexpr,
 ) -> None:
-    if USE_BLACKWELL_CVT_RS_INSTRUCTIONS:
+    if MAJOR_COMPUTE_CAPABILITY == SM_100:
         rbits = _create_rbits_for_cvt_rs(BLOCK_SIZE_M, BLOCK_SIZE_N, RBITS)
 
         return tl.inline_asm_elementwise(
@@ -258,7 +263,7 @@ def convert_to_e2m1x2_with_sr(
     return convert_to_e2m1x2_with_rtn(
         x_block_scaled_b1,
         x_block_scaled_b2,
-        USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+        MAJOR_COMPUTE_CAPABILITY,
     )
 
 
@@ -270,8 +275,7 @@ def convert_to_e2m1x2(
     BLOCK_SIZE_N: tl.constexpr,
     ROUND_STYLE: tl.constexpr,
     RBITS: tl.constexpr,
-    USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
-    USE_BLACKWELL_CVT_RS_INSTRUCTIONS: tl.constexpr,
+    MAJOR_COMPUTE_CAPABILITY: tl.constexpr,
 ) -> None:
     if ROUND_STYLE == ROUND_STYLE_STOCHASTIC:
         return convert_to_e2m1x2_with_sr(
@@ -280,14 +284,13 @@ def convert_to_e2m1x2(
             BLOCK_SIZE_M,
             BLOCK_SIZE_N,
             RBITS,
-            USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
-            USE_BLACKWELL_CVT_RS_INSTRUCTIONS,
+            MAJOR_COMPUTE_CAPABILITY,
         )
 
     return convert_to_e2m1x2_with_rtn(
         x_block_scaled_b1,
         x_block_scaled_b2,
-        USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+        MAJOR_COMPUTE_CAPABILITY,
     )
 
 
@@ -298,9 +301,13 @@ def convert_to_e2m1x2_and_quantized_fp16_with_rtn(
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
     SCALE_GROUP_SIZE: tl.constexpr,
-    USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
+    MAJOR_COMPUTE_CAPABILITY: tl.constexpr,
 ) -> None:
-    if USE_BLACKWELL_CVT_RN_INSTRUCTIONS:
+    if (
+        MAJOR_COMPUTE_CAPABILITY == SM_100
+        or MAJOR_COMPUTE_CAPABILITY == SM_110
+        or MAJOR_COMPUTE_CAPABILITY == SM_120
+    ):
         (x_e2m1, x_fp16x2) = tl.inline_asm_elementwise(
             asm="""
                 {
@@ -360,10 +367,9 @@ def convert_to_e2m1x2_and_quantized_fp16_with_sr(
     BLOCK_SIZE_N: tl.constexpr,
     SCALE_GROUP_SIZE: tl.constexpr,
     RBITS: tl.constexpr,
-    USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
-    USE_BLACKWELL_CVT_RS_INSTRUCTIONS: tl.constexpr,
+    MAJOR_COMPUTE_CAPABILITY: tl.constexpr,
 ) -> None:
-    if USE_BLACKWELL_CVT_RS_INSTRUCTIONS:
+    if MAJOR_COMPUTE_CAPABILITY == SM_100:
         rbits = _create_rbits_for_cvt_rs(BLOCK_SIZE_M, BLOCK_SIZE_N, RBITS)
 
         (x_e2m1, x_fp16x2) = tl.inline_asm_elementwise(
@@ -420,7 +426,7 @@ def convert_to_e2m1x2_and_quantized_fp16_with_sr(
         BLOCK_SIZE_M,
         BLOCK_SIZE_N,
         SCALE_GROUP_SIZE,
-        USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+        MAJOR_COMPUTE_CAPABILITY,
     )
 
 
@@ -433,8 +439,7 @@ def convert_to_e2m1x2_and_quantized_fp16(
     ROUND_STYLE: tl.constexpr,
     SCALE_GROUP_SIZE: tl.constexpr,
     RBITS: tl.constexpr,
-    USE_BLACKWELL_CVT_RN_INSTRUCTIONS: tl.constexpr,
-    USE_BLACKWELL_CVT_RS_INSTRUCTIONS: tl.constexpr,
+    MAJOR_COMPUTE_CAPABILITY: tl.constexpr,
 ) -> None:
     if ROUND_STYLE == ROUND_STYLE_STOCHASTIC:
         return convert_to_e2m1x2_and_quantized_fp16_with_sr(
@@ -444,8 +449,7 @@ def convert_to_e2m1x2_and_quantized_fp16(
             BLOCK_SIZE_N,
             SCALE_GROUP_SIZE,
             RBITS,
-            USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
-            USE_BLACKWELL_CVT_RS_INSTRUCTIONS,
+            MAJOR_COMPUTE_CAPABILITY,
         )
 
     return convert_to_e2m1x2_and_quantized_fp16_with_rtn(
@@ -454,5 +458,5 @@ def convert_to_e2m1x2_and_quantized_fp16(
         BLOCK_SIZE_M,
         BLOCK_SIZE_N,
         SCALE_GROUP_SIZE,
-        USE_BLACKWELL_CVT_RN_INSTRUCTIONS,
+        MAJOR_COMPUTE_CAPABILITY,
     )
