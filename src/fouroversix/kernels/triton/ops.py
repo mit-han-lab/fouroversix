@@ -141,40 +141,44 @@ def quantize_to_fp4(  # noqa: C901, PLR0915
             padded_n // tile_size_n,
         )
 
-        rht_kernel[rht_grid](
-            x_desc,
-            h_desc,
-            x_rht_desc,
-            BLOCK_SIZE_M=tile_size_m,
-            BLOCK_SIZE_N=tile_size_n,
-            TRANSPOSE=transpose,
-        )
+        with torch.cuda.device(x.device):
+            rht_kernel[rht_grid](
+                x_desc,
+                h_desc,
+                x_rht_desc,
+                BLOCK_SIZE_M=tile_size_m,
+                BLOCK_SIZE_N=tile_size_n,
+                TRANSPOSE=transpose,
+            )
 
         transpose = False
         x_amax = x_rht.abs().max().float()
 
-    quantization_kernel[grid](
-        x_rht_desc if had is not None else x_desc,
-        x_amax,
-        x_e2m1_desc,
-        x_sf_desc,
-        BLOCK_SIZE_M=block_size_m,
-        BLOCK_SIZE_N=block_size_n,
-        TILE_SIZE_M=tile_size_m,
-        TILE_SIZE_N=tile_size_n,
-        MAX_QUANTIZED_VALUE=dtype.quantized_value_type.get_maximum_value(scale_rule),
-        MAX_SCALE_FACTOR=dtype.scale_type.get_maximum_value(scale_rule),
-        TRANSPOSE=transpose,
-        QUANTIZED_VALUE_TYPE=dtype.quantized_value_type.value,
-        QUANTIZED_VALUE_PACKING_FACTOR=dtype.quantized_value_type.packing_factor,
-        ROUND_STYLE=round_style.value,
-        SCALE_TYPE=dtype.scale_type.value,
-        SCALE_GROUP_SIZE=dtype.block_size,
-        SCALE_RULE=scale_rule.value,
-        BLOCK_SCALE_2D=block_scale_2d,
-        RBITS=rbits,
-        MAJOR_COMPUTE_CAPABILITY=major_compute_capability,
-    )
+    with torch.cuda.device(x.device):
+        quantization_kernel[grid](
+            x_rht_desc if had is not None else x_desc,
+            x_amax,
+            x_e2m1_desc,
+            x_sf_desc,
+            BLOCK_SIZE_M=block_size_m,
+            BLOCK_SIZE_N=block_size_n,
+            TILE_SIZE_M=tile_size_m,
+            TILE_SIZE_N=tile_size_n,
+            MAX_QUANTIZED_VALUE=dtype.quantized_value_type.get_maximum_value(
+                scale_rule
+            ),
+            MAX_SCALE_FACTOR=dtype.scale_type.get_maximum_value(scale_rule),
+            TRANSPOSE=transpose,
+            QUANTIZED_VALUE_TYPE=dtype.quantized_value_type.value,
+            QUANTIZED_VALUE_PACKING_FACTOR=dtype.quantized_value_type.packing_factor,
+            ROUND_STYLE=round_style.value,
+            SCALE_TYPE=dtype.scale_type.value,
+            SCALE_GROUP_SIZE=dtype.block_size,
+            SCALE_RULE=scale_rule.value,
+            BLOCK_SCALE_2D=block_scale_2d,
+            RBITS=rbits,
+            MAJOR_COMPUTE_CAPABILITY=major_compute_capability,
+        )
 
     if x_sf.dtype != dtype.scale_type.torch_dtype:
         x_sf = x_sf.view(dtype.scale_type.torch_dtype)
