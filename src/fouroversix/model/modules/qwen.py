@@ -146,13 +146,17 @@ class FourOverSixQwenExperts(nn.Module):
         """Return high precision parameters to be quantized and deleted."""
         return ("down_proj", "gate_up_proj")
 
-    def get_packing_factor(self, parameter_name: str) -> float:
-        """Get the packing factor for a parameter."""
-        return (
-            2
-            if parameter_name
-            in {"quantized_down_proj_values", "quantized_gate_up_proj_values"}
-            else 1
+    def get_element_size(self, parameter_name: str) -> float:
+        """Get the size of a single element, in bytes, for a parameter."""
+
+        return {
+            "quantized_down_proj_values": 0.5,
+            "quantized_gate_up_proj_values": 0.5,
+            "down_proj": 9 / 16,
+            "gate_up_proj": 9 / 16,
+        }.get(
+            parameter_name,
+            getattr(self, parameter_name).element_size(),
         )
 
     def get_quantized_parameters(

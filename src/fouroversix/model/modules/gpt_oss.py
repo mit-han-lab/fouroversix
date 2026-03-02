@@ -72,9 +72,18 @@ class FourOverSixGptOssMLP(nn.Module):
         """Return high precision parameters to be quantized and deleted."""
         return ()
 
-    def get_packing_factor(self, parameter_name: str) -> float:  # noqa: ARG002
-        """Get the packing factor for a parameter."""
-        return 1
+    def get_element_size(self, parameter_name: str) -> float:
+        """Get the size of a single element, in bytes, for a parameter."""
+
+        return {
+            "quantized_down_proj_values": 0.5,
+            "quantized_gate_up_proj_values": 0.5,
+            "down_proj": 9 / 16,
+            "gate_up_proj": 9 / 16,
+        }.get(
+            parameter_name,
+            getattr(self, parameter_name).element_size(),
+        )
 
 
 @QuantizedModule.register(GptOssExperts, replace_existing_modules_in_model=False)
