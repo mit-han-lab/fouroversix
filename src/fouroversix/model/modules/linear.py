@@ -195,8 +195,8 @@ class FourOverSixLinear(nn.Linear):
         """Get the size of a single element, in bytes, for a parameter."""
 
         # quantized_weight_values is packed, so there are 4 bits, or 0.5 bytes, per
-        # element. Once quantized, weight will have (8+1)/16 bytes per element (one block
-        # of 16 values is 8 bytes of values + 1 byte of scale factors).
+        # element. Once quantized, weight will have (8+1)/16 bytes per element (one
+        # block of 16 values is 8 bytes of values + 1 byte of scale factors).
         return {"quantized_weight_values": 0.5, "weight": 9 / 16}.get(
             parameter_name,
             getattr(self, parameter_name).element_size(),
