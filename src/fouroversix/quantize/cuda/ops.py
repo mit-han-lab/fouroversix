@@ -31,6 +31,7 @@ def _(
     is_nvfp4: bool,  # noqa: FBT001
     is_rtn: bool,  # noqa: ARG001, FBT001
     is_rht: bool,  # noqa: ARG001, FBT001
+    is_2d: bool,  # noqa: ARG001, FBT001
     is_transpose: bool,  # noqa: ARG001, FBT001
     selection_rule: int,  # noqa: ARG001
     rbits: int,  # noqa: ARG001
