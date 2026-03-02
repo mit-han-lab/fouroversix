@@ -7,7 +7,10 @@ import modal
 
 from ..resources import Dependency, app, get_image
 
-img = get_image(dependencies=[Dependency.fouroversix, Dependency.transformer_engine])
+img = get_image(
+    dependencies=[Dependency.fouroversix, Dependency.transformer_engine],
+    extra_env={"TRITON_PRINT_AUTOTUNING": "1"},
+)
 
 with img.imports():
     import torch

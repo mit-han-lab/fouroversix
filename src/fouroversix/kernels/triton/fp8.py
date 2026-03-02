@@ -61,9 +61,13 @@ def convert_to_e4m3_with_rtn(x, MAJOR_COMPUTE_CAPABILITY: tl.constexpr) -> tl.te
 
 
 @triton.jit
-def convert_e4m3_to_fp32(fp8, MAJOR_COMPUTE_CAPABILITY: tl.constexpr) -> tl.tensor:
+def convert_e4m3_to_high_precision(
+    fp8,
+    TO_DTYPE: tl.dtype,
+    MAJOR_COMPUTE_CAPABILITY: tl.constexpr,
+) -> tl.tensor:
     if MAJOR_COMPUTE_CAPABILITY > SM_80:
-        return fp8.cast(tl.float8e4nv, bitcast=True).to(tl.float32)
+        return fp8.cast(tl.float8e4nv, bitcast=True).to(TO_DTYPE)
 
     sign = (fp8 >> 7) & 1
     exp = (fp8 >> MANTISSA_BITS) & 0xF
@@ -86,4 +90,4 @@ def convert_e4m3_to_fp32(fp8, MAJOR_COMPUTE_CAPABILITY: tl.constexpr) -> tl.tens
     val = tl.where(is_subnormal, val_sub, val_norm)
     val = tl.where(sign == 1, -val, val)
 
-    return tl.where(is_zero, 0, val)
+    return tl.where(is_zero, 0, val).to(TO_DTYPE)

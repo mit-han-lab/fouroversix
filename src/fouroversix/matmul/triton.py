@@ -13,7 +13,9 @@ class TritonMatmulBackend(MatmulBackendBase):
     @classmethod
     def is_available(cls) -> bool:
         """Return True if the Triton backend is available on the current machine."""
-        return torch.cuda.get_device_capability()[0] > SM_80
+        return (
+            torch.cuda.is_available() and torch.cuda.get_device_capability()[0] > SM_80
+        )
 
     @classmethod
     def is_supported(

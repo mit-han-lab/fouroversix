@@ -165,7 +165,7 @@ def quantize_to_fp4(  # noqa: C901, PLR0915
             TILE_SIZE_M=tile_size_m,
             TILE_SIZE_N=tile_size_n,
             MAX_QUANTIZED_VALUE=dtype.quantized_value_type.get_maximum_value(
-                scale_rule
+                scale_rule,
             ),
             MAX_SCALE_FACTOR=dtype.scale_type.get_maximum_value(scale_rule),
             TRANSPOSE=transpose,
@@ -324,10 +324,6 @@ def matmul(
         other_scale_factors.stride(1),
         output.stride(0),
         output.stride(1),
-        BLOCK_SIZE_M=128,
-        BLOCK_SIZE_N=64,
-        BLOCK_SIZE_K=32,
-        GROUP_SIZE_M=6,
         INPUT_QUANTIZED_VALUE_TYPE=input.dtype.quantized_value_type.value,
         INPUT_QUANTIZED_VALUE_PACKING_FACTOR=input.dtype.quantized_value_type.packing_factor,
         INPUT_QUANTIZED_VALUE_MAX=input.dtype.quantized_value_type.get_maximum_value(

@@ -2,10 +2,36 @@ import triton
 import triton.language as tl
 
 from .dequantize import dequantize_to_fp16_kernel
-from .fp8 import convert_e4m3_to_fp32
+from .fp8 import convert_e4m3_to_high_precision
 from .if4 import Q_BLOCK_SIZE
 
 
+@triton.autotune(
+    configs=[
+        triton.Config(
+            {
+                "BLOCK_SIZE_M": block_size_m,
+                "BLOCK_SIZE_N": block_size_n,
+                "BLOCK_SIZE_K": block_size_k,
+                "GROUP_SIZE_M": 8,
+            },
+            num_warps=num_warps,
+            num_stages=num_stages,
+        )
+        for block_size_m, block_size_n, block_size_k, num_warps, num_stages in [
+            (256, 128, 128, 4, 3),
+            (128, 128, 32, 4, 3),
+            (64, 64, 32, 2, 4),
+        ]
+    ],
+    key=[
+        "INPUT_QUANTIZED_VALUE_PACKING_FACTOR",
+        "INPUT_SCALE_GROUP_SIZE",
+        "OTHER_QUANTIZED_VALUE_PACKING_FACTOR",
+        "OTHER_SCALE_GROUP_SIZE",
+        "INTERMEDIATE_DTYPE",
+    ],
+)
 @triton.jit
 def matmul_kernel(
     a_values_ptr,
@@ -133,19 +159,19 @@ def matmul_kernel(
             MAJOR_COMPUTE_CAPABILITY=MAJOR_COMPUTE_CAPABILITY,
         )
 
-        a_sf = convert_e4m3_to_fp32(a_sf, MAJOR_COMPUTE_CAPABILITY)
-        b_sf = convert_e4m3_to_fp32(b_sf, MAJOR_COMPUTE_CAPABILITY)
+        a_sf = convert_e4m3_to_high_precision(
+            a_sf,
+            INTERMEDIATE_DTYPE,
+            MAJOR_COMPUTE_CAPABILITY,
+        )
+        b_sf = convert_e4m3_to_high_precision(
+            b_sf,
+            INTERMEDIATE_DTYPE,
+            MAJOR_COMPUTE_CAPABILITY,
+        )
 
-        a_sf = tl.where(
-            a_sf < 0.0,
-            -a_sf.to(INTERMEDIATE_DTYPE),
-            a_sf.to(INTERMEDIATE_DTYPE),
-        )
-        b_sf = tl.where(
-            b_sf < 0.0,
-            -b_sf.to(INTERMEDIATE_DTYPE),
-            b_sf.to(INTERMEDIATE_DTYPE),
-        )
+        a_sf = tl.where(a_sf < 0.0, -a_sf, a_sf)
+        b_sf = tl.where(b_sf < 0.0, -b_sf, b_sf)
 
         a_real_values = (
             a_real_values.to(INTERMEDIATE_DTYPE).reshape(

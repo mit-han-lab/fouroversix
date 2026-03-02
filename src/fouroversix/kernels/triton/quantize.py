@@ -23,7 +23,7 @@ from .constants import (
 )
 from .fp4 import convert_to_e2m1x2, convert_to_e2m1x2_and_quantized_fp16
 from .fp6 import convert_to_e2m3x2, convert_to_e3m2x2
-from .fp8 import convert_e4m3_to_fp32, convert_to_e4m3_with_rtn
+from .fp8 import convert_e4m3_to_high_precision, convert_to_e4m3_with_rtn
 
 
 @triton.jit  # noqa: RET503
@@ -146,9 +146,11 @@ def prepare_inputs_for_block_scaling(
             * tl.div_rn(
                 1,
                 decode_scale
-                * convert_e4m3_to_fp32(x_scales, MAJOR_COMPUTE_CAPABILITY)
-                .to(x_amax.dtype)
-                .expand_dims(2),
+                * convert_e4m3_to_high_precision(
+                    x_scales,
+                    x_amax.dtype,
+                    MAJOR_COMPUTE_CAPABILITY,
+                ).expand_dims(2),
             ),
             0,
         )
@@ -269,9 +271,11 @@ def nvfp4_fouroversix_quantization_kernel(
 
     x_dequantized_6 = tl.div_rn(
         x_fp16_6.to(x_amax.dtype)
-        * convert_e4m3_to_fp32(x_scales_6, MAJOR_COMPUTE_CAPABILITY)
-        .to(x_amax.dtype)
-        .expand_dims(2)
+        * convert_e4m3_to_high_precision(
+            x_scales_6,
+            x_amax.dtype,
+            MAJOR_COMPUTE_CAPABILITY,
+        ).expand_dims(2)
         * x_amax,
         E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX,
     )
@@ -309,9 +313,11 @@ def nvfp4_fouroversix_quantization_kernel(
 
     x_dequantized_4 = tl.div_rn(
         x_fp16_4.to(x_amax.dtype)
-        * convert_e4m3_to_fp32(x_scales_4, MAJOR_COMPUTE_CAPABILITY)
-        .to(x_amax.dtype)
-        .expand_dims(2)
+        * convert_e4m3_to_high_precision(
+            x_scales_4,
+            x_amax.dtype,
+            MAJOR_COMPUTE_CAPABILITY,
+        ).expand_dims(2)
         * x_amax,
         E2M1_MAX_VALUE * E4M3_MAX_FOUROVERSIX,
     )
@@ -454,9 +460,11 @@ def if4_quantization_kernel(
         * tl.div_rn(
             1,
             decode_scale
-            * convert_e4m3_to_fp32(x_scales, MAJOR_COMPUTE_CAPABILITY)
-            .to(x_amax.dtype)
-            .expand_dims(2),
+            * convert_e4m3_to_high_precision(
+                x_scales,
+                x_amax.dtype,
+                MAJOR_COMPUTE_CAPABILITY,
+            ).expand_dims(2),
         ),
         0,
     )
@@ -506,18 +514,22 @@ def if4_quantization_kernel(
     x_int_dequantized = tl.div_rn(
         x_int_hp
         * (6 / 7)
-        * convert_e4m3_to_fp32(x_scales, MAJOR_COMPUTE_CAPABILITY)
-        .to(x_amax.dtype)
-        .expand_dims(2)
+        * convert_e4m3_to_high_precision(
+            x_scales,
+            x_amax.dtype,
+            MAJOR_COMPUTE_CAPABILITY,
+        ).expand_dims(2)
         * x_amax,
         E2M1_MAX_VALUE * E4M3_MAX_VALUE,
     )
 
     x_fp_dequantized = tl.div_rn(
         x_fp_fp16.to(x_amax.dtype)
-        * convert_e4m3_to_fp32(x_scales, MAJOR_COMPUTE_CAPABILITY)
-        .to(x_amax.dtype)
-        .expand_dims(2)
+        * convert_e4m3_to_high_precision(
+            x_scales,
+            x_amax.dtype,
+            MAJOR_COMPUTE_CAPABILITY,
+        ).expand_dims(2)
         * x_amax,
         E2M1_MAX_VALUE * E4M3_MAX_VALUE,
     )
