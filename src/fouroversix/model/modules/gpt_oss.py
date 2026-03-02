@@ -72,11 +72,10 @@ class FourOverSixGptOssMLP(nn.Module):
         """Return high precision parameters to be quantized and deleted."""
         return ()
 
-    def get_quantized_parameters(
-        self,
-    ) -> dict[str, Any]:
-        """Get quantized parameters for the weight tensors."""
-        return {}
+    def get_packing_factor(self, parameter_name: str) -> float:  # noqa: ARG002
+        """Get the packing factor for a parameter."""
+        return 1
+
 
 
 @QuantizedModule.register(GptOssExperts, replace_existing_modules_in_model=False)
@@ -151,8 +150,13 @@ class FourOverSixGptOssExperts(nn.Module):
                         self.num_experts,
                         self.hidden_size
                         * (self.intermediate_size * 2)
+<<<<<<< HEAD
                         // self.config.weight_dtype.block_size,
                         dtype=self.config.weight_dtype.scale_type.torch_dtype,
+=======
+                        // self.config.dtype.block_size(),
+                        dtype=self.config.dtype.scale_dtype(),
+>>>>>>> main
                     ),
                     requires_grad=False,
                 ),
@@ -195,6 +199,15 @@ class FourOverSixGptOssExperts(nn.Module):
     def parameters_to_quantize(self) -> tuple[str, ...]:
         """Return high precision parameters to be quantized and deleted."""
         return ("down_proj", "gate_up_proj")
+
+    def get_packing_factor(self, parameter_name: str) -> float:
+        """Get the packing factor for a parameter."""
+        return (
+            2
+            if parameter_name
+            in {"quantized_down_proj_values", "quantized_gate_up_proj_values"}
+            else 1
+        )
 
     def get_quantized_parameters(
         self,
@@ -349,11 +362,19 @@ class FourOverSixGptOssExperts(nn.Module):
                         values=self.quantized_down_proj_values.data[e],
                         scale_factors=self.quantized_down_proj_scale_factors.data[e],
                         amax=self.quantized_down_proj_amax.data[e],
+<<<<<<< HEAD
                         dtype=self.config.weight_dtype,
                         original_shape=tuple(
                             self.quantized_down_proj_metadata.data[e, :2].tolist(),
                         ),
                         scale_rule=self.config.weight_scale_rule,
+=======
+                        dtype=self.config.dtype,
+                        original_shape=tuple(
+                            self.quantized_down_proj_metadata.data[e, :2].tolist(),
+                        ),
+                        scale_rule=self.config.get_weight_scale_rule(),
+>>>>>>> main
                         padded_shape=tuple(
                             self.quantized_down_proj_metadata.data[e, 2:].tolist(),
                         ),
@@ -364,11 +385,19 @@ class FourOverSixGptOssExperts(nn.Module):
                         values=self.quantized_gate_up_proj_values.data[e],
                         scale_factors=self.quantized_gate_up_proj_scale_factors.data[e],
                         amax=self.quantized_gate_up_proj_amax.data[e],
+<<<<<<< HEAD
                         dtype=self.config.weight_dtype,
                         original_shape=tuple(
                             self.quantized_gate_up_proj_metadata.data[e, :2].tolist(),
                         ),
                         scale_rule=self.config.weight_scale_rule,
+=======
+                        dtype=self.config.dtype,
+                        original_shape=tuple(
+                            self.quantized_gate_up_proj_metadata.data[e, :2].tolist(),
+                        ),
+                        scale_rule=self.config.get_weight_scale_rule(),
+>>>>>>> main
                         padded_shape=tuple(
                             self.quantized_gate_up_proj_metadata.data[e, 2:].tolist(),
                         ),

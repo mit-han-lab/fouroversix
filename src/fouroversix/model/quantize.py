@@ -14,7 +14,9 @@ class QuantizedModule:
     """Base class for all quantized modules."""
 
     _registry: ClassVar[dict[type[nn.Module], type[nn.Module]]] = {}
-    _should_replace_existing_modules_in_model: ClassVar[dict[type[nn.Module], bool]] = {} # noqa: E501
+    _should_replace_existing_modules_in_model: ClassVar[dict[type[nn.Module], bool]] = (
+        {}
+    )
 
     @classmethod
     def is_quantized_module_type(cls, module_type: type[nn.Module]) -> bool:
@@ -58,15 +60,20 @@ class QuantizedModule:
 
         """
 
-        if high_precision_cls in cls._registry and \
-        not replace_existing_modules_in_registry:
+        if (
+            high_precision_cls in cls._registry
+            and not replace_existing_modules_in_registry
+        ):
             msg = f"High-precision module {high_precision_cls} is already registered."
             raise ValueError(msg)
 
         modules_to_delete = []
 
         for module_cls in cls._registry:
-            if issubclass(high_precision_cls, module_cls):
+            if high_precision_cls is not None and issubclass(
+                high_precision_cls,
+                module_cls,
+            ):
                 if replace_existing_modules_in_registry:
                     modules_to_delete.append(module_cls)
                 else:
@@ -83,8 +90,9 @@ class QuantizedModule:
             wrapped_cls: type[nn.Module],
         ) -> type[nn.Module]:
             cls._registry[high_precision_cls] = wrapped_cls
-            cls._should_replace_existing_modules_in_model[high_precision_cls] = \
-            replace_existing_modules_in_model
+            cls._should_replace_existing_modules_in_model[high_precision_cls] = (
+                replace_existing_modules_in_model
+            )
             return wrapped_cls
 
         return inner_wrapper

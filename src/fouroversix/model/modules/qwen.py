@@ -1,3 +1,4 @@
+import warnings
 from typing import Any
 
 import torch
@@ -6,7 +7,17 @@ from fouroversix.model.config import ModuleQuantizationConfig
 from fouroversix.model.quantize import QuantizedModule
 from fouroversix.quantize import QuantizationConfig, QuantizedTensor, quantize_to_fp4
 from torch import nn
-from transformers.models.qwen3_5_moe.modeling_qwen3_5_moe import Qwen3_5MoeExperts
+
+try:
+    from transformers.models.qwen3_5_moe.modeling_qwen3_5_moe import Qwen3_5MoeExperts
+except ImportError:
+    warnings.warn(
+        "Qwen3_5MoeExperts not found, please update transformers to the latest "
+        "version to quantize Qwen3.5 models.",
+        stacklevel=2,
+    )
+
+    Qwen3_5MoeExperts = None
 
 
 @QuantizedModule.register(Qwen3_5MoeExperts)
@@ -78,8 +89,9 @@ class FourOverSixQwenExperts(nn.Module):
                 nn.Parameter(
                     torch.zeros(
                         self.num_experts,
-                        self.hidden_dim * self.intermediate_dim //
-                        self.config.dtype.block_size(),
+                        self.hidden_dim
+                        * self.intermediate_dim
+                        // self.config.dtype.block_size(),
                         dtype=self.config.dtype.scale_dtype(),
                     ),
                     requires_grad=False,
@@ -90,8 +102,9 @@ class FourOverSixQwenExperts(nn.Module):
                 nn.Parameter(
                     torch.zeros(
                         self.num_experts,
-                        self.hidden_dim * (self.intermediate_dim * 2) //
-                        self.config.dtype.block_size(),
+                        self.hidden_dim
+                        * (self.intermediate_dim * 2)
+                        // self.config.dtype.block_size(),
                         dtype=self.config.dtype.scale_dtype(),
                     ),
                     requires_grad=False,
@@ -133,6 +146,15 @@ class FourOverSixQwenExperts(nn.Module):
         """Return high precision parameters to be quantized and deleted."""
         return ("down_proj", "gate_up_proj")
 
+    def get_packing_factor(self, parameter_name: str) -> float:
+        """Get the packing factor for a parameter."""
+        return (
+            2
+            if parameter_name
+            in {"quantized_down_proj_values", "quantized_gate_up_proj_values"}
+            else 1
+        )
+
     def get_quantized_parameters(
         self,
         parameter_name: str,
@@ -165,29 +187,28 @@ class FourOverSixQwenExperts(nn.Module):
             prefix = "gate_up"
 
         return {
-            f"quantized_{prefix}_proj_values":
-                torch.stack(
-                    [tensor.values for tensor in quantized_proj],
-                    dim=0,
-                ),
-            f"quantized_{prefix}_proj_scale_factors":
-                torch.stack(
-                    [tensor.scale_factors for tensor in quantized_proj],
-                    dim=0,
-                ),
-            f"quantized_{prefix}_proj_amax":
-                torch.stack(
-                    [tensor.amax for tensor in quantized_proj],
-                    dim=0,
-                ),
+            f"quantized_{prefix}_proj_values": torch.stack(
+                [tensor.values for tensor in quantized_proj],
+                dim=0,
+            ),
+            f"quantized_{prefix}_proj_scale_factors": torch.stack(
+                [tensor.scale_factors for tensor in quantized_proj],
+                dim=0,
+            ),
+            f"quantized_{prefix}_proj_amax": torch.stack(
+                [tensor.amax for tensor in quantized_proj],
+                dim=0,
+            ),
             f"quantized_{prefix}_proj_metadata": torch.stack(
                 [
-                    torch.tensor([
-                        tensor.original_shape[0],
-                        tensor.original_shape[1],
-                        tensor.padded_shape[0],
-                        tensor.padded_shape[1],
-                    ])
+                    torch.tensor(
+                        [
+                            tensor.original_shape[0],
+                            tensor.original_shape[1],
+                            tensor.padded_shape[0],
+                            tensor.padded_shape[1],
+                        ],
+                    )
                     for tensor in quantized_proj
                 ],
             ),
@@ -236,8 +257,9 @@ class FourOverSixQwenExperts(nn.Module):
                 input_config=fprop_activation_config,
                 out_dtype=self.config.output_dtype,
             )
-            current_hidden_states = current_hidden_states * \
-            top_k_weights[token_idx, top_k_pos, None]
+            current_hidden_states = (
+                current_hidden_states * top_k_weights[token_idx, top_k_pos, None]
+            )
             final_hidden_states.index_add_(
                 0,
                 token_idx,
@@ -265,32 +287,36 @@ class FourOverSixQwenExperts(nn.Module):
             down = []
             gate_up = []
             for e in range(self.num_experts):
-                down.append(QuantizedTensor(
-                    values=self.quantized_down_proj_values.data[e],
-                    scale_factors=self.quantized_down_proj_scale_factors.data[e],
-                    amax=self.quantized_down_proj_amax.data[e],
-                    dtype=self.config.dtype,
-                    original_shape=tuple(
-                        self.quantized_down_proj_metadata.data[e, :2].tolist(),
+                down.append(
+                    QuantizedTensor(
+                        values=self.quantized_down_proj_values.data[e],
+                        scale_factors=self.quantized_down_proj_scale_factors.data[e],
+                        amax=self.quantized_down_proj_amax.data[e],
+                        dtype=self.config.dtype,
+                        original_shape=tuple(
+                            self.quantized_down_proj_metadata.data[e, :2].tolist(),
+                        ),
+                        scale_rule=self.config.get_weight_scale_rule(),
+                        padded_shape=tuple(
+                            self.quantized_down_proj_metadata.data[e, 2:].tolist(),
+                        ),
                     ),
-                    scale_rule=self.config.get_weight_scale_rule(),
-                    padded_shape=tuple(
-                        self.quantized_down_proj_metadata.data[e, 2:].tolist(),
+                )
+                gate_up.append(
+                    QuantizedTensor(
+                        values=self.quantized_gate_up_proj_values.data[e],
+                        scale_factors=self.quantized_gate_up_proj_scale_factors.data[e],
+                        amax=self.quantized_gate_up_proj_amax.data[e],
+                        dtype=self.config.dtype,
+                        original_shape=tuple(
+                            self.quantized_gate_up_proj_metadata.data[e, :2].tolist(),
+                        ),
+                        scale_rule=self.config.get_weight_scale_rule(),
+                        padded_shape=tuple(
+                            self.quantized_gate_up_proj_metadata.data[e, 2:].tolist(),
+                        ),
                     ),
-                ))
-                gate_up.append(QuantizedTensor(
-                    values=self.quantized_gate_up_proj_values.data[e],
-                    scale_factors=self.quantized_gate_up_proj_scale_factors.data[e],
-                    amax=self.quantized_gate_up_proj_amax.data[e],
-                    dtype=self.config.dtype,
-                    original_shape=tuple(
-                        self.quantized_gate_up_proj_metadata.data[e, :2].tolist(),
-                    ),
-                    scale_rule=self.config.get_weight_scale_rule(),
-                    padded_shape=tuple(
-                        self.quantized_gate_up_proj_metadata.data[e, 2:].tolist(),
-                    ),
-                ))
+                )
             self._quantized_weights = (down, gate_up)
 
         return self._quantized_weights

@@ -176,6 +176,10 @@ class FourOverSixLinear(nn.Linear):
         """Return high precision parameters to be quantized and deleted."""
         return ("weight",)
 
+    def get_packing_factor(self, parameter_name: str) -> float:
+        """Get the packing factor for a parameter."""
+        return 2 if parameter_name == "quantized_weight_values" else 1
+
     def get_quantized_parameters(
         self,
         parameter_name: str,
