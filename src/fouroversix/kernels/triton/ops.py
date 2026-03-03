@@ -183,7 +183,7 @@ def quantize_to_fp4(  # noqa: C901, PLR0915
     if x_sf.dtype != dtype.scale_type.torch_dtype:
         x_sf = x_sf.view(dtype.scale_type.torch_dtype)
 
-    if dtype == DataType.if4:
+    if dtype in {DataType.if4, DataType.nvint4}:
         x_sf = from_blocked(x_sf, (padded_m, padded_n // dtype.block_size))
 
     return x_e2m1, x_sf, x_amax
@@ -214,7 +214,7 @@ def dequantize_values(
             tensor.scale_factors,
             block_shape=[SCALE_MEGABLOCK_SIZE.value],
         )
-        if tensor.dtype == DataType.if4
+        if tensor.dtype in {DataType.if4, DataType.nvint4}
         else None
     )
 
@@ -329,6 +329,7 @@ def matmul(
         INPUT_QUANTIZED_VALUE_MAX=input.dtype.quantized_value_type.get_maximum_value(
             input.scale_rule,
         ),
+        INPUT_SCALE_TYPE=input.dtype.scale_type.value,
         INPUT_SCALE_FACTOR_MAX=input.dtype.scale_type.get_maximum_value(
             input.scale_rule,
         ),
@@ -338,6 +339,7 @@ def matmul(
         OTHER_QUANTIZED_VALUE_MAX=other.dtype.quantized_value_type.get_maximum_value(
             other.scale_rule,
         ),
+        OTHER_SCALE_TYPE=other.dtype.scale_type.value,
         OTHER_SCALE_FACTOR_MAX=other.dtype.scale_type.get_maximum_value(
             other.scale_rule,
         ),

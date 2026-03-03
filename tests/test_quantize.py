@@ -57,7 +57,7 @@ NUM_RANDOM_SEEDS = 10
     ],
 )
 @pytest.mark.parametrize("block_scale_2d", ["block_scale_2d", "no_block_scale_2d"])
-@pytest.mark.parametrize("dtype", [DataType.if4, DataType.nvfp4])
+@pytest.mark.parametrize("dtype", [DataType.if4, DataType.nvfp4, DataType.nvint4])
 @pytest.mark.parametrize("rht", ["rht", "no_rht"])
 @pytest.mark.parametrize(
     "scale_rule",
@@ -247,6 +247,7 @@ def test_stochastic_rounding() -> None:
         ({"backend": "transformer_engine", "scale_rule": "static_6"}, 141),
         ({"backend": "triton", "scale_rule": "static_6"}, 137),
         ({"backend": "triton", "scale_rule": "mse"}, 122),
+        ({"backend": "triton", "dtype": "nvint4", "scale_rule": "static_6"}, 125),
         ({"backend": "triton", "dtype": "if4", "scale_rule": "mse"}, 110),
         (
             {

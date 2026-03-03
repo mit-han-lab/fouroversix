@@ -65,3 +65,22 @@ def unpack_packed_if4(
         ((x_unpacked.to(torch.int8) << 4) >> 4).to(to_dtype) * (6 / 7),
         convert_e2m1_to_fp8_e4m3(x_unpacked).to(to_dtype),
     ).reshape(x.shape[0], x.shape[1] * 2)
+
+
+def unpack_packed_int4(
+    x: torch.Tensor,
+    to_dtype: torch.dtype = torch.float8_e4m3fn,
+) -> torch.Tensor:
+    high = (x >> 4) & 0xF
+    low = x & 0xF
+
+    x_unpacked = torch.stack(
+        [low, high],
+        dim=-1,
+    ).reshape(x.shape[0], x.shape[1] * 2 // 16, 16)
+
+    return (
+        ((x_unpacked.to(torch.int8) << 4) >> 4)
+        .to(to_dtype)
+        .reshape(x.shape[0], x.shape[1] * 2)
+    )

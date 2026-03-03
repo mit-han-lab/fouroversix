@@ -6,9 +6,11 @@ from .constants import (
     QUANTIZED_VALUE_TYPE_FP6_E2M3,
     QUANTIZED_VALUE_TYPE_FP6_E3M2,
     QUANTIZED_VALUE_TYPE_IF4,
+    QUANTIZED_VALUE_TYPE_INT4,
 )
 from .fp6 import convert_e2m3x2_to_fp16, convert_e3m2x2_to_fp16
 from .if4 import convert_if4_to_fp32
+from .int4 import convert_int4_to_fp32
 
 
 @triton.jit
@@ -29,7 +31,7 @@ def dequantize_to_fp16_kernel(
             RETURN_FP=True,
             MAJOR_COMPUTE_CAPABILITY=MAJOR_COMPUTE_CAPABILITY,
         ).to(tl.float16)
-    if QUANTIZED_VALUE_TYPE == QUANTIZED_VALUE_TYPE_FP6_E2M3:
+    elif QUANTIZED_VALUE_TYPE == QUANTIZED_VALUE_TYPE_FP6_E2M3:
         dequantized_values = convert_e2m3x2_to_fp16(
             values,
             MAJOR_COMPUTE_CAPABILITY=MAJOR_COMPUTE_CAPABILITY,
@@ -39,7 +41,7 @@ def dequantize_to_fp16_kernel(
             values,
             MAJOR_COMPUTE_CAPABILITY=MAJOR_COMPUTE_CAPABILITY,
         )
-    if QUANTIZED_VALUE_TYPE == QUANTIZED_VALUE_TYPE_IF4:
+    elif QUANTIZED_VALUE_TYPE == QUANTIZED_VALUE_TYPE_IF4:
         dequantized_values = convert_if4_to_fp32(
             values,
             scale_factors,
@@ -47,6 +49,12 @@ def dequantize_to_fp16_kernel(
             BLOCK_SIZE_N,
             RETURN_FP=False,
             MAJOR_COMPUTE_CAPABILITY=MAJOR_COMPUTE_CAPABILITY,
+        )
+    elif QUANTIZED_VALUE_TYPE == QUANTIZED_VALUE_TYPE_INT4:
+        dequantized_values = convert_int4_to_fp32(
+            values,
+            BLOCK_SIZE_M,
+            BLOCK_SIZE_N,
         )
 
     return dequantized_values

@@ -4,7 +4,12 @@ import torch
 from fouroversix.utils import DataType, ScaleType
 
 from .config import QuantizationConfig
-from .dequantize_utils import from_blocked, unpack_packed_fp4, unpack_packed_if4
+from .dequantize_utils import (
+    from_blocked,
+    unpack_packed_fp4,
+    unpack_packed_if4,
+    unpack_packed_int4,
+)
 from .quantized_tensor import QuantizedTensor
 
 
@@ -87,7 +92,10 @@ class QuantizeBackendBase(ABC):
                     torch.float8_e4m3fn,
                 ),
                 scales,
-            ).reshape(
+            )
+
+        if tensor.dtype in {DataType.if4, DataType.nvint4}:
+            scales = scales.reshape(
                 tensor.padded_shape[0],
                 tensor.padded_shape[1] // tensor.dtype.block_size,
             )
@@ -140,6 +148,8 @@ class QuantizeBackendBase(ABC):
                     ),
                     dtype,
                 )
+            elif tensor.dtype == DataType.nvint4:
+                values = unpack_packed_int4(tensor.values)
             else:
                 values = unpack_packed_fp4(tensor.values)
         else:

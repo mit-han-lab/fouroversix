@@ -1,6 +1,7 @@
 import triton
 import triton.language as tl
 
+from .constants import SCALE_TYPE_NV_IF
 from .dequantize import dequantize_to_fp16_kernel
 from .fp8 import convert_e4m3_to_high_precision
 from .if4 import Q_BLOCK_SIZE
@@ -61,11 +62,13 @@ def matmul_kernel(
     INPUT_QUANTIZED_VALUE_TYPE: tl.constexpr,
     INPUT_QUANTIZED_VALUE_PACKING_FACTOR: tl.constexpr,
     INPUT_QUANTIZED_VALUE_MAX: tl.constexpr,
+    INPUT_SCALE_TYPE: tl.constexpr,
     INPUT_SCALE_FACTOR_MAX: tl.constexpr,
     INPUT_SCALE_GROUP_SIZE: tl.constexpr,
     OTHER_QUANTIZED_VALUE_TYPE: tl.constexpr,
     OTHER_QUANTIZED_VALUE_PACKING_FACTOR: tl.constexpr,
     OTHER_QUANTIZED_VALUE_MAX: tl.constexpr,
+    OTHER_SCALE_TYPE: tl.constexpr,
     OTHER_SCALE_FACTOR_MAX: tl.constexpr,
     OTHER_SCALE_GROUP_SIZE: tl.constexpr,
     INTERMEDIATE_DTYPE: tl.constexpr,
@@ -170,8 +173,11 @@ def matmul_kernel(
             MAJOR_COMPUTE_CAPABILITY,
         )
 
-        a_sf = tl.where(a_sf < 0.0, -a_sf, a_sf)
-        b_sf = tl.where(b_sf < 0.0, -b_sf, b_sf)
+        if INPUT_SCALE_TYPE == SCALE_TYPE_NV_IF:
+            a_sf = tl.where(a_sf < 0.0, -a_sf, a_sf)
+
+        if OTHER_SCALE_TYPE == SCALE_TYPE_NV_IF:
+            b_sf = tl.where(b_sf < 0.0, -b_sf, b_sf)
 
         a_real_values = (
             a_real_values.to(INTERMEDIATE_DTYPE).reshape(

@@ -10,6 +10,7 @@ from .constants import (
     QUANTIZED_VALUE_TYPE_FP4,
     QUANTIZED_VALUE_TYPE_FP6_E2M3,
     QUANTIZED_VALUE_TYPE_FP6_E3M2,
+    QUANTIZED_VALUE_TYPE_INT4,
     ROUND_STYLE_STOCHASTIC,
     SCALE_MEGABLOCK_SIZE,
     SCALE_RULE_ABS_MAX,
@@ -24,6 +25,7 @@ from .constants import (
 from .fp4 import convert_to_e2m1x2, convert_to_e2m1x2_and_quantized_fp16
 from .fp6 import convert_to_e2m3x2, convert_to_e3m2x2
 from .fp8 import convert_e4m3_to_high_precision, convert_to_e4m3_with_rtn
+from .int4 import convert_to_int4
 
 
 @triton.jit  # noqa: RET503
@@ -213,6 +215,13 @@ def block_scaled_quantization_kernel(
         x_e2m1 = convert_to_e3m2x2(
             x_block_scaled.reshape(BLOCK_SIZE_M, BLOCK_SIZE_N),
             MAJOR_COMPUTE_CAPABILITY,
+        )
+    elif QUANTIZED_VALUE_TYPE == QUANTIZED_VALUE_TYPE_INT4:
+        x_e2m1 = convert_to_int4(
+            x_block_scaled.reshape(BLOCK_SIZE_M, BLOCK_SIZE_N),
+            BLOCK_SIZE_M,
+            BLOCK_SIZE_N,
+            ROUND_STYLE,
         )
 
     return x_e2m1, x_scales

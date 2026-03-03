@@ -12,15 +12,6 @@ E4M3_MAX_VALUE = 448
 E4M3_MAX_FOUROVERSIX = 256
 
 
-def fake_quantize_to_int4(
-    x: torch.Tensor,
-    *,
-    round_style: RoundStyle = RoundStyle.nearest,
-) -> torch.Tensor:
-    rbits = torch.rand_like(x) - 0.5 if round_style == RoundStyle.stochastic else 0
-    return (x + rbits).clamp(min=-7, max=7).round()
-
-
 def fake_quantize_to_e2m1(
     x: torch.Tensor,
     *,
@@ -43,6 +34,18 @@ def fake_quantize_to_e2m1(
     return x.sign() * (
         step1 * mask1 + step2 * (~mask1) * mask2 + step3 * (~mask1) * (~mask2)
     )
+
+
+def fake_quantize_to_int4(
+    x: torch.Tensor,
+    *,
+    round_style: RoundStyle = RoundStyle.nearest,
+) -> torch.Tensor:
+    if round_style == RoundStyle.stochastic:
+        rbits = torch.rand_like(x) - 0.5
+        return x.sign() * (x.abs() + rbits).clamp(min=-7, max=7).round()
+
+    return x.clamp(min=-7, max=7).round()
 
 
 def quantize_bf16_to_unpacked_int4(x: torch.Tensor) -> torch.Tensor:
@@ -106,30 +109,42 @@ def quantize_to_nvint4(
     x_scale_blocks: torch.Tensor,
     x_amax: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    encode_scale = (
-        torch.tensor(
-            DataType.if4.quantized_value_type.get_maximum_value(ScaleRule.static_6)
-            * DataType.if4.scale_type.get_maximum_value(ScaleRule.static_6),
+    if x_amax == 0:
+        x_scales_hp = torch.zeros(
+            *x_scale_blocks.shape[:-1],
             dtype=x_amax.dtype,
             device=x_amax.device,
         )
-        / x_amax
-    )
-    x_scales_hp = (
-        x_scale_blocks.abs().max(axis=-1).values
-        / torch.tensor(
-            DataType.if4.quantized_value_type.get_maximum_value(ScaleRule.static_6),
-            dtype=x_amax.dtype,
-            device=x_amax.device,
+    else:
+        encode_scale = (
+            torch.tensor(
+                DataType.nvint4.quantized_value_type.get_maximum_value(
+                    ScaleRule.static_6,
+                )
+                * DataType.nvint4.scale_type.get_maximum_value(ScaleRule.static_6),
+                dtype=x_amax.dtype,
+                device=x_amax.device,
+            )
+            / x_amax
         )
-        * encode_scale
-    )
+        x_scales_hp = (
+            x_scale_blocks.abs().max(axis=-1).values
+            / torch.tensor(
+                DataType.nvint4.quantized_value_type.get_maximum_value(
+                    ScaleRule.static_6,
+                ),
+                dtype=x_amax.dtype,
+                device=x_amax.device,
+            )
+            * encode_scale
+        )
+
     x_scales = x_scales_hp.to(torch.float8_e4m3fn)
 
     decode_scale = 1 / (
         torch.tensor(
-            DataType.if4.quantized_value_type.get_maximum_value(ScaleRule.static_6)
-            * DataType.if4.scale_type.get_maximum_value(ScaleRule.static_6),
+            DataType.nvint4.quantized_value_type.get_maximum_value(ScaleRule.static_6)
+            * DataType.nvint4.scale_type.get_maximum_value(ScaleRule.static_6),
             dtype=x_amax.dtype,
             device=x_amax.device,
         )
@@ -139,11 +154,6 @@ def quantize_to_nvint4(
         x_scales.unsqueeze(1) != 0,
         x_scale_blocks * (1 / (decode_scale * x_scales.to(x_amax.dtype).unsqueeze(1))),
         0,
-    )
-    x_block_scaled = torch.clamp(
-        x_block_scaled,
-        min=-SCALED_INT4_MAX_VALUE,
-        max=SCALED_INT4_MAX_VALUE,
     )
 
     return x_block_scaled, x_scales
@@ -458,6 +468,12 @@ def quantize_to_fp4(  # noqa: C901, PLR0912
             scale_rule=scale_rule,
             round_style=round_style,
         )
+    elif fp4_format == DataType.nvint4:
+        x_block_scaled, scales = quantize_to_nvint4(x_scale_blocks, x_amax)
+        x_fake_quantized = fake_quantize_to_int4(
+            x_block_scaled,
+            round_style=round_style,
+        )
     else:
         msg = f"Invalid FP4 format: {fp4_format}"
         raise ValueError(msg)
@@ -498,6 +514,12 @@ def quantize_to_fp4(  # noqa: C901, PLR0912
                     quantize_bf16_to_unpacked_int4(x_fake_quantized.bfloat16()),
                     quantize_bf16_to_unpacked_fp4(x_fake_quantized.bfloat16()),
                 ).reshape_as(x),
+            )
+        elif fp4_format == DataType.nvint4:
+            x_quantized = pack_unpacked_fp4(
+                quantize_bf16_to_unpacked_int4(
+                    x_fake_quantized.bfloat16().reshape_as(x),
+                ),
             )
         else:
             x_quantized = pack_unpacked_fp4(

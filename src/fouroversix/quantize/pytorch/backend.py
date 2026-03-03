@@ -105,7 +105,8 @@ class PyTorchQuantizeBackend(QuantizeBackendBase):
                 block_scale_2d=config.block_scale_2d,
                 transpose=config.transpose,
                 pack_values=True,
-                use_blackwell_scale_layout=config.dtype != DataType.if4,
+                use_blackwell_scale_layout=config.dtype
+                not in {DataType.if4, DataType.nvint4},
             )
 
         return QuantizedTensor(
@@ -116,5 +117,6 @@ class PyTorchQuantizeBackend(QuantizeBackendBase):
             input_shape,
             config.scale_rule,
             values_are_packed=True,
-            scale_factors_are_in_blackwell_layout=config.dtype != DataType.if4,
+            scale_factors_are_in_blackwell_layout=config.dtype
+            not in {DataType.if4, DataType.nvint4},
         )

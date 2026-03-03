@@ -36,7 +36,13 @@ class TritonMatmulBackend(MatmulBackendBase):
         return (
             input.dtype == other.dtype
             and input.dtype
-            in {DataType.nvfp4, DataType.nvfp6_e2m3, DataType.nvfp6_e3m2, DataType.if4}
+            in {
+                DataType.nvfp4,
+                DataType.nvfp6_e2m3,
+                DataType.nvfp6_e3m2,
+                DataType.nvint4,
+                DataType.if4,
+            }
             and input.device.type == "cuda"
         )
 

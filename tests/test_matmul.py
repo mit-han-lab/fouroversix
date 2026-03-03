@@ -28,7 +28,7 @@ NUM_RANDOM_SEEDS = 10
         r=2,
     ),
 )
-@pytest.mark.parametrize("dtype", [DataType.if4, DataType.nvfp4])
+@pytest.mark.parametrize("dtype", [DataType.if4, DataType.nvfp4, DataType.nvint4])
 @pytest.mark.parametrize(
     "scale_rule",
     [ScaleRule.static_6, ScaleRule.static_4, ScaleRule.mse],

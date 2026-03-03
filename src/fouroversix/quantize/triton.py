@@ -104,5 +104,6 @@ class TritonQuantizeBackend(QuantizeBackendBase):
             (x.shape[1], x.shape[0]) if config.transpose else x.shape,
             config.scale_rule,
             values_are_packed=True,
-            scale_factors_are_in_blackwell_layout=config.dtype != DataType.if4,
+            scale_factors_are_in_blackwell_layout=config.dtype
+            not in {DataType.if4, DataType.nvint4},
         )
