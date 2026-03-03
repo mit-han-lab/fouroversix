@@ -77,11 +77,11 @@
     "layer_precision_configs": [
         {
             "repeats": 20,
-	    "dtype": "if4",
-	    "scale_rule": "mse"
+            "dtype": "if4",
+            "scale_rule": "mse"
         },
-	{
+        {
             "repeats": 4
-	}
+        }
     ]
 }

@@ -77,8 +77,8 @@
     "layer_precision_configs": [
         {
             "repeats": 20,
-            "dtype": "nvfp4",
-            "scale_rule": "mse"
+            "dtype": "nvint4",
+            "scale_rule": "static_6"
         },
         {
             "repeats": 4
