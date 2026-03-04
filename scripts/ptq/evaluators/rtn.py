@@ -51,13 +51,13 @@ class RTNEvaluatorImpl(PTQEvaluator):
             model_config = AutoConfig.from_pretrained(model_name)
 
             hf_quantization_config = HFFourOverSixConfig(
-                activation_scale_rule=quantization_config.get_activation_scale_rule(),
+                activation_scale_rule=quantization_config.activation_scale_rule,
                 dtype=quantization_config.dtype,
                 matmul_backend=quantization_config.matmul_backend,
                 output_dtype=quantization_config.output_dtype,
                 quantize_backend=quantization_config.quantize_backend,
                 weight_scale_2d=quantization_config.weight_scale_2d,
-                weight_scale_rule=quantization_config.get_weight_scale_rule(),
+                weight_scale_rule=quantization_config.weight_scale_rule,
             )
 
             save_kwargs = {}

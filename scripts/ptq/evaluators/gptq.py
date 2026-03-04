@@ -85,9 +85,9 @@ class GPTQEvaluator(PTQEvaluator):
                 "--save_path",
                 save_path.as_posix(),
                 "--a_scale_rule",
-                quantization_config.get_activation_scale_rule().value,
+                quantization_config.activation_scale_rule.value,
                 "--w_scale_rule",
-                quantization_config.get_weight_scale_rule().value,
+                quantization_config.weight_scale_rule.value,
             ]
 
             main()

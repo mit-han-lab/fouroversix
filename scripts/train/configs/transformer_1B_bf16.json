@@ -20,8 +20,7 @@
     "qk_norm": true,
     "layer_precision_configs": [
         {
-            "repeats": 24,
-            "precision": "bf16"
+            "repeats": 24
         }
     ]
 }

@@ -4,7 +4,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from fouroversix.quantize import QuantizationConfig
-from fouroversix.utils import DataType, MatmulBackend, QuantizeBackend, ScaleRule
+from fouroversix.utils import (
+    DataType,
+    MatmulBackend,
+    QuantizeBackend,
+    RoundStyle,
+    ScaleRule,
+)
 
 
 @dataclass
@@ -17,6 +23,8 @@ class ModuleQuantizationConfig:
             tensors. If not provided, `scale_rule` will be used.
         dtype (DataType): The quantization data type to use for the module. Defaults to
             `DataType.nvfp4`.
+        gradient_round_style (RoundStyle | None): The rounding style to use for gradient
+            tensors. Defaults to `RoundStyle.stochastic`.
         gradient_scale_rule (ScaleRule | None): The scaling rule to use for gradient
             tensors. If not provided, `scale_rule` will be used.
         keep_master_weights (bool): Whether to keep the master weights. Defaults to
@@ -40,6 +48,7 @@ class ModuleQuantizationConfig:
 
     activation_scale_rule: ScaleRule | None = None
     dtype: DataType = DataType.nvfp4
+    gradient_round_style: RoundStyle = RoundStyle.stochastic
     gradient_scale_rule: ScaleRule | None = None
     keep_master_weights: bool = False
     matmul_backend: MatmulBackend | None = None
@@ -57,6 +66,9 @@ class ModuleQuantizationConfig:
 
         if isinstance(self.dtype, str):
             self.dtype = DataType(self.dtype)
+
+        if isinstance(self.gradient_round_style, str):
+            self.gradient_round_style = RoundStyle(self.gradient_round_style)
 
         if isinstance(self.gradient_scale_rule, str):
             self.gradient_scale_rule = ScaleRule(self.gradient_scale_rule)
@@ -76,24 +88,16 @@ class ModuleQuantizationConfig:
         if isinstance(self.weight_scale_rule, str):
             self.weight_scale_rule = ScaleRule(self.weight_scale_rule)
 
-    def get_activation_scale_rule(self) -> ScaleRule:
-        """Return the scaling rule to use for activation tensors."""
-        return self.activation_scale_rule or self.scale_rule
-
-    def get_gradient_scale_rule(self) -> ScaleRule:
-        """Return the scaling rule to use for gradient tensors."""
-        return self.gradient_scale_rule or self.scale_rule
-
-    def get_weight_scale_rule(self) -> ScaleRule:
-        """Return the scaling rule to use for weight tensors."""
-        return self.weight_scale_rule or self.scale_rule
+        self.activation_scale_rule = self.activation_scale_rule or self.scale_rule
+        self.gradient_scale_rule = self.gradient_scale_rule or self.scale_rule
+        self.weight_scale_rule = self.weight_scale_rule or self.scale_rule
 
     def get_activation_config(self, **kwargs: dict[str, Any]) -> QuantizationConfig:
         """Return the quantization configuration for the activation tensors."""
         return QuantizationConfig(
             backend=self.quantize_backend,
             dtype=self.dtype,
-            scale_rule=self.get_activation_scale_rule(),
+            scale_rule=self.activation_scale_rule,
             **kwargs,
         )
 
@@ -102,7 +106,8 @@ class ModuleQuantizationConfig:
         return QuantizationConfig(
             backend=self.quantize_backend,
             dtype=self.dtype,
-            scale_rule=self.get_gradient_scale_rule(),
+            round_style=self.gradient_round_style,
+            scale_rule=self.gradient_scale_rule,
             **kwargs,
         )
 
@@ -110,8 +115,9 @@ class ModuleQuantizationConfig:
         """Return the quantization configuration for the weight tensors."""
         return QuantizationConfig(
             backend=self.quantize_backend,
+            block_scale_2d=self.weight_scale_2d,
             dtype=self.dtype,
-            scale_rule=self.get_weight_scale_rule(),
+            scale_rule=self.weight_scale_rule,
             **kwargs,
         )
 
@@ -126,6 +132,8 @@ class ModelQuantizationConfig(ModuleQuantizationConfig):
             tensors. If not provided, `scale_rule` will be used.
         dtype (DataType): The quantization data type to use for the module. Defaults to
             `DataType.nvfp4`.
+        gradient_round_style (RoundStyle | None): The rounding style to use for gradient
+            tensors. If not provided, `gradient_round_style` will be used.
         gradient_scale_rule (ScaleRule | None): The scaling rule to use for gradient
             tensors. If not provided, `scale_rule` will be used.
         keep_master_weights (bool): Whether to keep the master weights. Defaults to

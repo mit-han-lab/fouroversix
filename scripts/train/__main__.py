@@ -19,14 +19,9 @@ from ..resources import (
     wandb_secret,
 )
 
-img_4gpus = get_image(
+img = get_image(
     dependencies=[Dependency.flash_attention, Dependency.flame, Dependency.fouroversix],
-    extra_env={"NGPU": "4"},
-)
-
-img_8gpus = get_image(
-    dependencies=[Dependency.flash_attention, Dependency.flame, Dependency.fouroversix],
-    extra_env={"NGPU": "8"},
+    extra_pip_dependencies=["datasets<4.6"],
 )
 
 
@@ -34,6 +29,7 @@ def train(
     *,
     batch_size: int,
     checkpoint_interval: int,
+    checkpoint_keep_latest_k: int,
     checkpoint_load_step: int,
     context_length: int,
     dataset: str,
@@ -136,7 +132,7 @@ def train(
         "--checkpoint.load_step",
         str(checkpoint_load_step),
         "--checkpoint.keep_latest_k",
-        "0",
+        str(checkpoint_keep_latest_k),
         "--metrics.log_freq",
         "1",
     ]
@@ -156,36 +152,8 @@ def train(
     subprocess.run(args, check=True)
 
 
-@app.function(
-    image=img_4gpus,
-    gpu="B200:4",
-    timeout=24 * 60 * 60,
-    cpu=64,
-    memory=8 * 64 * 1024,
-    volumes={FOUROVERSIX_CACHE_PATH: cache_volume},
-    secrets=[wandb_secret],
-)
-def train_4xb200(**kwargs: dict[str, Any]) -> None:
-    os.chdir(FOUROVERSIX_INSTALL_PATH / "third_party" / "flame")
-    train(**kwargs)
-
-
-@app.function(
-    image=img_4gpus,
-    gpu="H200:4",
-    timeout=24 * 60 * 60,
-    cpu=64,
-    memory=8 * 64 * 1024,
-    volumes={FOUROVERSIX_CACHE_PATH: cache_volume},
-    secrets=[wandb_secret],
-)
-def train_4xh200(**kwargs: dict[str, Any]) -> None:
-    os.chdir(FOUROVERSIX_INSTALL_PATH / "third_party" / "flame")
-    train(**kwargs)
-
-
-@app.function(
-    image=img_8gpus,
+@app.cls(
+    image=img,
     gpu="B200:8",
     timeout=24 * 60 * 60,
     cpu=64,
@@ -193,14 +161,20 @@ def train_4xh200(**kwargs: dict[str, Any]) -> None:
     volumes={FOUROVERSIX_CACHE_PATH: cache_volume},
     secrets=[wandb_secret],
 )
-def train_8xb200(**kwargs: dict[str, Any]) -> None:
-    os.chdir(FOUROVERSIX_INSTALL_PATH / "third_party" / "flame")
-    train(**kwargs)
+class ModalTrainer:
+    """Run training jobs on Modal."""
+
+    @modal.method()
+    def train(self, **kwargs: dict[str, Any]) -> None:
+        """Start a training job on Modal."""
+        os.chdir(FOUROVERSIX_INSTALL_PATH / "third_party" / "flame")
+        train(**kwargs)
 
 
 @click.command()
 @click.option("--batch-size", type=float, default=16)
 @click.option("--checkpoint-interval", type=int, default=1000)
+@click.option("--checkpoint-keep-latest-k", type=int, default=0)
 @click.option("--checkpoint-load-step", type=int, default=-1)
 @click.option("--context-length", type=int, default=8192)
 @click.option("--dataset", type=str, default="HuggingFaceFW/fineweb-edu")
@@ -214,7 +188,7 @@ def train_8xb200(**kwargs: dict[str, Any]) -> None:
 @click.option("--lr", type=float, default=1.2e-3)
 @click.option("--lr-decay-type", type=str, default="linear")
 @click.option("--modal", is_flag=True)
-@click.option("--modal-gpu", type=str, default="B200:4")
+@click.option("--modal-gpu", type=str, default="B200:8")
 @click.option("--model-config", type=str, required=True)
 @click.option("--model-name", type=str, required=True)
 @click.option("--no-torch-compile", is_flag=True)
@@ -225,7 +199,7 @@ def train_8xb200(**kwargs: dict[str, Any]) -> None:
 def cli(**kwargs: dict[str, Any]) -> None:
     # Options that are not passed to the train function
     detach = kwargs.pop("detach", False)
-    modal_gpu = kwargs.pop("modal_gpu", "B200:4")
+    modal_gpu = kwargs.pop("modal_gpu", "B200:8")
     use_modal = kwargs.pop("modal", False)
     wait_for_pid = kwargs.pop("wait_for_pid", None)
 
@@ -258,15 +232,7 @@ def cli(**kwargs: dict[str, Any]) -> None:
                 .as_posix()
             )
 
-            if modal_gpu == "B200:4":
-                train_4xb200.remote(**kwargs)
-            elif modal_gpu == "B200:8":
-                train_8xb200.remote(**kwargs)
-            elif modal_gpu == "H200:4":
-                train_4xh200.remote(**kwargs)
-            else:
-                msg = f"Invalid modal GPU: {modal_gpu}"
-                raise ValueError(msg)
+            ModalTrainer.with_options(gpu=modal_gpu)().train.remote(**kwargs)
     else:
         kwargs["model_config"] = Path(kwargs["model_config"]).absolute().as_posix()
 

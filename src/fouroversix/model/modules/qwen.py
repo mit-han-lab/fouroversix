@@ -177,7 +177,7 @@ class FourOverSixQwenExperts(nn.Module):
         weight_config = QuantizationConfig(
             backend=self.config.quantize_backend,
             dtype=self.config.dtype,
-            scale_rule=self.config.get_weight_scale_rule(),
+            scale_rule=self.config.weight_scale_rule,
         )
 
         quantized_proj = []
@@ -244,7 +244,7 @@ class FourOverSixQwenExperts(nn.Module):
             fprop_activation_config = QuantizationConfig(
                 backend=self.config.quantize_backend,
                 dtype=self.config.dtype,
-                scale_rule=self.config.get_activation_scale_rule(),
+                scale_rule=self.config.activation_scale_rule,
             )
             top_k_pos, token_idx = torch.where(expert_mask[expert_idx])
             current_state = hidden_states[token_idx]
@@ -300,7 +300,7 @@ class FourOverSixQwenExperts(nn.Module):
                         original_shape=tuple(
                             self.quantized_down_proj_metadata.data[e, :2].tolist(),
                         ),
-                        scale_rule=self.config.get_weight_scale_rule(),
+                        scale_rule=self.config.weight_scale_rule,
                         padded_shape=tuple(
                             self.quantized_down_proj_metadata.data[e, 2:].tolist(),
                         ),
@@ -315,7 +315,7 @@ class FourOverSixQwenExperts(nn.Module):
                         original_shape=tuple(
                             self.quantized_gate_up_proj_metadata.data[e, :2].tolist(),
                         ),
-                        scale_rule=self.config.get_weight_scale_rule(),
+                        scale_rule=self.config.weight_scale_rule,
                         padded_shape=tuple(
                             self.quantized_gate_up_proj_metadata.data[e, 2:].tolist(),
                         ),

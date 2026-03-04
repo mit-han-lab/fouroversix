@@ -10,7 +10,6 @@ from fouroversix.quantize import (
     QuantizedTensor,
     quantize_to_fp4,
 )
-from fouroversix.utils import RoundStyle
 
 
 class FourOverSixLinearFunction(torch.autograd.Function):
@@ -30,13 +29,16 @@ class FourOverSixLinearFunction(torch.autograd.Function):
         provided in low precision.
         """
 
-        fprop_activation_config = config.get_activation_config()
-        fprop_weight_config = config.get_weight_config(
-            block_scale_2d=config.weight_scale_2d,
-        )
-
-        if isinstance(weight, torch.Tensor):
+        if isinstance(weight, nn.Parameter):
+            ctx.config = config
             ctx.save_for_backward(input, weight, bias)
+
+        fprop_activation_config = config.get_activation_config()
+        fprop_weight_config = config.get_weight_config()
+
+        if isinstance(weight, nn.Parameter):
+            weight = quantize_to_fp4(weight.data, fprop_weight_config)
+        elif isinstance(weight, torch.Tensor):
             weight = quantize_to_fp4(weight, fprop_weight_config)
 
         ctx.config = config
@@ -65,30 +67,19 @@ class FourOverSixLinearFunction(torch.autograd.Function):
 
         assert grad_output.shape[0] == 1  # noqa: S101
 
-        dgrad_grad_config = ctx.config.get_gradient_config(
-            round_style=RoundStyle.stochastic,
-        )
-
-        dgrad_weight_config = ctx.config.get_weight_config(
-            block_scale_2d=ctx.config.weight_scale_2d,
-            transpose=True,
-        )
+        dgrad_grad_config = ctx.config.get_gradient_config()
+        dgrad_weight_config = ctx.config.get_weight_config(transpose=True)
 
         grad_input = fp4_matmul(
             grad_output[0],
             weight,
-            backend=ctx.matmul_backend,
+            backend=ctx.config.matmul_backend,
             input_config=dgrad_grad_config,
             other_config=dgrad_weight_config,
             out_dtype=ctx.config.output_dtype,
         ).unsqueeze(0)
 
-        wgrad_grad_config = ctx.config.get_gradient_config(
-            rht=True,
-            round_style=RoundStyle.stochastic,
-            transpose=True,
-        )
-
+        wgrad_grad_config = ctx.config.get_gradient_config(rht=True, transpose=True)
         wgrad_activation_config = ctx.config.get_activation_config(
             rht=True,
             transpose=True,
@@ -97,7 +88,7 @@ class FourOverSixLinearFunction(torch.autograd.Function):
         grad_weight = fp4_matmul(
             grad_output[0],
             input[0],
-            backend=ctx.matmul_backend,
+            backend=ctx.config.matmul_backend,
             input_config=wgrad_grad_config,
             other_config=wgrad_activation_config,
             out_dtype=ctx.config.output_dtype,
@@ -214,7 +205,7 @@ class FourOverSixLinear(nn.Linear):
                 backend=self.config.quantize_backend,
                 block_scale_2d=self.config.weight_scale_2d,
                 dtype=self.config.dtype,
-                scale_rule=self.config.get_weight_scale_rule(),
+                scale_rule=self.config.weight_scale_rule,
             )
 
             quantized_weight = quantize_to_fp4(parameter, config)
@@ -246,7 +237,7 @@ class FourOverSixLinear(nn.Linear):
 
         if not hasattr(self, "_quantized_weight"):
             if self.config.keep_master_weights:
-                return quantize_to_fp4(self.weight, self.config.get_weight_config())
+                return self.weight
 
             original_shape = tuple(self.quantized_weight_metadata.data[:2].tolist())
             padded_shape = tuple(self.quantized_weight_metadata.data[2:].tolist())
@@ -257,7 +248,7 @@ class FourOverSixLinear(nn.Linear):
                 self.quantized_weight_amax.data,
                 self.config.dtype,
                 original_shape,
-                self.config.get_weight_scale_rule(),
+                self.config.weight_scale_rule,
                 padded_shape,
             )
 

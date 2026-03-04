@@ -20,12 +20,11 @@
     "layer_precision_configs": [
         {
             "repeats": 20,
-            "precision": "fp4",
+            "dtype": "fp4",
             "scale_rule": "mse"
         },
         {
-            "repeats": 4,
-            "precision": "bf16"
+            "repeats": 4
         }
     ]
 }
