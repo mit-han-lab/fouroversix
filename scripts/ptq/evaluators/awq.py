@@ -50,9 +50,9 @@ class FourOverSixLinearForAWQ(FourOverSixLinear):
         """
 
         return (
-            super().forward(input)
+            F.linear(input, self.weight, self.bias)
             if self.high_precision
-            else F.linear(input, self.weight, self.bias)
+            else super().forward(input)
         )
 
 
@@ -85,17 +85,10 @@ class AWQEvaluator(RTNEvaluatorImpl):
         # Replace FourOverSixLinear with FourOverSixLinearForAWQ
         QuantizedModule.register(
             nn.Linear,
-            replace_existing_modules=True,
+            replace_existing_modules_in_registry=True,
         )(FourOverSixLinearForAWQ)
 
-        save_path = (
-            save_path
-            / "awq"
-            / (
-                f"{model_name}-{quantization_config.get_activation_scale_rule().value}"
-                f"-{quantization_config.get_weight_scale_rule().value}"
-            )
-        )
+        save_path = save_path / "awq" / model_name / quantization_config.__hash__()
 
         if not save_path.exists():
             model = AutoModelForCausalLM.from_pretrained(
@@ -104,11 +97,7 @@ class AWQEvaluator(RTNEvaluatorImpl):
                 trust_remote_code=trust_remote_code,
             ).eval()
 
-            quantize_model(
-                model,
-                quantization_config,
-                linear_cls=FourOverSixLinearForAWQ,
-            )
+            quantize_model(model, quantization_config)
 
             enc = AutoTokenizer.from_pretrained(
                 model_name,

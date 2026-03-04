@@ -1,3 +1,5 @@
+import hashlib
+import json
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -175,3 +177,9 @@ class ModelQuantizationConfig(ModuleQuantizationConfig):
             if self.module_config_overrides is not None
             else self
         )
+
+    def __hash__(self) -> str:
+        """Return a hash of the configuration."""
+        return hashlib.sha256(
+            json.dumps(self.__dict__, sort_keys=True).encode(),
+        ).hexdigest()
