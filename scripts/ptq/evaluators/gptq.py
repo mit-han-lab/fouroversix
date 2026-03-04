@@ -64,14 +64,7 @@ class GPTQEvaluator(PTQEvaluator):
         from model_quant import main
         from transformers import AutoModelForCausalLM
 
-        save_path = (
-            save_path
-            / "gptq"
-            / (
-                f"{model_name}-{quantization_config.get_activation_scale_rule().value}"
-                f"-{quantization_config.get_weight_scale_rule().value}"
-            )
-        )
+        save_path = save_path / "gptq" / model_name / quantization_config.__hash__()
 
         if not save_path.exists():
             sys.argv = [
@@ -91,9 +84,9 @@ class GPTQEvaluator(PTQEvaluator):
                 "--gptq",
                 "--save_path",
                 save_path.as_posix(),
-                "--activation_scale_rule",
+                "--a_scale_rule",
                 quantization_config.get_activation_scale_rule().value,
-                "--weight_scale_rule",
+                "--w_scale_rule",
                 quantization_config.get_weight_scale_rule().value,
             ]
 
