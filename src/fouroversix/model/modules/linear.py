@@ -43,6 +43,7 @@ class FourOverSixLinearFunction(torch.autograd.Function):
 
         ctx.config = config
 
+        input = input.contiguous()
         out = fp4_matmul(
             input.reshape(-1, input.shape[-1]),
             weight,

@@ -24,12 +24,17 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+diffusers = [
+    "accelerate>=0.26.0",
+    "diffusers>=0.32.0",
+]
 docs = [
     "mkdocs~=1.6.1",
     "mkdocs-material~=9.7.4",
     "mkdocstrings[python]~=1.0.3",
 ]
 evals = [
+    "diffusers>=0.32.0",
     "inspect-ai~=0.3.186",
     "inspect-evals~=0.3.106",
     "lm-eval[hf]~=0.4.11",

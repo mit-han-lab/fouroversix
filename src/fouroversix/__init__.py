@@ -12,10 +12,16 @@ from .quantize import QuantizationConfig, QuantizedTensor, quantize_to_fp4
 from .utils import DataType, MatmulBackend, QuantizeBackend, RoundStyle, ScaleRule
 from .weight_conversions import WeightConversions
 
+try:
+    from .diffusers import FourOverSixConfig
+except ImportError:
+    FourOverSixConfig = None
+
 __version__ = version("fouroversix")
 
 __all__ = [
     "DataType",
+    "FourOverSixConfig",
     "FourOverSixLinear",
     "MatmulBackend",
     "ModelQuantizationConfig",
