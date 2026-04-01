@@ -1,17 +1,21 @@
+from typing import Any
+
 import torch
-from fouroversix.quantize import QuantizationConfig, QuantizedTensor, quantize_to_fp4
+from fouroversix.quantize import QuantizationConfig, QuantizedTensor, quantize
 from fouroversix.utils import DataType, MatmulBackend
 
 from .cutlass import CUTLASSMatmulBackend
 from .pytorch import PyTorchMatmulBackend
+from .triton import TritonMatmulBackend
 
 AVAILABLE_BACKENDS = {
     MatmulBackend.cutlass: CUTLASSMatmulBackend,
+    MatmulBackend.triton: TritonMatmulBackend,
     MatmulBackend.pytorch: PyTorchMatmulBackend,
 }
 
 
-def fp4_matmul(
+def quantized_matmul(
     input: torch.Tensor | QuantizedTensor,
     other: torch.Tensor | QuantizedTensor,
     *,
@@ -19,6 +23,7 @@ def fp4_matmul(
     input_config: QuantizationConfig | None = None,
     other_config: QuantizationConfig | None = None,
     out_dtype: DataType = DataType.bfloat16,
+    **kwargs: dict[str, Any],
 ) -> torch.Tensor:
     """
     Perform a matrix multiplication (`a @ b.T`) between two quantized tensors.
@@ -36,7 +41,7 @@ def fp4_matmul(
     ```python
     a = torch.tensor(1024, 1024, dtype=torch.bfloat16, device="cuda")
     b = torch.tensor(1024, 1024, dtype=torch.bfloat16, device="cuda")
-    out = fp4_matmul(a, b)
+    out = quantized_matmul(a, b)
     ```
 
     ### With Low-Precision Inputs
@@ -45,10 +50,10 @@ def fp4_matmul(
     a = torch.tensor(1024, 1024, dtype=torch.bfloat16, device="cuda")
     b = torch.tensor(1024, 1024, dtype=torch.bfloat16, device="cuda")
 
-    a_quantized = quantize_to_fp4(a)
-    b_quantized = quantize_to_fp4(b)
+    a_quantized = quantize(a)
+    b_quantized = quantize(b)
 
-    out = fp4_matmul(a_quantized, b_quantized)
+    out = quantized_matmul(a_quantized, b_quantized)
     ```
 
     ## Backends
@@ -70,13 +75,14 @@ def fp4_matmul(
             provided, CUTLASS will be used if the machine has a Blackwell GPU, and
             PyTorch will be used otherwise.
         input_config (QuantizationConfig | None): If `input` is provided in high
-            precision, this configuration will be passed to the `quantize_to_fp4` call
+            precision, this configuration will be passed to the `quantize` call
             done prior to the matrix multiplication.
         other_config (QuantizationConfig | None): If `other` is provided in high
-            precision, this configuration will be passed to the `quantize_to_fp4` call
+            precision, this configuration will be passed to the `quantize` call
             done prior to the matrix multiplication.
         out_dtype (DataType): The data type of the output tensor. Defaults to
             `DataType.bfloat16`.
+        kwargs (dict[str, Any]): Additional keyword arguments to pass to the backend.
 
     Returns:
         The output tensor.
@@ -87,16 +93,20 @@ def fp4_matmul(
         input_config = QuantizationConfig()
 
     if isinstance(input, torch.Tensor):
-        input = quantize_to_fp4(input, input_config)
+        input = quantize(input, input_config)
 
     if other_config is None:
         other_config = QuantizationConfig()
 
     if isinstance(other, torch.Tensor):
-        other = quantize_to_fp4(other, other_config)
+        other = quantize(other, other_config)
 
     if backend is None:
-        for backend_candidate in [MatmulBackend.cutlass, MatmulBackend.pytorch]:
+        for backend_candidate in [
+            MatmulBackend.cutlass,
+            MatmulBackend.triton,
+            MatmulBackend.pytorch,
+        ]:
             if AVAILABLE_BACKENDS[backend_candidate] is not None and AVAILABLE_BACKENDS[
                 backend_candidate
             ].is_supported(input, other, out_dtype=out_dtype):
@@ -107,9 +117,16 @@ def fp4_matmul(
             raise ValueError(msg)
 
     elif not AVAILABLE_BACKENDS[backend].is_supported(
-        input, other, out_dtype=out_dtype,
+        input,
+        other,
+        out_dtype=out_dtype,
     ):
         msg = f"Backend {backend} does not support the given parameters"
         raise ValueError(msg)
 
-    return AVAILABLE_BACKENDS[backend].fp4_matmul(input, other, out_dtype=out_dtype)
+    return AVAILABLE_BACKENDS[backend].quantized_matmul(
+        input,
+        other,
+        out_dtype=out_dtype,
+        **kwargs,
+    )

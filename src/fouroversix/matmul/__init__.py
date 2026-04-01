@@ -1,3 +1,3 @@
-from .frontend import fp4_matmul
+from .frontend import quantized_matmul
 
-__all__ = ["fp4_matmul"]
+__all__ = ["quantized_matmul"]

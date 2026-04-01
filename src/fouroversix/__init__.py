@@ -1,6 +1,6 @@
 from importlib.metadata import version
 
-from .matmul import fp4_matmul
+from .matmul import quantized_matmul
 from .model import (
     FourOverSixLinear,
     ModelQuantizationConfig,
@@ -8,7 +8,7 @@ from .model import (
     QuantizedModule,
     quantize_model,
 )
-from .quantize import QuantizationConfig, QuantizedTensor, quantize_to_fp4
+from .quantize import QuantizationConfig, QuantizedTensor, dequantize, quantize
 from .utils import DataType, MatmulBackend, QuantizeBackend, RoundStyle, ScaleRule
 from .weight_conversions import WeightConversions
 
@@ -33,7 +33,8 @@ __all__ = [
     "RoundStyle",
     "ScaleRule",
     "WeightConversions",
-    "fp4_matmul",
+    "dequantize",
+    "quantize",
     "quantize_model",
-    "quantize_to_fp4",
+    "quantized_matmul",
 ]

@@ -33,6 +33,7 @@ class Dependency(str, Enum):
     flash_attention = "flash_attention"
     fouroversix = "fouroversix"
     fp_quant = "fp_quant"
+    quartet_ii = "quartet_ii"
     qutlass = "qutlass"
     spinquant = "spinquant"
     transformer_engine = "transformer_engine"
@@ -112,7 +113,10 @@ cuda_version_to_image_tag = {
 
 
 def add_submodule(img: modal.Image, submodule: Submodule) -> modal.Image:
-    if submodule.has_untracked_or_unstaged_changes():
+    if (
+        submodule.has_untracked_or_unstaged_changes()
+        or submodule == Submodule.spinquant
+    ):
         # Submodule has uncommitted changes, build image with local copy
         return img.add_local_dir(
             submodule.get_local_path(),
@@ -191,6 +195,7 @@ def get_image(  # noqa: C901, PLR0912
     cuda_version: str = "12.9",
     deploy: bool = False,
     extra_env: dict[str, str] | None = None,
+    extra_apt_dependencies: list[str] | None = None,
     extra_pip_dependencies: list[str] | None = None,
     include_tests: bool = False,
     python_version: str = "3.13",
@@ -205,8 +210,13 @@ def get_image(  # noqa: C901, PLR0912
     if not pyproject_path.exists():
         pyproject_path = Path(__file__).parent.parent / "fouroversix" / "pyproject.toml"
 
-    with pyproject_path.open("rb") as f:
-        pyproject_data = tomllib.load(f)
+    if pyproject_path.exists():
+        with pyproject_path.open("rb") as f:
+            pyproject_data = tomllib.load(f)
+
+        requires = pyproject_data["build-system"]["requires"]
+    else:
+        requires = []
 
     img = (
         modal.Image.from_registry(
@@ -215,7 +225,7 @@ def get_image(  # noqa: C901, PLR0912
         )
         .entrypoint([])
         .apt_install("clang", "git")
-        .uv_pip_install(*pyproject_data["build-system"]["requires"], "numpy")
+        .uv_pip_install(*requires, "numpy")
         .uv_pip_install(
             f"torch=={pytorch_version}",
             extra_index_url=(
@@ -266,7 +276,7 @@ def get_image(  # noqa: C901, PLR0912
             img = (
                 add_submodule(
                     img.env(
-                        {"CUDA_ARCHS": "100", "FORCE_BUILD": "1", "MAX_JOBS": "32"},
+                        {"CUDA_ARCHS": "100", "FORCE_BUILD": "1", "MAX_JOBS": "16"},
                     ),
                     Submodule.cutlass,
                 )
@@ -277,6 +287,9 @@ def get_image(  # noqa: C901, PLR0912
                 )
                 .uv_pip_install(
                     *pyproject_data["project"]["optional-dependencies"]["evals"],
+                )
+                .uv_pip_install(
+                    "transformers @ git+https://github.com/kathrynle20/transformers.git@jack/dtypes",
                 )
                 .add_local_file(
                     "setup.py",
@@ -312,11 +325,27 @@ def get_image(  # noqa: C901, PLR0912
             )
 
             if not KERNEL_DEV_MODE:
-                img = img.run_function(install_fouroversix, cpu=32, memory=64 * 1024)
+                img = img.run_function(
+                    install_fouroversix,
+                    cpu=32,
+                    memory=64 * 1024,
+                    region="eastus",
+                )
 
         if dependency == Dependency.fp_quant:
             img = add_submodule(img, Submodule.fp_quant).run_commands(
                 f"pip install {Submodule.fp_quant.get_install_path()}/inference_lib",
+            )
+
+        if dependency == Dependency.quartet_ii:
+            img = (
+                img.apt_install("cmake")
+                .uv_pip_install("scikit-build-core")
+                .run_commands(
+                    "git clone https://github.com/IST-DASLab/Quartet-II.git "
+                    "/quartet_ii",
+                )
+                .run_commands("pip install --no-build-isolation /quartet_ii/kernels")
             )
 
         if dependency == Dependency.qutlass:
@@ -335,10 +364,26 @@ def get_image(  # noqa: C901, PLR0912
                 extra_options="--no-build-isolation",
             )
 
+    if extra_apt_dependencies is not None:
+        img = img.apt_install(*extra_apt_dependencies)
+
     if extra_pip_dependencies is not None:
         img = img.uv_pip_install(*extra_pip_dependencies)
 
-    img = img.env({"HF_HOME": FOUROVERSIX_CACHE_PATH.as_posix(), **(extra_env or {})})
+    img = img.env(
+        {
+            "HF_HOME": FOUROVERSIX_CACHE_PATH.as_posix(),
+            "TORCHINDUCTOR_CACHE_DIR": (
+                FOUROVERSIX_CACHE_PATH / "torchinductor"
+            ).as_posix(),
+            "TRITON_HOME": (FOUROVERSIX_CACHE_PATH / "triton").as_posix(),
+            "VLLM_CACHE_ROOT": (FOUROVERSIX_CACHE_PATH / "vllm").as_posix(),
+            "FLASHINFER_WORKSPACE_BASE": (
+                FOUROVERSIX_CACHE_PATH / "flashinfer"
+            ).as_posix(),
+            **(extra_env or {}),
+        },
+    )
 
     if run_before_copy is not None:
         img = run_before_copy(img)

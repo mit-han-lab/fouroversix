@@ -1,3 +1,3 @@
 # Matrix Multiplication
 
-::: fouroversix.fp4_matmul
+::: fouroversix.quantized_matmul

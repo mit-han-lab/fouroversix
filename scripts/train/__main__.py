@@ -94,7 +94,7 @@ def train(
         "--optimizer.lr",
         str(lr),
         "--lr_scheduler.warmup_steps",
-        "0",
+        "1000",
         "--lr_scheduler.decay_ratio",
         "0.15",
         "--lr_scheduler.decay_type",
@@ -172,7 +172,7 @@ class ModalTrainer:
 
 
 @click.command()
-@click.option("--batch-size", type=float, default=16)
+@click.option("--batch-size", type=float, default=8)
 @click.option("--checkpoint-interval", type=int, default=1000)
 @click.option("--checkpoint-keep-latest-k", type=int, default=0)
 @click.option("--checkpoint-load-step", type=int, default=-1)

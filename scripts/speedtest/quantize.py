@@ -7,18 +7,25 @@ import modal
 
 from ..resources import Dependency, app, get_image
 
-img = get_image(dependencies=[Dependency.transformer_engine, Dependency.fouroversix])
+img = get_image(dependencies=[Dependency.fouroversix, Dependency.transformer_engine])
 
 with img.imports():
     import torch
     import torch.utils.benchmark as benchmark
-    from fouroversix import QuantizationConfig, QuantizeBackend, RoundStyle, ScaleRule
+    from fouroversix import (
+        DataType,
+        QuantizationConfig,
+        QuantizeBackend,
+        RoundStyle,
+        ScaleRule,
+    )
     from fouroversix.quantize.frontend import AVAILABLE_BACKENDS
 
 
 def run_speedtest(
     *,
     block_scale_2d: bool = False,
+    dtype: DataType = DataType.nvfp4,
     input_shape: str = "1024,1024",
     repeats: int = 100,
     rht: bool = False,
@@ -33,6 +40,7 @@ def run_speedtest(
 
     print("Testing with config:")
     print(f"- block_scale_2d: {block_scale_2d}")
+    print(f"- dtype: {dtype}")
     print(f"- input_shape: {input_shape}")
     print(f"- rht: {rht}")
     print(f"- round_style: {round_style}")
@@ -49,6 +57,7 @@ def run_speedtest(
         config = QuantizationConfig(
             backend=backend,
             block_scale_2d=block_scale_2d,
+            dtype=dtype,
             rht=rht,
             round_style=RoundStyle(round_style),
             scale_rule=ScaleRule(scale_rule),
@@ -62,20 +71,21 @@ def run_speedtest(
             print("Not available")
             continue
 
-        if not backend_cls.is_supported(x, config):
+        if not backend_cls.can_quantize(x, config):
             print("Not supported")
             continue
 
         config = QuantizationConfig(
             backend=backend,
+            dtype=dtype,
             rht=rht,
             round_style=RoundStyle(round_style),
             scale_rule=ScaleRule(scale_rule),
         )
 
         t = benchmark.Timer(
-            setup="from fouroversix import quantize_to_fp4",
-            stmt="quantize_to_fp4(x, config)",
+            setup="from fouroversix import quantize",
+            stmt="quantize(x, config)",
             globals={"x": x, "config": config},
         )
 
@@ -89,6 +99,7 @@ def run_speedtest_on_modal(**kwargs: dict[str, Any]) -> None:
 
 @click.command()
 @click.option("--block-scale-2d", is_flag=True)
+@click.option("--dtype", type=DataType, default=DataType.nvfp4)
 @click.option("--input-shape", type=str, default="1024,1024")
 @click.option("--modal", is_flag=True)
 @click.option("--repeats", type=int, default=100)

@@ -3,7 +3,7 @@ import torch
 import fouroversix._C  # noqa: F401
 
 
-def quantize_to_fp4(
+def quantize(
     x: torch.Tensor,
     is_nvfp4: bool,  # noqa: FBT001
     is_rtn: bool,  # noqa: FBT001
@@ -13,7 +13,7 @@ def quantize_to_fp4(
     selection_rule: int,
     rbits: int,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    return torch.ops.fouroversix.quantize_to_fp4.default(
+    return torch.ops.fouroversix.quantize.default(
         x,
         is_nvfp4,
         is_rtn,
@@ -25,7 +25,7 @@ def quantize_to_fp4(
     )
 
 
-@torch.library.register_fake("fouroversix::quantize_to_fp4")
+@torch.library.register_fake("fouroversix::quantize")
 def _(
     x: torch.Tensor,
     is_nvfp4: bool,  # noqa: FBT001

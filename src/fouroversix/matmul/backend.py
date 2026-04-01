@@ -29,10 +29,6 @@ class MatmulBackendBase(ABC):
         if not cls.is_available():
             return False
 
-        if input.dtype != other.dtype:
-            msg = "Both inputs must have the same dtype"
-            raise ValueError(msg)
-
         if input.original_shape[1] != other.original_shape[1]:
             msg = (
                 "The first input must be in row-major layout, the second input must be"
@@ -45,7 +41,7 @@ class MatmulBackendBase(ABC):
 
     @classmethod
     @abstractmethod
-    def fp4_matmul(
+    def quantized_matmul(
         cls,
         input: QuantizedTensor,
         other: QuantizedTensor,

@@ -46,10 +46,14 @@ class CUTLASSMatmulBackend(MatmulBackendBase):
         if not super().is_supported(input, other, out_dtype=out_dtype):
             return False
 
-        return input.device.type == "cuda"
+        return (
+            input.dtype == other.dtype
+            and input.dtype in {DataType.mxfp4, DataType.nvfp4}
+            and input.device.type == "cuda"
+        )
 
     @classmethod
-    def fp4_matmul(
+    def quantized_matmul(
         cls,
         input: QuantizedTensor,
         other: QuantizedTensor,
@@ -82,10 +86,14 @@ class CUTLASSMatmulBackend(MatmulBackendBase):
             alpha = (
                 (input.amax * other.amax)
                 / (
-                    input.scale_rule.max_allowed_e2m1_value()
-                    * input.scale_rule.max_allowed_e4m3_value()
-                    * other.scale_rule.max_allowed_e2m1_value()
-                    * other.scale_rule.max_allowed_e4m3_value()
+                    input.dtype.quantized_value_type.get_maximum_value(input.scale_rule)
+                    * input.dtype.scale_type.get_maximum_value(input.scale_rule)
+                    * other.dtype.quantized_value_type.get_maximum_value(
+                        other.scale_rule,
+                    )
+                    * other.dtype.scale_type.get_maximum_value(other.scale_rule)
+                    * input.round_style.adjustment_factor
+                    * other.round_style.adjustment_factor
                 )
             ).to(torch.float32)
 

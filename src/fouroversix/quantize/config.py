@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 from fouroversix.utils import DataType, QuantizeBackend, RoundStyle, ScaleRule
 
@@ -17,19 +18,24 @@ class QuantizationConfig:
             weight matrix during training, so that W and W.T will be equivalent after
             quantization.
         dtype (DataType): The data type to quantize to.
+        kwargs (dict[str, Any]): Additional keyword arguments to pass to the backend.
+        pseudo_quantize (bool): If True, a pseudo-quantized high-precision tensor will
+            be returned instead of a quantized tensor.
         rht (bool): If True, the random Hadamard transform will be applied to the input
             prior to quantization.
         round_style (RoundStyle): The rounding style to apply during quantization.
         scale_rule (ScaleRule): The scaling rule to use during quantization.
         transpose (bool): If True, the output will be a quantized version of the
             transposed input. This may be helpful for certain operations during training
-            as `fp4_matmul` requires that both tensors are provided in row-major format.
+            as `quantized_matmul` requires that both tensors are provided in row-major format.
 
     """
 
     backend: QuantizeBackend | None = None
     block_scale_2d: bool = False
     dtype: DataType = DataType.nvfp4
+    kwargs: dict[str, Any] = field(default_factory=dict)
+    pseudo_quantize: bool = False
     rht: bool = False
     round_style: RoundStyle = RoundStyle.nearest
     scale_rule: ScaleRule = ScaleRule.mse

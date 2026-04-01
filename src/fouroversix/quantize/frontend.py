@@ -16,10 +16,10 @@ AVAILABLE_BACKENDS = {
 }
 
 
-def quantize_to_fp4(
+def quantize(
     x: torch.Tensor,
     config: QuantizationConfig | None = None,
-) -> QuantizedTensor:
+) -> QuantizedTensor | torch.Tensor:
     """
     Quantize a tensor to FP4.
 
@@ -29,7 +29,7 @@ def quantize_to_fp4(
 
     ```python
     x = torch.tensor(1024, 1024, dtype=torch.bfloat16, device="cuda")
-    x_quantized = quantize_to_fp4(x)
+    x_quantized = quantize(x)
     ```
 
     ### Without Four Over Six
@@ -37,7 +37,7 @@ def quantize_to_fp4(
     ```python
     x = torch.tensor(1024, 1024, dtype=torch.bfloat16, device="cuda")
     config = QuantizationConfig(scale_rule="static_6")
-    x_quantized = quantize_to_fp4(x, config)
+    x_quantized = quantize(x, config)
     ```
 
     ### With Stochastic Rounding
@@ -45,7 +45,7 @@ def quantize_to_fp4(
     ```python
     x = torch.tensor(1024, 1024, dtype=torch.bfloat16, device="cuda")
     config = QuantizationConfig(round_style="stochastic")
-    x_quantized = quantize_to_fp4(x, config)
+    x_quantized = quantize(x, config)
     ```
 
     ### With the Random Hadamard Transform
@@ -55,7 +55,7 @@ def quantize_to_fp4(
 
     x = torch.tensor(1024, 1024, dtype=torch.bfloat16, device="cuda")
     config = QuantizationConfig(rht=True)
-    x_quantized = quantize_to_fp4(x, config)
+    x_quantized = quantize(x, config)
     ```
 
     ## Backends
@@ -71,7 +71,7 @@ def quantize_to_fp4(
     - **PyTorch**: A slow implementation written in PyTorch which supports all
         operations and can be run on any GPU.
 
-    If `quantize_to_fp4` is called with `backend=None`, a backend will be selected
+    If `quantize` is called with `backend=None`, a backend will be selected
     automatically based on the following rules:
 
     - If there is no GPU available, or if the available GPU is not a Blackwell GPU,
@@ -108,15 +108,50 @@ def quantize_to_fp4(
         ]:
             if AVAILABLE_BACKENDS[backend] is not None and AVAILABLE_BACKENDS[
                 backend
-            ].is_supported(x, config):
+            ].can_quantize(x, config):
                 selected_backend = backend
                 break
         else:
             msg = "No backend found that supports the given parameters"
             raise ValueError(msg)
 
-    elif not AVAILABLE_BACKENDS[selected_backend].is_supported(x, config):
+    elif not AVAILABLE_BACKENDS[selected_backend].can_quantize(x, config):
         msg = f"Backend {selected_backend} does not support the given parameters"
         raise ValueError(msg)
 
-    return AVAILABLE_BACKENDS[selected_backend].quantize_to_fp4(x, config)
+    if config.pseudo_quantize:
+        return AVAILABLE_BACKENDS[selected_backend].pseudo_quantize(x, config)
+
+    return AVAILABLE_BACKENDS[selected_backend].quantize(x, config)
+
+
+def dequantize(
+    tensor: QuantizedTensor,
+    dtype: torch.dtype = torch.bfloat16,
+    *,
+    backend: QuantizeBackend | None = None,
+    intermediate_dtype: torch.dtype = torch.float16,
+) -> torch.Tensor:
+    selected_backend = backend
+
+    if selected_backend is None:
+        for backend_candidate in [
+            QuantizeBackend.cuda,
+            QuantizeBackend.triton,
+            QuantizeBackend.pytorch,
+        ]:
+            if AVAILABLE_BACKENDS[backend_candidate] is not None and AVAILABLE_BACKENDS[
+                backend_candidate
+            ].can_dequantize(tensor):
+                selected_backend = backend_candidate
+                break
+
+    elif not AVAILABLE_BACKENDS[selected_backend].can_dequantize(tensor):
+        msg = f"Backend {selected_backend} does not support the given parameters"
+        raise ValueError(msg)
+
+    return AVAILABLE_BACKENDS[selected_backend].dequantize(
+        tensor,
+        dtype,
+        intermediate_dtype=intermediate_dtype,
+    )

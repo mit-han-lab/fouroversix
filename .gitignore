@@ -14,3 +14,4 @@ dist/
 site/
 results.db
 /ptq/
+*.png

@@ -37,13 +37,17 @@ class TransformerEngineQuantizeBackend(QuantizeBackendBase):
         return True
 
     @classmethod
-    def is_supported(cls, x: torch.Tensor, config: QuantizationConfig) -> bool:
+    def can_quantize(  # noqa: PLR0911
+        cls,
+        x: torch.Tensor,
+        config: QuantizationConfig,
+    ) -> bool:
         """
         Return True if the Transformer Engine backend supports the given input and
         quantization configuration.
         """
 
-        if not super().is_supported(x, config):
+        if not super().can_quantize(x, config):
             return False
 
         if config.dtype != DataType.nvfp4 or config.scale_rule != ScaleRule.static_6:
@@ -52,13 +56,19 @@ class TransformerEngineQuantizeBackend(QuantizeBackendBase):
         if not config.transpose and config.rht:
             return False
 
-        if config.transpose and config.rht and config.block_scale_2d:  # noqa: SIM103
+        if config.transpose and config.rht and config.block_scale_2d:
+            return False
+
+        if config.round_style == RoundStyle.stochastic_unbiased:
+            return False
+
+        if config.pseudo_quantize:  # noqa: SIM103
             return False
 
         return True
 
     @classmethod
-    def quantize_to_fp4(
+    def quantize(
         cls,
         x: torch.Tensor,
         config: QuantizationConfig,
@@ -106,4 +116,5 @@ class TransformerEngineQuantizeBackend(QuantizeBackendBase):
             config.dtype,
             (x.shape[1], x.shape[0]) if config.transpose else x.shape,
             config.scale_rule,
+            config.round_style,
         )

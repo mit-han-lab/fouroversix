@@ -1,6 +1,5 @@
-
 import torch
-from fouroversix.quantize import QuantizedTensor
+from fouroversix.quantize import QuantizedTensor, dequantize
 from fouroversix.utils import DataType
 
 from .backend import MatmulBackendBase
@@ -19,7 +18,19 @@ class PyTorchMatmulBackend(MatmulBackendBase):
         return True
 
     @classmethod
-    def fp4_matmul(
+    def is_supported(
+        cls,
+        input: QuantizedTensor,
+        other: QuantizedTensor,
+        *,
+        out_dtype: DataType,
+    ) -> bool:
+        """Return True if this backend supports the given inputs."""
+
+        return super().is_supported(input, other, out_dtype=out_dtype)
+
+    @classmethod
+    def quantized_matmul(
         cls,
         input: QuantizedTensor,
         other: QuantizedTensor,
@@ -31,9 +42,9 @@ class PyTorchMatmulBackend(MatmulBackendBase):
         out_shape = (input.original_shape[0], other.original_shape[0])
 
         out = torch.matmul(
-            input.dequantize(dtype=torch.float32),
-            other.dequantize(dtype=torch.float32).T,
-        ).to(out_dtype.torch_dtype())
+            dequantize(input, dtype=torch.float32),
+            dequantize(other, dtype=torch.float32).T,
+        ).to(out_dtype.torch_dtype)
 
         if out.shape != out_shape:
             out = out[: out_shape[0], : out_shape[1]]

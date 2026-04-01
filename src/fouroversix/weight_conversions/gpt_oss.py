@@ -1,5 +1,5 @@
 import torch
-from fouroversix import DataType, ScaleRule
+from fouroversix import DataType, ScaleRule, dequantize
 from fouroversix.quantize import QuantizedTensor
 from transformers import ConversionOps, GptOssConfig, WeightConverter
 
@@ -46,7 +46,9 @@ class FourOverSixGptOssDeserialize(ConversionOps):
             weight_uint8 = weight[e].to(torch.uint8)
             quantized_tensor = QuantizedTensor(
                 values=weight_uint8,
-                scale_factors=scales[e].to(torch.uint8).view(self.dtype.scale_dtype()),
+                scale_factors=scales[e]
+                .to(torch.uint8)
+                .view(self.dtype.scale_type.torch_dtype),
                 amax=torch.ones(
                     (1,),
                     device=weight[e].device,
@@ -60,7 +62,7 @@ class FourOverSixGptOssDeserialize(ConversionOps):
                 scale_rule=self.scale_rule,
             )
 
-            dequantized = quantized_tensor.dequantize()
+            dequantized = dequantize(quantized_tensor)
             dequantized_proj.append(dequantized)
 
         dequantized_weight = torch.stack(dequantized_proj, dim=0)

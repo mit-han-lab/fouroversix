@@ -33,13 +33,13 @@ class CUDAQuantizeBackend(QuantizeBackendBase):
         return True
 
     @classmethod
-    def is_supported(cls, x: torch.Tensor, config: QuantizationConfig) -> bool:
+    def can_quantize(cls, x: torch.Tensor, config: QuantizationConfig) -> bool:
         """
         Return True if the CUDA backend supports the given input and quantization
         configuration.
         """
 
-        if not super().is_supported(x, config):
+        if not super().can_quantize(x, config):
             return False
 
         return (
@@ -48,10 +48,11 @@ class CUDAQuantizeBackend(QuantizeBackendBase):
             and config.round_style == RoundStyle.nearest
             and config.dtype == DataType.nvfp4
             and not config.transpose
+            and not config.pseudo_quantize
         )
 
     @classmethod
-    def quantize_to_fp4(
+    def quantize(
         cls,
         x: torch.Tensor,
         config: QuantizationConfig,
@@ -68,17 +69,17 @@ class CUDAQuantizeBackend(QuantizeBackendBase):
 
         """
 
-        from .ops import quantize_to_fp4
+        from .ops import quantize
 
-        values, scale_factors, amax = quantize_to_fp4(
+        values, scale_factors, amax = quantize(
             x,
             config.dtype == DataType.nvfp4,
             config.round_style == RoundStyle.nearest,
             config.rht,
             config.block_scale_2d,
             config.transpose,
-            config.scale_rule.cuda_id(),
-            0,
+            config.scale_rule.cuda_id,
+            config.kwargs.get("rbits", -1),
         )
 
         return QuantizedTensor(
@@ -88,4 +89,5 @@ class CUDAQuantizeBackend(QuantizeBackendBase):
             config.dtype,
             (x.shape[1], x.shape[0]) if config.transpose else x.shape,
             config.scale_rule,
+            config.round_style,
         )

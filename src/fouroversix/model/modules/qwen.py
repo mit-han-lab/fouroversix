@@ -2,13 +2,13 @@ import warnings
 from typing import Any
 
 import torch
-from fouroversix.matmul import fp4_matmul
 from fouroversix.model.config import ModuleQuantizationConfig
 from fouroversix.model.quantize import QuantizedModule
-from fouroversix.quantize import QuantizationConfig, QuantizedTensor, quantize_to_fp4
+from fouroversix.quantize import dequantize, quantize
 from torch import nn
 
 try:
+    from transformers.integrations.moe import _default_apply_gate, _grouped_linear
     from transformers.models.qwen3_5_moe.modeling_qwen3_5_moe import Qwen3_5MoeExperts
 except ImportError:
     warnings.warn(
@@ -56,90 +56,17 @@ class FourOverSixQwenExperts(nn.Module):
 
         self.act_fn = module.act_fn
 
-        if not self.config.keep_master_weights:
+        self.has_bias = False
+        self.is_transposed = False
 
-            self.register_buffer(
-                "quantized_down_proj_values",
-                nn.Parameter(
-                    torch.zeros(
-                        self.num_experts,
-                        self.hidden_dim,
-                        self.intermediate_dim // 2,
-                        dtype=torch.uint8,
-                    ),
-                    requires_grad=False,
-                ),
-            )
-
-            self.register_buffer(
-                "quantized_gate_up_proj_values",
-                nn.Parameter(
-                    torch.zeros(
-                        self.num_experts,
-                        self.intermediate_dim * 2,
-                        self.hidden_dim // 2,
-                        dtype=torch.uint8,
-                    ),
-                    requires_grad=False,
-                ),
-            )
-
-            self.register_buffer(
-                "quantized_down_proj_scale_factors",
-                nn.Parameter(
-                    torch.zeros(
-                        self.num_experts,
-                        self.hidden_dim
-                        * self.intermediate_dim
-                        // self.config.dtype.block_size(),
-                        dtype=self.config.dtype.scale_dtype(),
-                    ),
-                    requires_grad=False,
-                ),
-            )
-            self.register_buffer(
-                "quantized_gate_up_proj_scale_factors",
-                nn.Parameter(
-                    torch.zeros(
-                        self.num_experts,
-                        self.hidden_dim
-                        * (self.intermediate_dim * 2)
-                        // self.config.dtype.block_size(),
-                        dtype=self.config.dtype.scale_dtype(),
-                    ),
-                    requires_grad=False,
-                ),
-            )
-
-            self.register_buffer(
-                "quantized_down_proj_amax",
-                nn.Parameter(
-                    torch.zeros(self.num_experts, 1, dtype=torch.float32),
-                    requires_grad=False,
-                ),
-            )
-            self.register_buffer(
-                "quantized_gate_up_proj_amax",
-                nn.Parameter(
-                    torch.zeros(self.num_experts, 1, dtype=torch.float32),
-                    requires_grad=False,
-                ),
-            )
-
-            self.register_buffer(
-                "quantized_down_proj_metadata",
-                nn.Parameter(
-                    torch.zeros(self.num_experts, 4, dtype=torch.int32),
-                    requires_grad=False,
-                ),
-            )
-            self.register_buffer(
-                "quantized_gate_up_proj_metadata",
-                nn.Parameter(
-                    torch.zeros(self.num_experts, 4, dtype=torch.int32),
-                    requires_grad=False,
-                ),
-            )
+        self.register_buffer(
+            "down_proj_pseudoquant",
+            nn.Parameter(torch.empty_like(self.down_proj), requires_grad=False),
+        )
+        self.register_buffer(
+            "gate_up_proj_pseudoquant",
+            nn.Parameter(torch.empty_like(self.gate_up_proj), requires_grad=False),
+        )
 
     @property
     def parameters_to_quantize(self) -> tuple[str, ...]:
@@ -149,12 +76,7 @@ class FourOverSixQwenExperts(nn.Module):
     def get_element_size(self, parameter_name: str) -> float:
         """Get the size of a single element, in bytes, for a parameter."""
 
-        return {
-            "quantized_down_proj_values": 0.5,
-            "quantized_gate_up_proj_values": 0.5,
-            "down_proj": 9 / 16,
-            "gate_up_proj": 9 / 16,
-        }.get(
+        return {"down_proj_pseudoquant": 2, "gate_up_proj_pseudoquant": 2}.get(
             parameter_name,
             getattr(self, parameter_name).element_size(),
         )
@@ -171,156 +93,126 @@ class FourOverSixQwenExperts(nn.Module):
         high-precision weight.
         """
 
-        if "bias" in parameter_name:
-            return {parameter_name: parameter}
-
-        weight_config = QuantizationConfig(
-            backend=self.config.quantize_backend,
-            dtype=self.config.dtype,
-            scale_rule=self.config.weight_scale_rule,
-        )
-
-        quantized_proj = []
-        for e in range(parameter.shape[0]):
-            q = quantize_to_fp4(parameter[e], weight_config)
-            quantized_proj.append(q)
-
-        if "down" in parameter_name:
-            prefix = "down"
-        elif "gate_up" in parameter_name:
-            prefix = "gate_up"
-
         return {
-            f"quantized_{prefix}_proj_values": torch.stack(
-                [tensor.values for tensor in quantized_proj],
-                dim=0,
-            ),
-            f"quantized_{prefix}_proj_scale_factors": torch.stack(
-                [tensor.scale_factors for tensor in quantized_proj],
-                dim=0,
-            ),
-            f"quantized_{prefix}_proj_amax": torch.stack(
-                [tensor.amax for tensor in quantized_proj],
-                dim=0,
-            ),
-            f"quantized_{prefix}_proj_metadata": torch.stack(
-                [
-                    torch.tensor(
-                        [
-                            tensor.original_shape[0],
-                            tensor.original_shape[1],
-                            tensor.padded_shape[0],
-                            tensor.padded_shape[1],
-                        ],
-                    )
-                    for tensor in quantized_proj
-                ],
-            ),
+            f"{parameter_name}_pseudoquant": dequantize(
+                quantize(
+                    parameter.reshape(-1, parameter.shape[-1]),
+                    self.config.get_weight_config(),
+                ),
+            ).reshape_as(parameter),
         }
 
     def forward(
-        self,
+        self: torch.nn.Module,
         hidden_states: torch.Tensor,
         top_k_index: torch.Tensor,
         top_k_weights: torch.Tensor,
     ) -> torch.Tensor:
-        """Forward pass for the FP4 experts layer."""
+        """Quantized Qwen3.5 experts forward pass."""
 
-        down_proj, gate_up_proj = self.quantized_weights()
+        device = hidden_states.device
+        num_top_k = top_k_index.size(-1)
+        num_tokens = hidden_states.size(0)
+        hidden_dim = hidden_states.size(-1)
 
-        final_hidden_states = torch.zeros_like(hidden_states)
-        with torch.no_grad():
-            expert_mask = torch.nn.functional.one_hot(
-                top_k_index,
-                num_classes=self.num_experts,
-            )
-            expert_mask = expert_mask.permute(2, 1, 0)
-            expert_hit = torch.greater(expert_mask.sum(dim=(-1, -2)), 0).nonzero()
+        # Reshape for easier indexing
+        # S is the number of selected tokens-experts pairs (S = num_tokens * num_top_k)
+        token_idx = (
+            torch.arange(num_tokens, device=device)
+            .unsqueeze(1)
+            .expand(-1, num_top_k)
+            .reshape(-1)
+        )  # (S,)
+        sample_weights = top_k_weights.reshape(-1)  # (S,)
+        expert_ids = top_k_index.reshape(-1)  # (S,)
 
-        for [expert_idx] in expert_hit:
-            if expert_idx == self.num_experts:
-                continue
+        # Get current hidden states for selected samples
+        selected_hidden_states = hidden_states[token_idx]
 
-            fprop_activation_config = QuantizationConfig(
-                backend=self.config.quantize_backend,
-                dtype=self.config.dtype,
-                scale_rule=self.config.activation_scale_rule,
-            )
-            top_k_pos, token_idx = torch.where(expert_mask[expert_idx])
-            current_state = hidden_states[token_idx]
-            gate, up = fp4_matmul(
-                current_state,
-                gate_up_proj[expert_idx],
-                input_config=fprop_activation_config,
-                out_dtype=self.config.output_dtype,
-            ).chunk(2, dim=-1)
-            current_hidden_states = self.act_fn(gate) * up
-            current_hidden_states = fp4_matmul(
-                current_hidden_states,
-                down_proj[expert_idx],
-                input_config=fprop_activation_config,
-                out_dtype=self.config.output_dtype,
-            )
-            current_hidden_states = (
-                current_hidden_states * top_k_weights[token_idx, top_k_pos, None]
-            )
-            final_hidden_states.index_add_(
-                0,
-                token_idx,
-                current_hidden_states.to(final_hidden_states.dtype),
-            )
+        # Sort by expert for grouped processing
+        perm = torch.argsort(expert_ids)
+        inv_perm = torch.argsort(perm)
+        expert_ids_g = expert_ids[perm]
+        sample_weights_g = sample_weights[perm]
+        selected_hidden_states_g = selected_hidden_states[perm]
 
-        return final_hidden_states
+        # Select expert weights and biases for selected samples
+        # NOTE: We keep all experts here and rely on offsets to target the active ones.
+        # I have already implemented a version that only passes the active experts, but
+        # to do so I had to use torch.unique which breaks the graph capture
+        # (data-dependent). Also there were no speedup gains from it in my experiments,
+        # even in eager mode.
+        selected_gate_up = self.gate_up_proj_pseudoquant
+        selected_down = self.down_proj_pseudoquant
+        selected_gate_up_bias = (
+            self.gate_up_proj_bias[expert_ids_g] if self.has_bias else None
+        )
+        selected_down_bias = (
+            self.down_proj_bias[expert_ids_g] if self.has_bias else None
+        )
 
-    def quantized_weights(self) -> tuple[list[QuantizedTensor], list[QuantizedTensor]]:
-        """Return quantized parameters as QuantizedTensor."""
+        # Compute offsets for grouped_mm
+        # using histc instead of bincount to avoid cuda graph issues
+        # With deterministic algorithms, CPU only supports float input, CUDA only
+        # supports int input.
+        histc_input = (
+            expert_ids_g.float() if device.type == "cpu" else expert_ids_g.int()
+        )
+        num_tokens_per_expert = torch.histc(
+            histc_input,
+            bins=self.num_experts,
+            min=0,
+            max=self.num_experts - 1,
+        )
+        offsets = torch.cumsum(num_tokens_per_expert, dim=0, dtype=torch.int32)
 
-        if not hasattr(self, "_quantized_weights"):
-            weight_config = self.config.get_weight_config()
-            if self.config.keep_master_weights:
-                down = [
-                    quantize_to_fp4(self.down_proj[e], weight_config)
-                    for e in range(self.num_experts)
-                ]
-                gate_up = [
-                    quantize_to_fp4(self.gate_up_proj[e], weight_config)
-                    for e in range(self.num_experts)
-                ]
-                return (down, gate_up)
+        selected_hidden_states_g = dequantize(
+            quantize(
+                selected_hidden_states_g,
+                self.config.get_activation_config(),
+            ),
+        )
 
-            down = []
-            gate_up = []
-            for e in range(self.num_experts):
-                down.append(
-                    QuantizedTensor(
-                        values=self.quantized_down_proj_values.data[e],
-                        scale_factors=self.quantized_down_proj_scale_factors.data[e],
-                        amax=self.quantized_down_proj_amax.data[e],
-                        dtype=self.config.dtype,
-                        original_shape=tuple(
-                            self.quantized_down_proj_metadata.data[e, :2].tolist(),
-                        ),
-                        scale_rule=self.config.weight_scale_rule,
-                        padded_shape=tuple(
-                            self.quantized_down_proj_metadata.data[e, 2:].tolist(),
-                        ),
-                    ),
-                )
-                gate_up.append(
-                    QuantizedTensor(
-                        values=self.quantized_gate_up_proj_values.data[e],
-                        scale_factors=self.quantized_gate_up_proj_scale_factors.data[e],
-                        amax=self.quantized_gate_up_proj_amax.data[e],
-                        dtype=self.config.dtype,
-                        original_shape=tuple(
-                            self.quantized_gate_up_proj_metadata.data[e, :2].tolist(),
-                        ),
-                        scale_rule=self.config.weight_scale_rule,
-                        padded_shape=tuple(
-                            self.quantized_gate_up_proj_metadata.data[e, 2:].tolist(),
-                        ),
-                    ),
-                )
-            self._quantized_weights = (down, gate_up)
+        # --- Up projection per expert (grouped) ---
+        gate_up_out = _grouped_linear(
+            selected_hidden_states_g,
+            selected_gate_up,
+            offs=offsets,
+            bias=selected_gate_up_bias,
+            is_transposed=self.is_transposed,
+        )  # (S, 2 * intermediate_dim)
 
-        return self._quantized_weights
+        # Apply gating
+        gated_out = _default_apply_gate(self, gate_up_out)  # (S, intermediate_dim)
+
+        gated_out = dequantize(
+            quantize(gated_out, self.config.get_activation_config()),
+        )
+
+        # --- Down projection per expert (grouped) ---
+        out_per_sample_g = _grouped_linear(
+            gated_out,
+            selected_down,
+            offs=offsets,
+            bias=selected_down_bias,
+            is_transposed=self.is_transposed,
+        )  # (S, hidden_dim)
+
+        # Apply routing weights
+        out_per_sample_g = out_per_sample_g * sample_weights_g.unsqueeze(
+            -1,
+        )  # (S, hidden_dim)
+
+        # Restore original order
+        out_per_sample = out_per_sample_g[inv_perm]
+
+        # Accumulate results using deterministic reshape+sum instead of index_add_
+        # (index_add_ with duplicate indices is non-deterministic on CUDA due to
+        # atomicAdd)
+        final_hidden_states = out_per_sample.view(
+            num_tokens,
+            num_top_k,
+            hidden_dim,
+        ).sum(dim=1)
+
+        return final_hidden_states.to(hidden_states.dtype)

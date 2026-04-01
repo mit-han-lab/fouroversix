@@ -96,7 +96,7 @@ namespace fouroversix
                                                               { run_fp4_quant_<fp16_type, Is_nvfp4, Is_rht, Is_transpose>(params, stream); }); }); }); });
     }
 
-    std::tuple<at::Tensor, at::Tensor, at::Tensor> quantize_to_fp4(
+    std::tuple<at::Tensor, at::Tensor, at::Tensor> quantize(
         const at::Tensor &x,
         const bool is_nvfp4,
         const bool is_rtn,
@@ -240,6 +240,6 @@ namespace fouroversix
 
     TORCH_LIBRARY_IMPL(fouroversix, CUDA, m)
     {
-        m.impl("quantize_to_fp4", &quantize_to_fp4);
+        m.impl("quantize", &quantize);
     }
 }

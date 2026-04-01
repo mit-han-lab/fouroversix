@@ -1,13 +1,12 @@
 from typing import Any
 
 import torch
-from fouroversix.matmul import fp4_matmul
+from fouroversix.matmul import quantized_matmul
 from fouroversix.model.config import ModuleQuantizationConfig
 from fouroversix.model.quantize import QuantizedModule
 from fouroversix.quantize import (
-    QuantizationConfig,
     QuantizedTensor,
-    quantize_to_fp4,
+    quantize,
 )
 from torch import nn
 from transformers import GptOssConfig
@@ -118,7 +117,8 @@ class FourOverSixGptOssExperts(nn.Module):
                     torch.zeros(
                         self.num_experts,
                         self.intermediate_size,
-                        self.hidden_size // 2,
+                        self.hidden_size
+                        // self.config.weight_dtype.quantized_value_type.packing_factor,
                         dtype=torch.uint8,
                     ),
                     requires_grad=False,
@@ -131,7 +131,8 @@ class FourOverSixGptOssExperts(nn.Module):
                     torch.zeros(
                         self.num_experts,
                         self.intermediate_size * 2,
-                        self.hidden_size // 2,
+                        self.hidden_size
+                        // self.config.weight_dtype.quantized_value_type.packing_factor,
                         dtype=torch.uint8,
                     ),
                     requires_grad=False,
@@ -145,8 +146,8 @@ class FourOverSixGptOssExperts(nn.Module):
                         self.num_experts,
                         self.hidden_size
                         * self.intermediate_size
-                        // self.config.dtype.block_size(),
-                        dtype=self.config.dtype.scale_dtype(),
+                        // self.config.weight_dtype.block_size,
+                        dtype=self.config.weight_dtype.scale_type.torch_dtype,
                     ),
                     requires_grad=False,
                 ),
@@ -158,8 +159,8 @@ class FourOverSixGptOssExperts(nn.Module):
                         self.num_experts,
                         self.hidden_size
                         * (self.intermediate_size * 2)
-                        // self.config.dtype.block_size(),
-                        dtype=self.config.dtype.scale_dtype(),
+                        // self.config.weight_dtype.block_size,
+                        dtype=self.config.weight_dtype.scale_type.torch_dtype,
                     ),
                     requires_grad=False,
                 ),
@@ -183,14 +184,14 @@ class FourOverSixGptOssExperts(nn.Module):
             self.register_buffer(
                 "quantized_down_proj_metadata",
                 nn.Parameter(
-                    torch.zeros(self.num_experts, 4, dtype=torch.int32),
+                    torch.zeros(self.num_experts, 6, dtype=torch.int32),
                     requires_grad=False,
                 ),
             )
             self.register_buffer(
                 "quantized_gate_up_proj_metadata",
                 nn.Parameter(
-                    torch.zeros(self.num_experts, 4, dtype=torch.int32),
+                    torch.zeros(self.num_experts, 6, dtype=torch.int32),
                     requires_grad=False,
                 ),
             )
@@ -224,15 +225,11 @@ class FourOverSixGptOssExperts(nn.Module):
         high-precision weight.
         """
 
-        weight_config = QuantizationConfig(
-            backend=self.config.quantize_backend,
-            dtype=self.config.dtype,
-            scale_rule=self.config.weight_scale_rule,
-        )
+        weight_config = self.config.get_weight_config()
 
         quantized_proj = []
         for e in range(parameter.shape[0]):
-            q = quantize_to_fp4(parameter[e], weight_config)
+            q = quantize(parameter[e], weight_config)
             quantized_proj.append(q)
 
         if "down" in parameter_name:
@@ -261,6 +258,8 @@ class FourOverSixGptOssExperts(nn.Module):
                             tensor.original_shape[1],
                             tensor.padded_shape[0],
                             tensor.padded_shape[1],
+                            1,
+                            (1 if tensor.scale_factors_are_in_blackwell_layout else 0),
                         ],
                     )
                     for tensor in quantized_proj
@@ -304,13 +303,9 @@ class FourOverSixGptOssExperts(nn.Module):
             current_state = hidden_states[token_idx]
 
             # Gate-up projection
-            fprop_activation_config = QuantizationConfig(
-                backend=self.config.quantize_backend,
-                dtype=self.config.dtype,
-                scale_rule=self.config.activation_scale_rule,
-            )
+            fprop_activation_config = self.config.get_activation_config()
 
-            gate_up = fp4_matmul(
+            gate_up = quantized_matmul(
                 current_state,
                 gate_up_proj[expert_idx],
                 input_config=fprop_activation_config,
@@ -325,7 +320,7 @@ class FourOverSixGptOssExperts(nn.Module):
             gated_output = (up + 1) * glu
 
             # Down projection
-            out = fp4_matmul(
+            out = quantized_matmul(
                 gated_output,
                 down_proj[expert_idx],
                 input_config=fprop_activation_config,
@@ -348,11 +343,11 @@ class FourOverSixGptOssExperts(nn.Module):
             weight_config = self.config.get_weight_config()
             if self.config.keep_master_weights:
                 down = [
-                    quantize_to_fp4(self.down_proj[e], weight_config)
+                    quantize(self.down_proj[e], weight_config)
                     for e in range(self.num_experts)
                 ]
                 gate_up = [
-                    quantize_to_fp4(self.gate_up_proj[e], weight_config)
+                    quantize(self.gate_up_proj[e], weight_config)
                     for e in range(self.num_experts)
                 ]
                 return (down, gate_up)
@@ -365,13 +360,16 @@ class FourOverSixGptOssExperts(nn.Module):
                         values=self.quantized_down_proj_values.data[e],
                         scale_factors=self.quantized_down_proj_scale_factors.data[e],
                         amax=self.quantized_down_proj_amax.data[e],
-                        dtype=self.config.dtype,
+                        dtype=self.config.weight_dtype,
                         original_shape=tuple(
                             self.quantized_down_proj_metadata.data[e, :2].tolist(),
                         ),
                         scale_rule=self.config.weight_scale_rule,
                         padded_shape=tuple(
-                            self.quantized_down_proj_metadata.data[e, 2:].tolist(),
+                            self.quantized_down_proj_metadata.data[e, 2:4].tolist(),
+                        ),
+                        scale_factors_are_in_blackwell_layout=(
+                            self.quantized_down_proj_metadata.data[e, 5].item() == 1
                         ),
                     ),
                 )
@@ -380,14 +378,19 @@ class FourOverSixGptOssExperts(nn.Module):
                         values=self.quantized_gate_up_proj_values.data[e],
                         scale_factors=self.quantized_gate_up_proj_scale_factors.data[e],
                         amax=self.quantized_gate_up_proj_amax.data[e],
-                        dtype=self.config.dtype,
+                        dtype=self.config.weight_dtype,
                         original_shape=tuple(
                             self.quantized_gate_up_proj_metadata.data[e, :2].tolist(),
                         ),
                         scale_rule=self.config.weight_scale_rule,
                         padded_shape=tuple(
-                            self.quantized_gate_up_proj_metadata.data[e, 2:].tolist(),
+                            self.quantized_gate_up_proj_metadata.data[e, 2:4].tolist(),
                         ),
+                        scale_factors_are_in_blackwell_layout=self.quantized_gate_up_proj_metadata.data[
+                            e,
+                            5,
+                        ].item()
+                        == 1,
                     ),
                 )
             self._quantized_weights = (down, gate_up)
