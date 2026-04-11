@@ -132,6 +132,45 @@ config = QuantizationConfig(scale_rule="static_6")
 x_quantized = quantize(x, config)
 ```
 
+### Quantize a Diffusers Model to NVFP4
+
+Install diffusers support with:
+
+```bash
+pip install "fouroversix[diffusers]" --no-build-isolation
+```
+
+You can quantize any diffusers model using `quantize_model`:
+
+```python
+import torch
+from diffusers import FluxTransformer2DModel
+from fouroversix import ModelQuantizationConfig, quantize_model
+
+model = FluxTransformer2DModel.from_pretrained(
+    "black-forest-labs/FLUX.1-dev",
+    subfolder="transformer",
+    torch_dtype=torch.bfloat16,
+)
+config = ModelQuantizationConfig(modules_to_not_convert=[])
+quantize_model(model, config)
+```
+
+Or use the `from_pretrained` integration which automatically quantizes during loading:
+
+```python
+import torch
+from diffusers import FluxTransformer2DModel
+from fouroversix.diffusers import FourOverSixConfig
+
+model = FluxTransformer2DModel.from_pretrained(
+    "black-forest-labs/FLUX.1-dev",
+    subfolder="transformer",
+    torch_dtype=torch.bfloat16,
+    quantization_config=FourOverSixConfig(),
+)
+```
+
 ### Multiply Two NVFP4 Tensors
 
 ```python

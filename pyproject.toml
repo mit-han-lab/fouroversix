@@ -24,6 +24,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+diffusers = [
+    "accelerate>=0.26.0",
+    "diffusers>=0.32.0",
+]
 docs = [
     "mkdocs~=1.6.1",
     "mkdocs-material~=9.7.4",
@@ -31,6 +35,7 @@ docs = [
 ]
 evals = [
     "causal-conv1d @ https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.6.1.post4/causal_conv1d-1.6.1+cu12torch2.10cxx11abiTRUE-cp313-cp313-linux_x86_64.whl",
+    "diffusers>=0.32.0",
     "flash-linear-attention @ git+https://github.com/fla-org/flash-linear-attention",
     "inspect-ai~=0.3.191",
     "inspect-evals~=0.5.1",
