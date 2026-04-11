@@ -131,7 +131,11 @@ def compute_scale_factors_kernel(
 
         # When x_amax is very small, encode_scale overflows to inf, causing
         # 0 * inf = NaN for zero blocks. Replace NaN with 0.
-        x_scales_hp = tl.where(x_scales_hp != x_scales_hp, 0.0, x_scales_hp)
+        x_scales_hp = tl.where(
+            x_scales_hp != x_scales_hp,  # noqa: PLR0124
+            0.0,
+            x_scales_hp,
+        )
 
     if BLOCK_SCALE_2D:
         x_scales_hp = (

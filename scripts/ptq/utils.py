@@ -40,6 +40,7 @@ class QuantizationScheme(Enum):
 
     @property
     def dtype(self) -> str:
+        """Get the data type for a quantization scheme."""
         return {
             "mxfp4": "mxfp4",
             "nvint4": "nvint4",
@@ -50,6 +51,7 @@ class QuantizationScheme(Enum):
 
     @property
     def scale_rule(self) -> str:
+        """Get the scale rule for a quantization scheme."""
         return {
             "mxfp4": "static_6",
             "nvint4": "static_6",

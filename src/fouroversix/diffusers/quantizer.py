@@ -51,7 +51,11 @@ class FourOverSixQuantizer(DiffusersQuantizer):
                 quantization_config.modules_to_not_convert,
             )
 
-    def validate_environment(self, *args, **kwargs) -> None:  # noqa: ARG002, ANN002, ANN003
+    def validate_environment(
+        self,
+        *args: list[Any],  # noqa: ARG002
+        **kwargs: dict[str, Any],  # noqa: ARG002
+    ) -> None:
         """Check that CUDA is available."""
         if not torch.cuda.is_available():
             logger.warning(
@@ -64,20 +68,27 @@ class FourOverSixQuantizer(DiffusersQuantizer):
         torch_dtype: torch.dtype,
     ) -> torch.dtype:
         """Ensure bfloat16 is used for the high-precision weights during loading."""
+
         if torch_dtype is None:
             torch_dtype = torch.bfloat16
             logger.info(
-                "Setting torch_dtype to torch.bfloat16 for FourOverSix quantization.",
+                "Setting torch_dtype to torch.bfloat16 for FourOverSix quantization",
             )
+
         return torch_dtype
 
     def update_device_map(
         self,
         device_map: dict[str, Any] | None,
     ) -> dict[str, Any] | None:
-        """Default to current CUDA device when no device_map is provided."""
+        """
+        Return a device map, defaulting to the current CUDA device when no device_map
+        is provided.
+        """
+
         if device_map is None and torch.cuda.is_available():
             device_map = {"": torch.cuda.current_device()}
+
         return device_map
 
     def _process_model_before_weight_loading(
@@ -186,13 +197,14 @@ class FourOverSixQuantizer(DiffusersQuantizer):
         """
         if self.pre_quantized:
             return [
-                k for k in missing_keys
-                if not k.endswith(".weight")
-                or not _has_fouroversix_parent(model, k)
+                k
+                for k in missing_keys
+                if not k.endswith(".weight") or not _has_fouroversix_parent(model, k)
             ]
 
         return [
-            k for k in missing_keys
+            k
+            for k in missing_keys
             if not any(k.endswith(suffix) for suffix in QUANTIZED_WEIGHT_SUFFIXES)
         ]
 

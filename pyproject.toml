@@ -54,7 +54,7 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 88
 indent-width = 4
-exclude = ["build", "dist", "env", ".venv", "third_party", "scripts/ptq/tasks"]
+exclude = ["build", "dist", "env", ".venv", "third_party", "scripts/ptq_hf/tasks"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -105,6 +105,9 @@ select = [
     "N803",  # Allow uppercase arguments to Triton kernels
     "N806",  # Allow uppercase variables in Triton kernels
     "PLR1714", "SIM109",  # Allow multiple equality comparisons in Triton kernels
+]
+"src/fouroversix/kernels/triton/*3.py" = [
+    "PLR2004",  # Allow magic numbers in FP3 and IF3 conversion kernels
 ]
 "src/fouroversix/kernels/triton/*4.py" = [
     "PLR2004",  # Allow magic numbers in FP4 and IF4 conversion kernels

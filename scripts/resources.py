@@ -189,7 +189,7 @@ def install_qutlass() -> None:
     )
 
 
-def get_image(  # noqa: C901, PLR0912
+def get_image(  # noqa: C901, PLR0912, PLR0915
     dependencies: list[Dependency] | None = None,
     *,
     cuda_version: str = "12.9",

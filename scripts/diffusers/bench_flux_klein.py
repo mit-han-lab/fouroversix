@@ -5,7 +5,6 @@ import time
 
 import torch
 from diffusers import Flux2KleinPipeline, Flux2Transformer2DModel
-
 from fouroversix.diffusers import FourOverSixConfig
 
 MODEL_ID = "black-forest-labs/FLUX.2-klein-4B"
@@ -67,7 +66,12 @@ def benchmark(label: str, pipe: Flux2KleinPipeline) -> dict[str, float]:
     best = min(times)
     print(f"  Avg: {avg:.3f}s  Best: {best:.3f}s")
     print(f"  Peak VRAM allocated: {alloc:.2f} GB  reserved: {reserved:.2f} GB")
-    return {"avg": avg, "best": best, "peak_alloc_gb": alloc, "peak_reserved_gb": reserved}
+    return {
+        "avg": avg,
+        "best": best,
+        "peak_alloc_gb": alloc,
+        "peak_reserved_gb": reserved,
+    }
 
 
 # ── BF16 baseline ──────────────────────────────────────────
@@ -75,7 +79,8 @@ print("Loading bf16 baseline pipeline...")
 flush()
 t0 = time.perf_counter()
 pipe_bf16 = Flux2KleinPipeline.from_pretrained(
-    MODEL_ID, torch_dtype=torch.bfloat16,
+    MODEL_ID,
+    torch_dtype=torch.bfloat16,
 )
 pipe_bf16.to("cuda")
 load_bf16 = time.perf_counter() - t0
@@ -117,8 +122,27 @@ print("  COMPARISON SUMMARY")
 print(f"{'='*60}")
 print(f"{'Metric':<28} {'BF16':>10} {'NVFP4':>10} {'Speedup':>10}")
 print(f"{'-'*60}")
-print(f"{'Load time (s)':<28} {results_bf16['load_time']:>10.2f} {results_fp4['load_time']:>10.2f}")
-print(f"{'Avg generation (s)':<28} {results_bf16['avg']:>10.3f} {results_fp4['avg']:>10.3f} {results_bf16['avg']/results_fp4['avg']:>9.2f}x")
-print(f"{'Best generation (s)':<28} {results_bf16['best']:>10.3f} {results_fp4['best']:>10.3f} {results_bf16['best']/results_fp4['best']:>9.2f}x")
-print(f"{'Peak VRAM alloc (GB)':<28} {results_bf16['peak_alloc_gb']:>10.2f} {results_fp4['peak_alloc_gb']:>10.2f} {results_bf16['peak_alloc_gb']/results_fp4['peak_alloc_gb']:>9.2f}x")
-print(f"{'Peak VRAM reserved (GB)':<28} {results_bf16['peak_reserved_gb']:>10.2f} {results_fp4['peak_reserved_gb']:>10.2f} {results_bf16['peak_reserved_gb']/results_fp4['peak_reserved_gb']:>9.2f}x")
+print(
+    f"{'Load time (s)':<28} {results_bf16['load_time']:>10.2f} "
+    f"{results_fp4['load_time']:>10.2f}",
+)
+print(
+    f"{'Avg generation (s)':<28} {results_bf16['avg']:>10.3f} "
+    f"{results_fp4['avg']:>10.3f} "
+    f"{results_bf16['avg']/results_fp4['avg']:>9.2f}x",
+)
+print(
+    f"{'Best generation (s)':<28} {results_bf16['best']:>10.3f} "
+    f"{results_fp4['best']:>10.3f} "
+    f"{results_bf16['best']/results_fp4['best']:>9.2f}x",
+)
+print(
+    f"{'Peak VRAM alloc (GB)':<28} {results_bf16['peak_alloc_gb']:>10.2f} "
+    f"{results_fp4['peak_alloc_gb']:>10.2f} "
+    f"{results_bf16['peak_alloc_gb']/results_fp4['peak_alloc_gb']:>9.2f}x",
+)
+print(
+    f"{'Peak VRAM reserved (GB)':<28} {results_bf16['peak_reserved_gb']:>10.2f} "
+    "{results_fp4['peak_reserved_gb']:>10.2f} "
+    f"{results_bf16['peak_reserved_gb']/results_fp4['peak_reserved_gb']:>9.2f}x",
+)

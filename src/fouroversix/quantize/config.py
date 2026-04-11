@@ -27,7 +27,8 @@ class QuantizationConfig:
         scale_rule (ScaleRule): The scaling rule to use during quantization.
         transpose (bool): If True, the output will be a quantized version of the
             transposed input. This may be helpful for certain operations during training
-            as `quantized_matmul` requires that both tensors are provided in row-major format.
+            as `quantized_matmul` requires that both tensors are provided in row-major
+            format.
 
     """
 

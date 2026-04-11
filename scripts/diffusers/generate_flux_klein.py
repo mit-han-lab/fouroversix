@@ -4,7 +4,6 @@ import time
 
 import torch
 from diffusers import Flux2KleinPipeline, Flux2Transformer2DModel
-
 from fouroversix.diffusers import FourOverSixConfig
 
 MODEL_ID = "black-forest-labs/FLUX.2-klein-4B"

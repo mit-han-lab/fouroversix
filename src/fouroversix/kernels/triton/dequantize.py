@@ -25,7 +25,7 @@ from .int6 import convert_int6_to_fp16
 
 
 @triton.jit
-def dequantize_to_fp16_kernel(
+def dequantize_to_fp16_kernel(  # noqa: C901
     values,
     scale_factors,
     BLOCK_SIZE_M: tl.constexpr,

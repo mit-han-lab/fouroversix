@@ -137,7 +137,14 @@ class DataType(str, Enum):
     def supported_scale_rules(self) -> set["ScaleRule"]:
         """Return the scale rules that are allowed for this data type."""
 
-        if self in {DataType.if3, DataType.if3_bs8, DataType.if4, DataType.if4_bs8, DataType.if6_e2m3, DataType.if6_e3m2}:
+        if self in {
+            DataType.if3,
+            DataType.if3_bs8,
+            DataType.if4,
+            DataType.if4_bs8,
+            DataType.if6_e2m3,
+            DataType.if6_e3m2,
+        }:
             return {scale_rule for scale_rule in ScaleRule if not scale_rule.is_static}
 
         if self in {

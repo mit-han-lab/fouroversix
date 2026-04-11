@@ -1,9 +1,7 @@
-#!/usr/bin/env python3
-
 import random
 import struct
+from collections.abc import Callable
 from pathlib import Path
-
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 TB_DIR = SCRIPT_DIR.parent / "tb"
@@ -34,8 +32,9 @@ def f32_hex(value: float) -> str:
 
 
 def decode_nvfp4(bits: int) -> float:
-    if bits == 0x8:
-        raise ValueError("NVFP4 -0.0 is invalid input")
+    if bits == 0x8:  # noqa: PLR2004
+        msg = "NVFP4 -0.0 is invalid input"
+        raise ValueError(msg)
 
     sign = (bits >> 3) & 0x1
     mag = {
@@ -52,8 +51,9 @@ def decode_nvfp4(bits: int) -> float:
 
 
 def decode_int4(bits: int) -> float:
-    if bits == 0x8:
-        raise ValueError("INT4 -8 is invalid input")
+    if bits == 0x8:  # noqa: PLR2004
+        msg = "INT4 -8 is invalid input"
+        raise ValueError(msg)
 
     sign = (bits >> 3) & 0x1
     val = bits & 0x7
@@ -73,7 +73,7 @@ def decode_fp8_payload(bits: int) -> float:
     if exp == 0:
         return (man / 8.0) * (2.0 ** (1 - bias))
 
-    if exp == 0xF and man == 0x7:
+    if exp == 0xF and man == 0x7:  # noqa: PLR2004
         man = 0x6
 
     return (1.0 + man / 8.0) * (2.0 ** (exp - bias))
@@ -94,10 +94,7 @@ def pairwise_tree_sum(values: list[float]) -> float:
 
 
 def make_lanes(rng: random.Random) -> list[int]:
-    lanes = []
-    for _ in range(BLOCK_SIZE):
-        lanes.append(rng.choice(VALID_4BIT))
-    return lanes
+    return [rng.choice(VALID_4BIT) for _ in range(BLOCK_SIZE)]
 
 
 def random_if4_sf(rng: random.Random) -> int:
@@ -111,7 +108,7 @@ def random_nvfp4_sf(rng: random.Random) -> int:
 def build_segment(
     *,
     rng: random.Random,
-    sf_generator,
+    sf_generator: Callable[[random.Random], int],
 ) -> list[dict]:
     segment = []
     for cycle_idx in range(SEGMENT_LENGTH):
@@ -127,10 +124,12 @@ def build_segment(
 
 
 def build_if4_mac_inputs() -> list[dict]:
-    rng = random.Random(IF4_RANDOM_SEED)
+    rng = random.Random(IF4_RANDOM_SEED)  # noqa: S311
     inputs = []
+
     for _ in range(NUM_EXPECTED):
         inputs.extend(build_segment(rng=rng, sf_generator=random_if4_sf))
+
     inputs.append(
         {
             "first": 1,
@@ -138,13 +137,13 @@ def build_if4_mac_inputs() -> list[dict]:
             "w_sf": 0x00,
             "a_lane": [0] * BLOCK_SIZE,
             "w_lane": [0] * BLOCK_SIZE,
-        }
+        },
     )
     return inputs
 
 
 def build_nvfp4_mac_inputs() -> list[dict]:
-    rng = random.Random(NVFP4_RANDOM_SEED)
+    rng = random.Random(NVFP4_RANDOM_SEED)  # noqa: S311
     inputs = []
     for _ in range(NUM_EXPECTED):
         inputs.extend(build_segment(rng=rng, sf_generator=random_nvfp4_sf))
@@ -155,7 +154,7 @@ def build_nvfp4_mac_inputs() -> list[dict]:
             "w_sf": 0x00,
             "a_lane": [0] * BLOCK_SIZE,
             "w_lane": [0] * BLOCK_SIZE,
-        }
+        },
     )
     return inputs
 
@@ -240,9 +239,12 @@ def main() -> None:
     nvfp4_expected = generate_nvfp4_mac_golden_ref(nvfp4_inputs)
 
     if len(if4_expected) != NUM_EXPECTED:
-        raise RuntimeError("IF4 expected output count does not match NUM_EXPECTED")
+        msg = "IF4 expected output count does not match NUM_EXPECTED"
+        raise RuntimeError(msg)
+
     if len(nvfp4_expected) != NUM_EXPECTED:
-        raise RuntimeError("NVFP4 expected output count does not match NUM_EXPECTED")
+        msg = "NVFP4 expected output count does not match NUM_EXPECTED"
+        raise RuntimeError(msg)
 
     emit_include(TB_DIR / "if4_mac_golden_ref.svh", if4_inputs, if4_expected)
     emit_include(TB_DIR / "nvfp4_mac_golden_ref.svh", nvfp4_inputs, nvfp4_expected)

@@ -27,7 +27,7 @@ def _quantize_dequantize_impl(
     x: torch.Tensor,
     dtype: str,
     scale_rule: str,
-    rht: bool,
+    rht: bool,  # noqa: FBT001
 ) -> torch.Tensor:
     # Make sure last dimension is divisible by 16 before we reshape
     original_shape = x.shape
@@ -59,7 +59,7 @@ def _quantize_dequantize(
     x: torch.Tensor,
     dtype: str,
     scale_rule: str,
-    rht: bool,
+    rht: bool,  # noqa: FBT001
 ) -> torch.Tensor:
     return _quantize_dequantize_impl(x, dtype, scale_rule, rht)
 
@@ -67,9 +67,9 @@ def _quantize_dequantize(
 @_quantize_dequantize.register_fake
 def _(
     x: torch.Tensor,
-    dtype: str,
-    scale_rule: str,
-    rht: bool,
+    dtype: str,  # noqa: ARG001
+    scale_rule: str,  # noqa: ARG001
+    rht: bool,  # noqa: ARG001, FBT001
 ) -> torch.Tensor:
     return torch.empty_like(x)
 
@@ -82,6 +82,7 @@ class FourOverSixLinearMethod(UnquantizedLinearMethod):
 
     def __init__(
         self,
+        *,
         activation_dtype: str,
         activation_scale_rule: str,
         weight_dtype: str,
@@ -132,6 +133,7 @@ class FourOverSixMoEMethod(UnquantizedFusedMoEMethod):
     def __init__(
         self,
         moe: FusedMoEConfig,
+        *,
         activation_dtype: str,
         activation_scale_rule: str,
         weight_dtype: str,
@@ -219,21 +221,21 @@ class FourOverSixQuantizationConfig(QuantizationConfig):
     ) -> QuantizeMethodBase | None:
         if isinstance(layer, LinearBase):
             return FourOverSixLinearMethod(
-                self.activation_dtype,
-                self.activation_scale_rule,
-                self.weight_dtype,
-                self.weight_scale_rule,
-                self.rht,
+                activation_dtype=self.activation_dtype,
+                activation_scale_rule=self.activation_scale_rule,
+                weight_dtype=self.weight_dtype,
+                weight_scale_rule=self.weight_scale_rule,
+                rht=self.rht,
             )
 
         if isinstance(layer, FusedMoE):
             return FourOverSixMoEMethod(
                 layer.moe_config,
-                self.activation_dtype,
-                self.activation_scale_rule,
-                self.weight_dtype,
-                self.weight_scale_rule,
-                self.rht,
+                activation_dtype=self.activation_dtype,
+                activation_scale_rule=self.activation_scale_rule,
+                weight_dtype=self.weight_dtype,
+                weight_scale_rule=self.weight_scale_rule,
+                rht=self.rht,
             )
 
         return None
