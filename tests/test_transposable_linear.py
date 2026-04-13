@@ -9,13 +9,31 @@ from fouroversix import (
     dequantize,
     quantize,
 )
-from fouroversix.quantize.transpose import transpose_quantized_tensor
+from fouroversix.quantize.transpose import (
+    TransposeBackend,
+    transpose_quantized_tensor,
+)
 
 # ---------------------------------------------------------------------------
-# transpose_quantized_tensor correctness
+# Helpers
+# ---------------------------------------------------------------------------
+
+_ALL_BACKENDS = [TransposeBackend.pytorch, TransposeBackend.triton]
+
+try:
+    _cuda_op = torch.ops.fouroversix.transpose_packed_fp4
+    _ALL_BACKENDS.append(TransposeBackend.cuda)
+    del _cuda_op
+except (AttributeError, RuntimeError):
+    pass
+
+
+# ---------------------------------------------------------------------------
+# transpose_quantized_tensor correctness (parametrized over backends)
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("backend", _ALL_BACKENDS, ids=lambda b: b.name)
 @pytest.mark.parametrize(
     ("rows", "cols"),
     [(128, 128), (256, 512), (512, 256), (256, 256)],
@@ -25,6 +43,7 @@ def test_transpose_matches_quantize_with_transpose_flag(
     rows: int,
     cols: int,
     scale_rule: ScaleRule,
+    backend: TransposeBackend,
 ) -> None:
     """Nibble-transposing a 2D-block-scaled tensor must match quantizing W.T."""
     if not torch.cuda.is_available():
@@ -48,7 +67,7 @@ def test_transpose_matches_quantize_with_transpose_flag(
     qt = quantize(w, config)
     qt_t_ref = quantize(w, config_t)
 
-    qt_t = transpose_quantized_tensor(qt)
+    qt_t = transpose_quantized_tensor(qt, backend=backend)
 
     assert qt_t.original_shape == qt_t_ref.original_shape, (
         f"shape mismatch: {qt_t.original_shape} vs {qt_t_ref.original_shape}"
@@ -67,11 +86,16 @@ def test_transpose_matches_quantize_with_transpose_flag(
     torch.testing.assert_close(deq_t, deq_t_ref, atol=0, rtol=0)
 
 
+@pytest.mark.parametrize("backend", _ALL_BACKENDS, ids=lambda b: b.name)
 @pytest.mark.parametrize(
     ("rows", "cols"),
     [(128, 128), (256, 512)],
 )
-def test_transpose_roundtrip_lossless(rows: int, cols: int) -> None:
+def test_transpose_roundtrip_lossless(
+    rows: int,
+    cols: int,
+    backend: TransposeBackend,
+) -> None:
     """Transposing twice must recover the original tensor exactly."""
     if not torch.cuda.is_available():
         pytest.skip("CUDA not available")
@@ -84,7 +108,10 @@ def test_transpose_roundtrip_lossless(rows: int, cols: int) -> None:
         block_scale_2d=True,
     )
     qt = quantize(w, config)
-    qt_tt = transpose_quantized_tensor(transpose_quantized_tensor(qt))
+    qt_tt = transpose_quantized_tensor(
+        transpose_quantized_tensor(qt, backend=backend),
+        backend=backend,
+    )
 
     deq_orig = dequantize(qt, dtype=torch.float32)
     deq_tt = dequantize(qt_tt, dtype=torch.float32)
@@ -96,6 +123,50 @@ def test_transpose_roundtrip_lossless(rows: int, cols: int) -> None:
         atol=0,
         rtol=0,
     )
+
+
+# ---------------------------------------------------------------------------
+# Backend bitwise-identity: all backends must produce the same packed values
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("rows", "cols"),
+    [(128, 128), (256, 512), (512, 256)],
+)
+def test_all_backends_bitwise_identical(rows: int, cols: int) -> None:
+    """Every available backend must produce bitwise-identical packed output."""
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA not available")
+
+    torch.manual_seed(99)
+    w = torch.randn(rows, cols, dtype=torch.bfloat16, device="cuda")
+    config = QuantizationConfig(
+        backend=QuantizeBackend.pytorch,
+        block_scale_2d=True,
+    )
+    qt = quantize(w, config)
+
+    ref = transpose_quantized_tensor(qt, backend=TransposeBackend.pytorch)
+
+    for backend in _ALL_BACKENDS:
+        if backend == TransposeBackend.pytorch:
+            continue
+        result = transpose_quantized_tensor(qt, backend=backend)
+        torch.testing.assert_close(
+            result.values,
+            ref.values,
+            atol=0,
+            rtol=0,
+            msg=f"{backend.name} values differ from pytorch reference",
+        )
+        torch.testing.assert_close(
+            result.scale_factors.view(torch.uint8),
+            ref.scale_factors.view(torch.uint8),
+            atol=0,
+            rtol=0,
+            msg=f"{backend.name} scale_factors differ from pytorch reference",
+        )
 
 
 # ---------------------------------------------------------------------------

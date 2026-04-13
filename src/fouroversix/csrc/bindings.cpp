@@ -32,5 +32,6 @@ namespace fouroversix
         m.def("gemm_nvfp4nvfp4_accum_fp32_out_bf16_tnt_sm120(Tensor A, Tensor B, Tensor A_sf, Tensor B_sf, Tensor alpha) -> Tensor");
         m.def("gemm_nvfp4nvfp4_accum_fp32_out_fp16_tnt(Tensor A, Tensor B, Tensor A_sf, Tensor B_sf, Tensor alpha) -> Tensor");
         m.def("gemm_nvfp4nvfp4_accum_fp32_out_fp16_tnt_sm120(Tensor A, Tensor B, Tensor A_sf, Tensor B_sf, Tensor alpha) -> Tensor");
+        m.def("transpose_packed_fp4(Tensor values, int rows, int cols) -> Tensor");
     }
 }

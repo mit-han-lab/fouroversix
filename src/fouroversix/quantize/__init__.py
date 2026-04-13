@@ -2,7 +2,7 @@ from .config import QuantizationConfig
 from .dequantize_utils import from_blocked
 from .frontend import dequantize, quantize
 from .quantized_tensor import QuantizedTensor
-from .transpose import transpose_quantized_tensor
+from .transpose import TransposeBackend, transpose_quantized_tensor
 from .utils import get_rht_matrix
 
 __all__ = [
@@ -12,5 +12,6 @@ __all__ = [
     "from_blocked",
     "get_rht_matrix",
     "quantize",
+    "TransposeBackend",
     "transpose_quantized_tensor",
 ]
