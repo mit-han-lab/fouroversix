@@ -90,8 +90,10 @@ class BaseEvaluationCoordinator(ABC):
                 activation_dtype=kwargs.get("activation_dtype"),
                 weight_dtype=kwargs.get("weight_dtype"),
                 scale_rule=kwargs.get("scale_rule"),
-                activation_scale_rule=kwargs.get("activation_scale_rule"),
-                weight_scale_rule=kwargs.get("weight_scale_rule"),
+                activation_scale_rule=kwargs.get("activation_scale_rule")
+                or kwargs.get("scale_rule"),
+                weight_scale_rule=kwargs.get("weight_scale_rule")
+                or kwargs.get("scale_rule"),
                 smoothquant_alpha=kwargs.get("smoothquant_alpha"),
                 results=full_results,
             )

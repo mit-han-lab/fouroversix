@@ -110,15 +110,15 @@ class SmoothQuantEvaluator(RTNEvaluatorImpl):
 
         smoothquant_alpha = get_smoothquant_alpha(
             model_name,
-            kwargs.get("activation_scale_rule"),
-            kwargs.get("weight_scale_rule"),
+            kwargs.get("activation_scale_rule") or kwargs.get("scale_rule"),
+            kwargs.get("weight_scale_rule") or kwargs.get("scale_rule"),
             session,
         )
 
         calibration_experiments = get_calibration_experiments(
             model_name,
-            kwargs.get("activation_scale_rule"),
-            kwargs.get("weight_scale_rule"),
+            kwargs.get("activation_scale_rule") or kwargs.get("scale_rule"),
+            kwargs.get("weight_scale_rule") or kwargs.get("scale_rule"),
             session,
         )
 
@@ -151,8 +151,8 @@ class SmoothQuantEvaluator(RTNEvaluatorImpl):
 
         smoothquant_alpha = get_smoothquant_alpha(
             model_name,
-            kwargs.get("activation_scale_rule"),
-            kwargs.get("weight_scale_rule"),
+            kwargs.get("activation_scale_rule") or kwargs.get("scale_rule"),
+            kwargs.get("weight_scale_rule") or kwargs.get("scale_rule"),
             session,
         )
 
@@ -169,10 +169,11 @@ class SmoothQuantEvaluator(RTNEvaluatorImpl):
         self,
         model_name: str,
         *,
-        save_path: Path,  # noqa: ARG002
-        smoothquant_alpha: float,
-        quantization_config: ModelQuantizationConfig,
+        force_requantize_model: bool,  # noqa: ARG002
         from_pretrained_kwargs: dict[str, Any],
+        save_path: Path,  # noqa: ARG002
+        quantization_config: ModelQuantizationConfig,
+        smoothquant_alpha: float,
     ) -> AutoModelForCausalLM:
         """Quantize a model using SmoothQuant."""
 
