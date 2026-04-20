@@ -1,3 +1,5 @@
+import dataclasses
+
 import torch
 from fouroversix.utils import QuantizeBackend
 
@@ -7,6 +9,7 @@ from .pytorch import PyTorchQuantizeBackend
 from .quantized_tensor import QuantizedTensor
 from .transformer_engine import TransformerEngineQuantizeBackend
 from .triton import TritonQuantizeBackend
+from .utils import get_hadamard_matrix
 
 AVAILABLE_BACKENDS = {
     QuantizeBackend.cuda: CUDAQuantizeBackend,
@@ -14,6 +17,72 @@ AVAILABLE_BACKENDS = {
     QuantizeBackend.triton: TritonQuantizeBackend,
     QuantizeBackend.pytorch: PyTorchQuantizeBackend,
 }
+
+_HADAMARD_DIM = 16
+
+
+def _pseudo_quantize_with_precondition(
+    x: torch.Tensor,
+    config: QuantizationConfig,
+    selected_backend: QuantizeBackend,
+) -> torch.Tensor:
+    """
+    Kitchen-sink preprocessing for 2D pseudo-quantization.
+
+    ``pseudo_quantize(..., transpose=True)`` expects input W [out, in] and returns
+    a fake-quantized tensor in W.T layout [in, out].  We therefore operate on
+    W.T directly and call the backend with ``transpose=False``:
+
+    1. W_T = x.T  — work in [in, out]
+    2. RMS precondition W_T (row-wise and col-wise)
+    3. Apply fixed Hadamard to both dims
+    4. Pseudo-quantize with ``transpose=False, block_scale_2d=True``
+       → result ≈ W_T_had  [in, out]
+    5. Undo Hadamard
+    6. Undo RMS preconditioning
+    7. Return  [in, out]  (W.T layout — same as what ``transpose=True`` returns)
+
+    The caller then uses ``result.T`` in the matmul, giving ≈ W.
+    """
+    # Work with W.T because pseudo_quantize(transpose=True) returns W.T layout.
+    x_t = x.T.contiguous()
+    rows, cols = x_t.shape
+    x_f = x_t.float()
+
+    # RMS diagonal preconditioning on W.T
+    row_rms = x_f.pow(2).mean(dim=1).sqrt().clamp(min=1e-8)
+    col_rms = x_f.pow(2).mean(dim=0).sqrt().clamp(min=1e-8)
+    x_precond = x_f / row_rms.unsqueeze(1) / col_rms.unsqueeze(0)
+
+    # Fixed Hadamard rotation on both dims (only when divisible by 16)
+    apply_had = (rows % _HADAMARD_DIM == 0) and (cols % _HADAMARD_DIM == 0)
+    if apply_had:
+        had = get_hadamard_matrix(_HADAMARD_DIM, device=x.device)
+        x_precond = (
+            had @ x_precond.reshape(rows // _HADAMARD_DIM, _HADAMARD_DIM, cols)
+        ).reshape(rows, cols)
+        x_precond = (
+            x_precond.reshape(rows, cols // _HADAMARD_DIM, _HADAMARD_DIM) @ had.T
+        ).reshape(rows, cols)
+
+    # Pseudo-quantize W.T_had without the transpose flag (already transposed).
+    inner_config = dataclasses.replace(config, precondition_2d=False, transpose=False)
+    result = AVAILABLE_BACKENDS[selected_backend].pseudo_quantize(
+        x_precond.to(x.dtype), inner_config
+    ).float()
+
+    # Undo Hadamard
+    if apply_had:
+        result = (
+            result.reshape(rows, cols // _HADAMARD_DIM, _HADAMARD_DIM) @ had
+        ).reshape(rows, cols)
+        result = (
+            had.T @ result.reshape(rows // _HADAMARD_DIM, _HADAMARD_DIM, cols)
+        ).reshape(rows, cols)
+
+    # Undo RMS preconditioning and return in W.T layout
+    result = result * row_rms.unsqueeze(1) * col_rms.unsqueeze(0)
+    return result.to(x.dtype)
 
 
 def quantize(
@@ -118,6 +187,17 @@ def quantize(
     elif not AVAILABLE_BACKENDS[selected_backend].can_quantize(x, config):
         msg = f"Backend {selected_backend} does not support the given parameters"
         raise ValueError(msg)
+
+    # Kitchen-sink preprocessing: apply when pseudo-quantizing a transposable 2D weight.
+    # Reduces within-tile magnitude heterogeneity → better floating-point approximation.
+    if (
+        config.pseudo_quantize
+        and config.block_scale_2d
+        and config.transpose
+        and config.precondition_2d
+        and x.ndim == 2  # noqa: PLR2004
+    ):
+        return _pseudo_quantize_with_precondition(x, config, selected_backend)
 
     if config.pseudo_quantize:
         return AVAILABLE_BACKENDS[selected_backend].pseudo_quantize(x, config)
