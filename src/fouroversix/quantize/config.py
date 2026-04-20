@@ -19,13 +19,6 @@ class QuantizationConfig:
             quantization.
         dtype (DataType): The data type to quantize to.
         kwargs (dict[str, Any]): Additional keyword arguments to pass to the backend.
-        precondition_2d (bool): If True and both ``block_scale_2d`` and ``transpose``
-            are set, RMS diagonal preconditioning followed by a fixed Hadamard rotation
-            is applied before pseudo-quantization and undone afterwards ("kitchen sink"
-            preprocessing). This reduces within-tile magnitude heterogeneity and
-            improves reconstruction quality by ~18% on typical model weights. Only
-            takes effect when ``pseudo_quantize=True``; the real-FP4 path is
-            unaffected. Defaults to ``True``.
         pseudo_quantize (bool): If True, a pseudo-quantized high-precision tensor will
             be returned instead of a quantized tensor.
         rht (bool): If True, the random Hadamard transform will be applied to the input
@@ -43,7 +36,6 @@ class QuantizationConfig:
     block_scale_2d: bool = False
     dtype: DataType = DataType.nvfp4
     kwargs: dict[str, Any] = field(default_factory=dict)
-    precondition_2d: bool = True
     pseudo_quantize: bool = False
     rht: bool = False
     round_style: RoundStyle = RoundStyle.nearest
