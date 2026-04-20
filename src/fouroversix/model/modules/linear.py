@@ -12,6 +12,7 @@ from fouroversix.quantize import (
     get_rht_matrix,
     quantize,
 )
+from fouroversix.quantize.transpose import transpose_quantized_tensor
 from fouroversix.utils import DataType
 
 try:
@@ -204,6 +205,14 @@ class FourOverSixLinearFunction(torch.autograd.Function):
         dgrad_grad_config = ctx.config.get_gradient_config()
         dgrad_weight_config = ctx.config.get_weight_config(transpose=True)
 
+        # When 2D block scaling is enabled and we're in the real-quantize path,
+        # use the fast nibble transpose instead of re-quantizing with transpose=True.
+        use_fast_transpose = (
+            ctx.config.weight_scale_2d
+            and not ctx.config.pseudo_quantize
+            and not ctx.config.disable_dgrad_quantization
+        )
+
         if ctx.config.disable_dgrad_quantization == "quantize_grad_only":
             grad_input = (
                 torch.matmul(
@@ -233,6 +242,20 @@ class FourOverSixLinearFunction(torch.autograd.Function):
             grad_input = torch.matmul(
                 grad_pseudoquant,
                 weight_pseudoquant.T,
+            ).reshape(*grad_output.shape[:-1], weight.shape[1])
+        elif use_fast_transpose:
+            fprop_weight_config = ctx.config.get_weight_config()
+            weight_q = quantize(
+                weight if isinstance(weight, torch.Tensor) else weight.data,
+                fprop_weight_config,
+            )
+            weight_q_t = transpose_quantized_tensor(weight_q)
+            grad_input = quantized_matmul(
+                grad_output.reshape(-1, grad_output.shape[-1]),
+                weight_q_t,
+                backend=ctx.config.matmul_backend,
+                input_config=dgrad_grad_config,
+                out_dtype=ctx.config.output_dtype,
             ).reshape(*grad_output.shape[:-1], weight.shape[1])
         else:
             grad_input = quantized_matmul(

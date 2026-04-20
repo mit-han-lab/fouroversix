@@ -1,5 +1,5 @@
 from .config import ModelQuantizationConfig, ModuleQuantizationConfig
-from .modules import FourOverSixLinear, TransposableFourOverSixLinear
+from .modules import FourOverSixLinear
 from .quantize import QuantizedModule, quantize_model
 
 __all__ = [
@@ -7,6 +7,5 @@ __all__ = [
     "ModelQuantizationConfig",
     "ModuleQuantizationConfig",
     "QuantizedModule",
-    "TransposableFourOverSixLinear",
     "quantize_model",
 ]
