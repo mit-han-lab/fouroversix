@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 rtn_img = get_image(
     extra_pip_dependencies=[
-        "transformers @ git+https://github.com/kathrynle20/transformers.git@jack/dtypes",
+        "transformers @ git+https://github.com/jackcook/transformers.git@jack/dtypes",
     ],
 )
 

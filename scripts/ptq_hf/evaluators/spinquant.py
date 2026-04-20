@@ -184,7 +184,7 @@ class SpinQuantEvaluator(PTQEvaluator):
             msg = (
                 "Automatic SpinQuant optimization is not currently supported. Please "
                 "optimize the model manually with: "
-                "modal run -m scripts.ptq.evaluators.spinquant::optimize_model "
+                "modal run -m scripts.ptq_hf.evaluators.spinquant::optimize_model "
                 "--model-name <model_name> --dtype <dtype> --scale-rule <scale_rule>"
             )
             raise RuntimeError(msg)
@@ -204,11 +204,11 @@ class SpinQuantEvaluator(PTQEvaluator):
             "--rotate",
             "--optimized_rotation_path",
             (save_path / "R.bin").as_posix(),
-            "--a_scale_rule",
+            "--activation_scale_rule",
             quantization_config.activation_scale_rule.value,
-            "--a_dtype",
+            "--activation_dtype",
             quantization_config.activation_dtype.value,
-            "--w_scale_rule",
+            "--weight_scale_rule",
             quantization_config.weight_scale_rule.value,
             "--w_dtype",
             quantization_config.weight_dtype.value,
@@ -259,7 +259,7 @@ def optimize_model(
     scale_rule: str,
     *,
     force_requantize_model: bool = False,
-    modal_gpu: str = "B200:8",
+    modal_gpu: str = "B200",
 ) -> None:
     quantization_config = ModelQuantizationConfig(dtype=dtype, scale_rule=scale_rule)
 
